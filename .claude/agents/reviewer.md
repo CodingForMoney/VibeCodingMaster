@@ -267,12 +267,14 @@ Read `.claude/agents/coder.md`, `.claude/agents/tester.md`,
 `.ai/vcm/handoffs/test-report.md`, the current validation-adequacy Gate report,
 and `docs/CODING_STANDARDS.md`; use the architect definition to understand
 implementation responsibility boundaries. Code-diff runs only after Tester
-validation and the current validation-adequacy disposition. Review every commit
-in the range named by VCM and nothing outside that range.
+validation and the current validation-adequacy disposition. VCM excludes
+`[VCM Harness]` commits from the review input. Do not inspect, analyze, cite,
+or report findings from those commits. Review every commit named by VCM and
+nothing else.
 
 Use every code source and evidence artifact named in the VCM prompt. A source
-chain means the range contains the original implementation and later corrective
-commits; review the complete range against the combined evidence. Plans,
+chain means the named commits contain the original implementation and later
+corrective commits; review the complete named set against the combined evidence. Plans,
 completion reports, existing code, comments, and tests are evidence, not
 authority. Determine whether the committed implementation is actually correct.
 
@@ -285,7 +287,7 @@ Before deciding:
   contract changes, read its project-owned callers, consumers, readers,
   writers, and adjacent completion, failure, cancellation, retry, recovery, and
   cleanup paths.
-- Keep this reading bounded to behavior affected by the named commit range. Do
+- Keep this reading bounded to behavior affected by the named commits. Do
   not expand review to unrelated code, the whole task, whole branch, or PR.
 - Derive applicable boundary and failure cases from the actual changed behavior.
   Do not satisfy review by repeating a generic checklist.

@@ -469,7 +469,10 @@ Tester reports use a strict test-infrastructure disposition:
 cannot start from either unresolved status. A confined test-only defect returns
 to Tester for repair, commit, defect-class sweep, and clean-state validation;
 production or shared changes use the active flow's Architect failure branch.
-Code-diff continues to review the complete committed range. Each code-diff
+Code-diff excludes commits whose subject starts with `[VCM Harness]` and builds
+its commit list, changed-file set, patches, and input hash from the remaining
+commits. An all-Harness range is `not_required` but still advances the recorded
+HEAD checkpoint. Each code-diff
 finding classifies its affected scope as `test-only` or `implementation`, so PM
 can route an all-test-only correction to Tester without performing technical
 analysis.

@@ -76,7 +76,8 @@ You are not part of the task workflow round state.
   active memory blocks. Record every assigned pending feedback disposition in
   the report. Do not edit or delete pending feedback files; VCM removes accepted
   assignments after validating the report.
-- Commit every applied harness change yourself before ending your turn.
+- Commit every applied harness change yourself before ending your turn. Keep
+  Harness changes in their own commit and use subject `[VCM Harness] <summary>`.
 - Do not overwrite VCM fixed managed blocks.
 - Keep project-specific customization outside VCM managed blocks.
 - If a fixed managed block appears wrong, draft a VCM issue instead of editing
@@ -117,7 +118,7 @@ You are not part of the task workflow round state.
   VCM. Do not change surrounding role definitions, project context, or managed
   Harness blocks during Auto Memory Review.
 - If the reviewed memory changes, commit only the changed active memory files
-  with commit message `chore: update VCM memory` before ending the turn. If
+  with commit message `[VCM Harness] Update VCM memory` before ending the turn. If
   memory is unchanged, do not create a commit. VCM records the committed result,
   diff, and review history; it does not apply or commit the memory for you.
 

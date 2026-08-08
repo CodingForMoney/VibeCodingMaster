@@ -250,12 +250,14 @@ Read \`.claude/agents/coder.md\`, \`.claude/agents/tester.md\`,
 \`.ai/vcm/handoffs/test-report.md\`, the current validation-adequacy Gate report,
 and \`docs/CODING_STANDARDS.md\`; use the architect definition to understand
 implementation responsibility boundaries. Code-diff runs only after Tester
-validation and the current validation-adequacy disposition. Review every commit
-in the range named by VCM and nothing outside that range.
+validation and the current validation-adequacy disposition. VCM excludes
+\`[VCM Harness]\` commits from the review input. Do not inspect, analyze, cite,
+or report findings from those commits. Review every commit named by VCM and
+nothing else.
 
 Use every code source and evidence artifact named in the VCM prompt. A source
-chain means the range contains the original implementation and later corrective
-commits; review the complete range against the combined evidence. Plans,
+chain means the named commits contain the original implementation and later
+corrective commits; review the complete named set against the combined evidence. Plans,
 completion reports, existing code, comments, and tests are evidence, not
 authority. Determine whether the committed implementation is actually correct.
 
@@ -268,7 +270,7 @@ Before deciding:
   contract changes, read its project-owned callers, consumers, readers,
   writers, and adjacent completion, failure, cancellation, retry, recovery, and
   cleanup paths.
-- Keep this reading bounded to behavior affected by the named commit range. Do
+- Keep this reading bounded to behavior affected by the named commits. Do
   not expand review to unrelated code, the whole task, whole branch, or PR.
 - Derive applicable boundary and failure cases from the actual changed behavior.
   Do not satisfy review by repeating a generic checklist.
@@ -587,6 +589,7 @@ from pathlib import Path
 
 GATES = ("architecture-plan", "validation-adequacy", "code-diff")
 CODE_DIFF_SOURCES = ("coder", "architect-debug", "architect-diagnosis")
+HARNESS_COMMIT_PREFIX = "[VCM Harness] "
 LATEST_REPORTS = {
     "architecture-plan": ".ai/vcm/gate-reviews/architecture-plan-review.md",
     "validation-adequacy": ".ai/vcm/gate-reviews/validation-adequacy-review.md",
@@ -740,8 +743,20 @@ def code_diff_range(root: Path, gate_record: dict):
     ):
         base = gate_record["baseCommit"]
     elif (
+        gate_record.get("status") == "failed"
+        and gate_record.get("baseCommit")
+        and is_ancestor(root, gate_record["baseCommit"], head)
+    ):
+        base = gate_record["baseCommit"]
+    elif (
         gate_record.get("status") == "completed"
         and gate_record.get("decision") == "approve"
+        and gate_record.get("headCommit")
+        and is_ancestor(root, gate_record["headCommit"], head)
+    ):
+        base = gate_record["headCommit"]
+    elif (
+        gate_record.get("status") == "not_required"
         and gate_record.get("headCommit")
         and is_ancestor(root, gate_record["headCommit"], head)
     ):
@@ -791,7 +806,43 @@ def source_artifacts(gate: str, sources: list[str] | None) -> list[str]:
     ]))
 
 
-def input_hash(root: Path, gate: str, sources: list[str] | None = None, gate_record=None) -> str:
+def reviewable_code_diff(root: Path, base: str, head: str) -> dict | None:
+    all_commits = command_text(root, ["git", "log", "--oneline", "--reverse", f"{base}..{head}"]).splitlines()
+    if not all_commits:
+        return None
+    commits = []
+    commit_shas = []
+    changed_files = []
+    diff_stats = []
+    patches = []
+    for line in all_commits:
+        _, separator, subject = line.partition(" ")
+        if separator and subject.startswith(HARNESS_COMMIT_PREFIX):
+            continue
+        commit_sha = line.split(maxsplit=1)[0]
+        commits.append(line)
+        commit_shas.append(commit_sha)
+        for changed_file in command_text(root, ["git", "show", "--format=", "--name-only", "--find-renames", commit_sha]).splitlines():
+            if changed_file and changed_file not in changed_files:
+                changed_files.append(changed_file)
+        diff_stat = command_text(root, ["git", "show", "--format=", "--stat", "--find-renames", commit_sha])
+        if diff_stat:
+            diff_stats.append(diff_stat)
+        patch = command_output(root, ["git", "show", "--format=", "--binary", "--find-renames", commit_sha])
+        if patch:
+            patches.append(patch)
+    return {
+        "baseCommit": base,
+        "headCommit": head,
+        "commits": commits,
+        "commitShas": commit_shas,
+        "changedFiles": changed_files,
+        "diffStat": "\\n".join(diff_stats),
+        "diffHash": hashlib.sha256(b"\\n".join(patches)).hexdigest(),
+    }
+
+
+def input_hash(root: Path, gate: str, sources: list[str] | None = None, gate_record=None, code_diff=None) -> str:
     gate_record = gate_record or {}
     digest = hashlib.sha256()
     core_artifact = CORE_INPUT_ARTIFACTS.get(gate)
@@ -800,7 +851,7 @@ def input_hash(root: Path, gate: str, sources: list[str] | None = None, gate_rec
         digest.update(core_artifact.encode())
         digest.update(path.read_bytes())
 
-    common = [
+    common = [] if gate == "code-diff" else [
         "CLAUDE.md",
         ".claude/agents/architect.md",
         ".claude/agents/coder.md",
@@ -846,13 +897,10 @@ def input_hash(root: Path, gate: str, sources: list[str] | None = None, gate_rec
             digest.update(command_output(root, ["git", "hash-object", "--", relative]))
     if gate == "code-diff":
         digest.update(("\\n".join(sources or []) or "<missing>").encode())
-        base, head = code_diff_range(root, gate_record)
-        if base and head and base != head:
-            digest.update(base.encode())
-            digest.update(head.encode())
-            digest.update(command_output(root, ["git", "log", "--oneline", "--reverse", f"{base}..{head}"]))
-            digest.update(command_output(root, ["git", "diff", "--name-only", "--find-renames", f"{base}..{head}"]))
-            digest.update(hashlib.sha256(command_output(root, ["git", "diff", "--binary", "--find-renames", f"{base}..{head}"])).hexdigest().encode())
+        if code_diff:
+            digest.update("\\n".join(code_diff.get("commits", [])).encode())
+            digest.update("\\n".join(code_diff.get("changedFiles", [])).encode())
+            digest.update(code_diff.get("diffHash", "").encode())
     return digest.hexdigest()
 
 
@@ -868,7 +916,7 @@ def core_input_status(root: Path, gate: str) -> tuple[str, str] | None:
     return (core_artifact, "ready")
 
 
-def code_diff_prerequisite_error(root: Path, index: dict) -> str | None:
+def code_diff_prerequisite_error(root: Path, index: dict, check_validation_gate: bool = True) -> str | None:
     report_path = root / ".ai/vcm/handoffs/test-report.md"
     try:
         report = report_path.read_text()
@@ -879,6 +927,9 @@ def code_diff_prerequisite_error(root: Path, index: dict) -> str | None:
         return "code-diff requires completed Tester validation. Test Result must be exactly pass or fail."
     if result.group(1).lower() == "incomplete":
         return "code-diff requires completed Tester validation. Test Result is incomplete."
+
+    if not check_validation_gate:
+        return None
 
     validation = index.get("gates", {}).get("validation-adequacy", {})
     if not isinstance(validation, dict) or not validation.get("required", False):
@@ -896,6 +947,35 @@ def code_diff_prerequisite_error(root: Path, index: dict) -> str | None:
 def request_id(gate: str) -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return f"{stamp}-{gate}-{uuid.uuid4().hex[:8]}"
+
+
+def record_code_diff_start_failure(index_path: Path, index: dict, gate: str, reason: str, code_diff=None) -> None:
+    code_diff = code_diff or {}
+    gate_record = index["gates"].setdefault(gate, {})
+    gate_record.update({
+        "required": True,
+        "status": "failed",
+        "decision": None,
+        "error": reason,
+        "exceptionReason": None,
+        "requestId": None,
+        "requestPath": None,
+        "inputHash": None,
+        "baseCommit": code_diff.get("baseCommit"),
+        "headCommit": code_diff.get("headCommit"),
+        "commits": code_diff.get("commits"),
+        "changedFiles": code_diff.get("changedFiles"),
+        "diffStat": code_diff.get("diffStat"),
+        "requestedAt": None,
+        "startedAt": None,
+        "completedAt": now_iso(),
+        "callbackStatus": "not_sent",
+        "callbackError": None,
+        "updatedAt": now_iso(),
+    })
+    if index.get("activeGate") == gate:
+        index["activeGate"] = None
+    write_json(index_path, index)
 
 
 def local_request(gate: str, source: str | None) -> int:
@@ -990,34 +1070,10 @@ def local_request(gate: str, source: str | None) -> int:
         return 0
 
     if gate == "code-diff":
-        prerequisite_error = code_diff_prerequisite_error(root, index)
-        if prerequisite_error:
-            gate_record = index["gates"].setdefault(gate, {})
-            gate_record.update({
-                "required": True,
-                "status": "failed",
-                "decision": None,
-                "error": prerequisite_error,
-                "exceptionReason": None,
-                "requestId": None,
-                "requestPath": None,
-                "inputHash": None,
-                "baseCommit": None,
-                "headCommit": None,
-                "commits": None,
-                "changedFiles": None,
-                "diffStat": None,
-                "requestedAt": None,
-                "startedAt": None,
-                "completedAt": now_iso(),
-                "callbackStatus": "not_sent",
-                "callbackError": None,
-                "updatedAt": now_iso(),
-            })
-            if index.get("activeGate") == gate:
-                index["activeGate"] = None
-            write_json(index_path, index)
-            print_result("failed_to_start", gate=gate, reason=prerequisite_error)
+        evidence_error = code_diff_prerequisite_error(root, index, False)
+        if evidence_error:
+            record_code_diff_start_failure(index_path, index, gate, evidence_error)
+            print_result("failed_to_start", gate=gate, reason=evidence_error)
             return 2
 
     gate_record = index["gates"].get(gate, {})
@@ -1052,21 +1108,47 @@ def local_request(gate: str, source: str | None) -> int:
             write_json(index_path, index)
             print_result("not_required", gate=gate, message="No new commits to review.")
             return 0
-        commit_lines = command_text(root, ["git", "log", "--oneline", "--reverse", f"{base}..{head}"]).splitlines()
-        changed_files = command_text(root, ["git", "diff", "--name-only", "--find-renames", f"{base}..{head}"]).splitlines()
-        if not commit_lines:
+        code_diff = reviewable_code_diff(root, base, head)
+        if code_diff is None:
             print_result("not_required", gate=gate, message="No new commits to review.")
             return 0
-        code_diff = {
-            "baseCommit": base,
-            "headCommit": head,
-            "commits": commit_lines,
-            "changedFiles": changed_files,
-            "diffStat": command_text(root, ["git", "diff", "--stat", "--find-renames", f"{base}..{head}"]),
-        }
+        if not code_diff["commits"]:
+            gate_record = index["gates"].setdefault(gate, {})
+            gate_record.update({
+                "required": True,
+                "status": "not_required",
+                "decision": None,
+                "error": None,
+                "exceptionReason": None,
+                "requestId": None,
+                "requestPath": None,
+                "inputHash": None,
+                "baseCommit": base,
+                "headCommit": head,
+                "commits": [],
+                "changedFiles": [],
+                "diffStat": "",
+                "requestedAt": None,
+                "startedAt": None,
+                "completedAt": now_iso(),
+                "callbackStatus": "not_sent",
+                "callbackError": None,
+                "updatedAt": now_iso(),
+            })
+            if index.get("activeGate") == gate:
+                index["activeGate"] = None
+            write_json(index_path, index)
+            print_result("not_required", gate=gate, message="No non-Harness commits to review.")
+            return 0
+
+        prerequisite_error = code_diff_prerequisite_error(root, index)
+        if prerequisite_error:
+            record_code_diff_start_failure(index_path, index, gate, prerequisite_error, code_diff)
+            print_result("failed_to_start", gate=gate, reason=prerequisite_error)
+            return 2
 
     sources = code_diff_sources(gate_record, source, code_diff) if gate == "code-diff" else None
-    current_hash = input_hash(root, gate, sources, gate_record if isinstance(gate_record, dict) else {})
+    current_hash = input_hash(root, gate, sources, gate_record if isinstance(gate_record, dict) else {}, code_diff)
     if (
         gate_record.get("status") == "completed"
         and gate_record.get("decision") == "approve"

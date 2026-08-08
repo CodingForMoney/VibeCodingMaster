@@ -211,6 +211,8 @@ services with controlled runtime doubles:
   and automatic Task Harness Retrospective orchestration.
 - Architecture, validation, and code-diff rejection/correction loops, including
   corrected commit source chains and unchanged-input suppression.
+- Code-diff exclusion of `[VCM Harness]` commits, including mixed ranges,
+  all-Harness ranges, review-input hashes, and HEAD checkpoint advancement.
 - Gate Review cancellation, Reviewer restart, exact request ownership, and
   protection against cancelled-request reports overwriting replacement state.
 - Tester `incomplete` report validation and backend refusal to start

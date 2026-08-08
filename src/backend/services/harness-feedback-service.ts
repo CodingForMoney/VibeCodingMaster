@@ -412,7 +412,7 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
             "Do not keep full content in memory when durable-doc is correct. Use memory-reference only when an ongoing role needs the document pointer.",
             "Use none as the complete Existing Memory Decisions body only when no substantive existing memory entry exists.",
             "Apply the reviewed result directly to the <VCM-memory> blocks in the listed active memory files. Do not change any content outside those blocks.",
-            "If memory changes, commit only the changed active memory files before ending the turn. Use commit message: chore: update VCM memory. If memory is unchanged, do not create a commit.",
+            "If memory changes, commit only the changed active memory files before ending the turn. Use commit message: [VCM Harness] Update VCM memory. If memory is unchanged, do not create a commit.",
             "Use this exact block in the retrospective report and replace each option or placeholder with one allowed value or a concise summary:",
             "",
             "## Memory Review",

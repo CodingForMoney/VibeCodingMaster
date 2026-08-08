@@ -562,14 +562,16 @@ Input policy:
   Architect Debug fix, or Architecture Diagnosis fix. PM supplies the matching
   `coder`, `architect-debug`, or `architect-diagnosis` production-code source.
   PM does not inspect commits; the tool reviews committed implementation and
-  test inputs, returns `not_required` when there are no new commits, and fails
-  to start when the worktree has uncommitted changes.
+  test inputs, excludes `[VCM Harness]` commits, returns `not_required` when
+  there are no reviewable commits, and fails to start when the worktree has
+  uncommitted changes. Test failures caused by Harness changes still follow the
+  normal Tester failure flow.
 - `code-diff` fails to start when `test-report.md` is incomplete or when a
   required validation-adequacy decision is missing or stale. When
   validation-adequacy is disabled, completed Tester evidence is still required.
 - When rejected code receives corrective commits from another source, code-diff
   retains the original base and source evidence and appends the corrective
-  source. The next review covers the complete source chain and revised range.
+  source. The next review covers the complete non-Harness source chain.
 - Architect Debug writes `.ai/vcm/handoffs/architect-debug.md` before code-diff
   so the review receives the confirmed root cause and completed-fix evidence,
   not only the original Architect route command.
@@ -584,7 +586,7 @@ Input policy:
 - Gates avoid duplicate review by comparing input hashes. Architecture review
   binds the confirmed brief, code evidence, and plan to current scaffold/code evidence; validation review binds the
   test report to current non-document code/test evidence and `docs/TESTING.md`;
-  code-diff review binds the selected commit range and diff, current test
+  code-diff review binds the selected non-Harness commits and their patches, current test
   report, and validation-adequacy report.
 - Each Gate request snapshots its referenced `.ai/vcm` handoffs and prior-Gate
   evidence under the request record. Reviewer uses those immutable snapshots
@@ -754,7 +756,7 @@ VCM runs bootstrap through task-scoped `harness-engineer`:
 - run deterministic fixed installer first
 - start/resume Harness Engineer in the active task worktree
 - ask it to use `vcm-harness-bootstrap`
-- let Harness Engineer create its own bootstrap commit
+- let Harness Engineer create its own `[VCM Harness]` bootstrap commit
 - mark bootstrap complete from the Harness Engineer `Stop` hook
 
 Reusable harness issues are reported through `vcm-report-harness-issue`.

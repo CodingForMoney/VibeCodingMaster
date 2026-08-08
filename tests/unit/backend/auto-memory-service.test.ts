@@ -47,7 +47,7 @@ describe("auto-memory-service", () => {
 
     expect(await readText(context.taskRepoRoot, "CLAUDE.md")).toContain("project event bus");
     await expect(readText(context.baseRepoRoot, "CLAUDE.md")).rejects.toThrow();
-    expect(context.gitCommits).toEqual([{ message: "chore: update VCM memory", paths: ["CLAUDE.md"] }]);
+    expect(context.gitCommits).toEqual([{ message: "[VCM Harness] Update VCM memory", paths: ["CLAUDE.md"] }]);
     expect(state.runs).toHaveLength(1);
     expect(state.runs[0].canRevert).toBe(true);
 

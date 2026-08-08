@@ -236,6 +236,19 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
     expect(noCodeDiff.status).toBe("not_required");
     expect(noCodeDiff.message).toBe("No new commits to review.");
 
+    await fs.writeFile(path.join(task.worktreePath, "rust-analyzer.toml"), "[rust-analyzer]\n", "utf8");
+    await git(task.worktreePath, "add", "rust-analyzer.toml");
+    await git(task.worktreePath, "commit", "-m", "[VCM Harness] Update rust-analyzer configuration");
+    const harnessHead = (await git(task.worktreePath, "rev-parse", "HEAD")).stdout.trim();
+    const harnessOnly = await requestGateReview(env.app, task.taskSlug, "code-diff", { codeDiffSource: "coder" });
+    expect(harnessOnly.status).toBe("not_required");
+    expect(harnessOnly.message).toBe("No non-Harness commits to review.");
+    expect(harnessOnly.record).toMatchObject({
+      headCommit: harnessHead,
+      commits: [],
+      changedFiles: []
+    });
+
     await fs.writeFile(path.join(task.worktreePath, "feature.txt"), "hello gate diff\n", "utf8");
     await git(task.worktreePath, "add", "feature.txt");
     await git(task.worktreePath, "commit", "-m", "implement feature");
@@ -252,6 +265,7 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
     expect(codeDiffApproved.gates["code-diff"]).toMatchObject({
       status: "completed",
       decision: "approve",
+      baseCommit: harnessHead,
       codeDiffSource: "coder"
     });
     expect(codeDiffApproved.gates["code-diff"].changedFiles).toContain("feature.txt");

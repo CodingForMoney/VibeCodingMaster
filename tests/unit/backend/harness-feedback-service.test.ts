@@ -245,7 +245,7 @@ None.
     expect(prompt).toContain(`Architect planning-session candidate: ${path.join(taskRepoRoot, "memory-run/architect-planning.md")}`);
     expect(prompt).toContain(`- ${path.join(taskRepoRoot, "CLAUDE.md")}`);
     expect(prompt).toContain("Apply the reviewed result directly to the <VCM-memory> blocks");
-    expect(prompt).toContain("Use commit message: chore: update VCM memory");
+    expect(prompt).toContain("Use commit message: [VCM Harness] Update VCM memory");
     expect(prompt).not.toContain("Write the complete reviewed memory set to:");
     expect(prompt).toContain("Before evaluating proposals, review every substantive entry in every current memory snapshot");
     expect(prompt).toContain("#### Candidate architect:add:1");

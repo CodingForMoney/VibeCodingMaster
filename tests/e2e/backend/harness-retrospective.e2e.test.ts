@@ -124,7 +124,7 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
     await expect(fs.readFile(path.join(task.worktreePath, "CLAUDE.md"), "utf8"))
       .resolves.toContain("Backend hooks own lifecycle completion.");
     await expect(git(task.worktreePath, "log", "-1", "--pretty=%s"))
-      .resolves.toMatchObject({ stdout: "chore: update VCM memory\n" });
+      .resolves.toMatchObject({ stdout: "[VCM Harness] Update VCM memory\n" });
 
     const completedMemoryRound = await getWorkspaceState(env.app, task.taskSlug);
     expect(completedMemoryRound.roundState.status).toBe("stopped");
@@ -268,7 +268,7 @@ async function writeHarnessRetrospective(ctx: MockClaudePromptContext): Promise<
       )
     );
     await git(ctx.cwd, "add", "--", "CLAUDE.md");
-    await git(ctx.cwd, "commit", "-m", "chore: update VCM memory");
+    await git(ctx.cwd, "commit", "-m", "[VCM Harness] Update VCM memory");
   }
   const pendingFeedback = matchPendingFeedbackPaths(ctx.prompt);
   const dispositions = pendingFeedback.flatMap((feedbackPath) => [

@@ -579,7 +579,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
         harnessCommit = (await commitHarnessVisibleChanges(
           deps.git,
           repoRoot,
-          "chore(vcm-harness): update harness file"
+          "[VCM Harness] Update harness file"
         )).harnessCommit;
       }
 
@@ -608,7 +608,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
         const committed = await commitHarnessVisibleChanges(
           deps.git,
           repoRoot,
-          "chore(vcm-harness): update fixed harness"
+          "[VCM Harness] Update fixed harness"
         );
         return {
           ...result,
@@ -639,7 +639,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
       const committed = await commitHarnessVisibleChanges(
         deps.git,
         repoRoot,
-        "chore(vcm-harness): update fixed harness"
+        "[VCM Harness] Update fixed harness"
       );
 
       return {

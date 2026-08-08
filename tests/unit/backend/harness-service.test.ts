@@ -838,7 +838,7 @@ describe("createHarnessService", () => {
       "status:/repo",
       "status:/repo",
       "add:/repo:CLAUDE.md",
-      "commit:/repo:chore(vcm-harness): update harness file"
+      "commit:/repo:[VCM Harness] Update harness file"
     ]);
   });
 

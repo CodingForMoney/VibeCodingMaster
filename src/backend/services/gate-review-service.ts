@@ -84,6 +84,7 @@ interface CodeDiffInput {
   baseCommit: string;
   headCommit: string;
   commits: string[];
+  commitShas: string[];
   changedFiles: string[];
   diffStat: string;
   diffHash: string;
@@ -103,6 +104,7 @@ const REVIEWER_AGENT_PATH = ".claude/agents/reviewer.md";
 const GATE_REVIEW_DIR = ".ai/vcm/gate-reviews";
 const REQUESTS_DIR = ".ai/vcm/gate-reviews/requests";
 const GATE_REVIEW_VERSION = 1;
+const HARNESS_COMMIT_PREFIX = "[VCM Harness] ";
 const REVIEWER_ROLE = "reviewer";
 const DEFAULT_REPORT_POLL_INTERVAL_MS = 1000;
 const activeRuns = new Map<string, AbortController>();
@@ -466,30 +468,56 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     }
 
     if (gate === "code-diff") {
-      const prerequisiteError = await readCodeDiffPrerequisiteError(deps, context, index, codeDiffSource);
+      const evidenceError = await readCodeDiffEvidenceError(deps.fs, context.taskRepoRoot, codeDiffSource);
+      if (evidenceError) {
+        index = await recordCodeDiffStartFailure(index, context, gate, codeDiffSource, evidenceError);
+        return {
+          status: "failed_to_start",
+          gate,
+          record: index.gates[gate],
+          message: evidenceError
+        };
+      }
+    }
+
+    const codeDiffInput = gate === "code-diff"
+      ? await resolveCodeDiffInput(deps, context, record)
+      : undefined;
+    if (gate === "code-diff" && (!codeDiffInput || codeDiffInput.commits.length === 0)) {
+      index = applyGateState(index, gate, {
+        status: "not_required",
+        decision: undefined,
+        error: undefined,
+        exceptionReason: undefined,
+        requestId: undefined,
+        requestPath: undefined,
+        inputHash: undefined,
+        baseCommit: codeDiffInput?.baseCommit,
+        headCommit: codeDiffInput?.headCommit,
+        commits: codeDiffInput?.commits,
+        changedFiles: codeDiffInput?.changedFiles,
+        diffStat: codeDiffInput?.diffStat,
+        codeDiffSource,
+        codeDiffSources: codeDiffSource ? [codeDiffSource] : undefined,
+        requestedAt: undefined,
+        startedAt: undefined,
+        completedAt: codeDiffInput ? now() : undefined,
+        callbackStatus: "not_sent",
+        callbackError: undefined
+      }, now(), true);
+      await saveIndex(deps.fs, context.taskRepoRoot, index);
+      return {
+        status: "not_required",
+        gate,
+        record: index.gates[gate],
+        message: codeDiffInput ? "No non-Harness commits to review." : "No new commits to review."
+      };
+    }
+
+    if (gate === "code-diff") {
+      const prerequisiteError = await readCodeDiffValidationGateError(deps, context, index);
       if (prerequisiteError) {
-        index = applyGateState(index, gate, {
-          status: "failed",
-          decision: undefined,
-          error: prerequisiteError,
-          exceptionReason: undefined,
-          requestId: undefined,
-          requestPath: undefined,
-          inputHash: undefined,
-          baseCommit: undefined,
-          headCommit: undefined,
-          commits: undefined,
-          changedFiles: undefined,
-          diffStat: undefined,
-          codeDiffSource,
-          codeDiffSources: codeDiffSource ? [codeDiffSource] : undefined,
-          requestedAt: undefined,
-          startedAt: undefined,
-          completedAt: now(),
-          callbackStatus: "not_sent",
-          callbackError: undefined
-        }, now(), true);
-        await saveIndex(deps.fs, context.taskRepoRoot, index);
+        index = await recordCodeDiffStartFailure(index, context, gate, codeDiffSource, prerequisiteError, codeDiffInput);
         return {
           status: "failed_to_start",
           gate,
@@ -499,38 +527,37 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       }
     }
 
-    const codeDiffInput = gate === "code-diff"
-      ? await resolveCodeDiffInput(deps, context, record)
-      : undefined;
-    if (gate === "code-diff" && !codeDiffInput) {
-      index = applyGateState(index, gate, {
-        status: "not_required",
+    async function recordCodeDiffStartFailure(
+      currentIndex: GateReviewIndex,
+      currentContext: ReviewContext,
+      currentGate: GateReviewGate,
+      currentSource: CodeDiffSource | undefined,
+      message: string,
+      currentCodeDiffInput?: CodeDiffInput
+    ): Promise<GateReviewIndex> {
+      const failedIndex = applyGateState(currentIndex, currentGate, {
+        status: "failed",
         decision: undefined,
-        error: undefined,
+        error: message,
         exceptionReason: undefined,
         requestId: undefined,
         requestPath: undefined,
         inputHash: undefined,
-        baseCommit: undefined,
-        headCommit: undefined,
-        commits: undefined,
-        changedFiles: undefined,
-        diffStat: undefined,
-        codeDiffSource,
-        codeDiffSources: codeDiffSource ? [codeDiffSource] : undefined,
+        baseCommit: currentCodeDiffInput?.baseCommit,
+        headCommit: currentCodeDiffInput?.headCommit,
+        commits: currentCodeDiffInput?.commits,
+        changedFiles: currentCodeDiffInput?.changedFiles,
+        diffStat: currentCodeDiffInput?.diffStat,
+        codeDiffSource: currentSource,
+        codeDiffSources: currentSource ? [currentSource] : undefined,
         requestedAt: undefined,
         startedAt: undefined,
-        completedAt: undefined,
+        completedAt: now(),
         callbackStatus: "not_sent",
         callbackError: undefined
       }, now(), true);
-      await saveIndex(deps.fs, context.taskRepoRoot, index);
-      return {
-        status: "not_required",
-        gate,
-        record: index.gates[gate],
-        message: "No new commits to review."
-      };
+      await saveIndex(deps.fs, currentContext.taskRepoRoot, failedIndex);
+      return failedIndex;
     }
 
     const codeDiffSources = gate === "code-diff" && codeDiffInput && codeDiffSource
@@ -1334,44 +1361,74 @@ async function resolveCodeDiffInput(
   }
 
   const range = `${baseCommit}..${headCommit}`;
-  const commits = splitLines(await commandStdout(deps.runner, context.taskRepoRoot, [
+  const allCommits = splitLines(await commandStdout(deps.runner, context.taskRepoRoot, [
     "log",
     "--oneline",
     "--reverse",
     range
   ]));
-  if (commits.length === 0) {
+  if (allCommits.length === 0) {
     return undefined;
   }
 
-  const changedFiles = splitLines(await commandStdout(deps.runner, context.taskRepoRoot, [
-    "diff",
-    "--name-only",
-    "--find-renames",
-    range
-  ]));
-  const diffStat = await commandStdout(deps.runner, context.taskRepoRoot, [
-    "diff",
-    "--stat",
-    "--find-renames",
-    range
-  ]);
-  const diff = await commandStdout(deps.runner, context.taskRepoRoot, [
-    "diff",
-    "--binary",
-    "--find-renames",
-    range
-  ]);
+  const commits = allCommits.filter((line) => !isHarnessCommitLine(line));
+  const commitShas = commits.map(commitShaFromOneline);
+  const changedFiles = new Set<string>();
+  const diffStats: string[] = [];
+  const diffs: string[] = [];
+  for (const commitSha of commitShas) {
+    for (const changedFile of splitLines(await commandStdout(deps.runner, context.taskRepoRoot, [
+      "show",
+      "--format=",
+      "--name-only",
+      "--find-renames",
+      commitSha
+    ]))) {
+      changedFiles.add(changedFile);
+    }
+    const stat = await commandStdout(deps.runner, context.taskRepoRoot, [
+      "show",
+      "--format=",
+      "--stat",
+      "--find-renames",
+      commitSha
+    ]);
+    if (stat.trim()) {
+      diffStats.push(stat.trim());
+    }
+    const patch = await commandStdout(deps.runner, context.taskRepoRoot, [
+      "show",
+      "--format=",
+      "--binary",
+      "--find-renames",
+      commitSha
+    ]);
+    if (patch) {
+      diffs.push(patch);
+    }
+  }
+  const diffStat = diffStats.join("\n");
+  const diff = diffs.join("\n");
   const diffHash = createHash("sha256").update(diff).digest("hex");
 
   return {
     baseCommit,
     headCommit,
     commits,
-    changedFiles,
+    commitShas,
+    changedFiles: [...changedFiles],
     diffStat,
     diffHash
   };
+}
+
+function commitShaFromOneline(line: string): string {
+  return line.split(/\s+/, 1)[0] ?? line;
+}
+
+function isHarnessCommitLine(line: string): boolean {
+  const separator = line.indexOf(" ");
+  return separator >= 0 && line.slice(separator + 1).startsWith(HARNESS_COMMIT_PREFIX);
 }
 
 async function resolveCodeDiffBaseCommit(
@@ -1380,6 +1437,15 @@ async function resolveCodeDiffBaseCommit(
   record: GateReviewGateRecord,
   headCommit: string
 ): Promise<string | undefined> {
+  if (
+    record.gate === "code-diff"
+    && record.status === "failed"
+    && record.baseCommit
+    && await isAncestor(deps.runner, context.taskRepoRoot, record.baseCommit, headCommit)
+  ) {
+    return record.baseCommit;
+  }
+
   if (
     record.gate === "code-diff"
     && record.status === "completed"
@@ -1394,6 +1460,15 @@ async function resolveCodeDiffBaseCommit(
     record.gate === "code-diff"
     && record.status === "completed"
     && record.decision === "approve"
+    && record.headCommit
+    && await isAncestor(deps.runner, context.taskRepoRoot, record.headCommit, headCommit)
+  ) {
+    return record.headCommit;
+  }
+
+  if (
+    record.gate === "code-diff"
+    && record.status === "not_required"
     && record.headCommit
     && await isAncestor(deps.runner, context.taskRepoRoot, record.headCommit, headCommit)
   ) {
@@ -1477,7 +1552,7 @@ async function computeInputHash(
     digest.update(await deps.fs.readText(resolveRepoPath(taskRepoRoot, coreArtifact)));
   }
 
-  const common = [
+  const common = gate === "code-diff" ? [] : [
     "CLAUDE.md",
     ".claude/agents/architect.md",
     ".claude/agents/coder.md",
@@ -1502,10 +1577,6 @@ async function computeInputHash(
   if (gate === "code-diff" && codeDiffInput) {
     digest.update("codeDiffSources");
     digest.update(codeDiffSources?.join("\n") ?? "<missing>");
-    digest.update("baseCommit");
-    digest.update(codeDiffInput.baseCommit);
-    digest.update("headCommit");
-    digest.update(codeDiffInput.headCommit);
     digest.update("commits");
     digest.update(codeDiffInput.commits.join("\n"));
     digest.update("changedFiles");
@@ -1627,17 +1698,23 @@ async function readValidationReportError(
   return undefined;
 }
 
-async function readCodeDiffPrerequisiteError(
-  deps: Pick<GateReviewServiceDeps, "fs" | "runner">,
-  context: ReviewContext,
-  index: GateReviewIndex,
+async function readCodeDiffEvidenceError(
+  fs: FileSystemAdapter,
+  taskRepoRoot: string,
   source: CodeDiffSource | undefined
 ): Promise<string | undefined> {
-  const reportError = await readValidationReportError(deps.fs, context.taskRepoRoot);
+  const reportError = await readValidationReportError(fs, taskRepoRoot);
   if (reportError) {
     return "code-diff requires completed Tester validation. " + reportError;
   }
+  return readCodeDiffSourceArtifactError(fs, taskRepoRoot, source);
+}
 
+async function readCodeDiffValidationGateError(
+  deps: Pick<GateReviewServiceDeps, "fs" | "runner">,
+  context: ReviewContext,
+  index: GateReviewIndex
+): Promise<string | undefined> {
   const validationGate = index.gates["validation-adequacy"];
   if (validationGate.required && validationGate.status !== "skipped" && validationGate.status !== "overridden") {
     if (validationGate.status !== "completed" || validationGate.decision !== "approve") {
@@ -1654,7 +1731,7 @@ async function readCodeDiffPrerequisiteError(
     }
   }
 
-  return readCodeDiffSourceArtifactError(deps.fs, context.taskRepoRoot, source);
+  return undefined;
 }
 
 async function readArchitectureEvidenceError(
@@ -1766,17 +1843,16 @@ Use each captured snapshot as the immutable handoff or prior-Gate input for this
 Code Diff Input:
 This code-diff gate reviews the new commits from one PM route flow, not the whole task and not one terminal turn.
 Code sources: ${codeDiffSources?.join(" -> ") ?? "<missing>"}
-Base commit: ${codeDiffInput.baseCommit}
-Head commit: ${codeDiffInput.headCommit}
-Commits:
+Reviewable commits:
 ${codeDiffInput.commits.map((line) => `- ${line}`).join("\n")}
 Changed files:
 ${codeDiffInput.changedFiles.length > 0 ? codeDiffInput.changedFiles.map((line) => `- ${line}`).join("\n") : "- <none>"}
 Diff commands:
-- git diff --stat --find-renames ${codeDiffInput.baseCommit}..${codeDiffInput.headCommit}
-- git diff --find-renames ${codeDiffInput.baseCommit}..${codeDiffInput.headCommit}
-- git show --stat --oneline <commit>
-Review only this commit range.`
+${codeDiffInput.commitShas.flatMap((commitSha) => [
+    `- git show --stat --oneline ${commitSha}`,
+    `- git show --find-renames ${commitSha}`
+  ]).join("\n")}
+Review only these commits.`
     : "";
 
   return `[VCM GATE REVIEW]

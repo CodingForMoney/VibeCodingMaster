@@ -937,7 +937,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     await writeRunMemorySet(taskRepoRoot, runId, "before", before);
     await writeRunMemorySet(taskRepoRoot, runId, "after", after);
     try {
-      await applyAndCommitMemorySet(taskRepoRoot, before, after, "chore: update VCM memory");
+      await applyAndCommitMemorySet(taskRepoRoot, before, after, "[VCM Harness] Update VCM memory");
       const diff = renderMemoryDiff(before, after);
       await persistRun(taskRepoRoot, {
         version: 1,

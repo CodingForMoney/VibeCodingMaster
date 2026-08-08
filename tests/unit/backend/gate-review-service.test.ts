@@ -719,9 +719,12 @@ describe("gate-review-service", () => {
       "rev-parse HEAD": ({ cwd }) => cwd === tmpRepo ? "base-sha" : "head-sha",
       "merge-base --is-ancestor base-sha head-sha": "",
       "log --oneline --reverse base-sha..head-sha": "abc1234 implement route\nbcd2345 add tests",
-      "diff --name-only --find-renames base-sha..head-sha": "src/feature.ts\ntests/feature.test.ts",
-      "diff --stat --find-renames base-sha..head-sha": " src/feature.ts | 10 +++++\n 1 file changed",
-      "diff --binary --find-renames base-sha..head-sha": "diff --git a/src/feature.ts b/src/feature.ts\n"
+      "show --format= --name-only --find-renames abc1234": "src/feature.ts",
+      "show --format= --stat --find-renames abc1234": " src/feature.ts | 10 +++++",
+      "show --format= --binary --find-renames abc1234": "diff --git a/src/feature.ts b/src/feature.ts\n",
+      "show --format= --name-only --find-renames bcd2345": "tests/feature.test.ts",
+      "show --format= --stat --find-renames bcd2345": " tests/feature.test.ts | 8 ++++",
+      "show --format= --binary --find-renames bcd2345": "diff --git a/tests/feature.test.ts b/tests/feature.test.ts\n"
     });
     const writes: string[] = [];
     const service = createGateReviewService({
@@ -761,10 +764,114 @@ describe("gate-review-service", () => {
     expect(prompt).toContain("- .ai/vcm/handoffs/coder-completion.md");
     expect(prompt).toContain("- .ai/vcm/handoffs/test-report.md");
     expect(prompt).toContain("- .ai/vcm/gate-reviews/validation-adequacy-review.md");
-    expect(prompt).toContain("Base commit: base-sha");
-    expect(prompt).toContain("Head commit: head-sha");
+    expect(prompt).toContain("Reviewable commits:");
     expect(prompt).toContain("- abc1234 implement route");
-    expect(runnerCalls.some((call) => call.args.join(" ") === "diff --binary --find-renames base-sha..head-sha")).toBe(true);
+    expect(prompt).toContain("git show --find-renames abc1234");
+    expect(runnerCalls.some((call) => call.args.join(" ") === "show --format= --binary --find-renames abc1234")).toBe(true);
+  });
+
+  it("excludes Harness commits from mixed code-diff input", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-harness-filter-"));
+    await writeHarnessFiles(tmpRepo);
+    const runnerCalls: Array<{ command: string; args: string[]; options?: CommandRunnerOptions }> = [];
+    const runner = createRunner(tmpRepo, runnerCalls, {
+      "rev-parse HEAD": ({ cwd }) => cwd === tmpRepo ? "base-sha" : "head-sha",
+      "merge-base --is-ancestor base-sha head-sha": "",
+      "log --oneline --reverse base-sha..head-sha": [
+        "abc1234 implement route",
+        "har1234 [VCM Harness] Update rust-analyzer configuration",
+        "bcd2345 add tests",
+        "near123 [VCM harness] Lowercase marker is ordinary"
+      ].join("\n"),
+      "show --format= --name-only --find-renames abc1234": "src/feature.ts",
+      "show --format= --stat --find-renames abc1234": " src/feature.ts | 4 ++",
+      "show --format= --binary --find-renames abc1234": "diff --git a/src/feature.ts b/src/feature.ts\n",
+      "show --format= --name-only --find-renames bcd2345": "tests/feature.test.ts",
+      "show --format= --stat --find-renames bcd2345": " tests/feature.test.ts | 4 ++",
+      "show --format= --binary --find-renames bcd2345": "diff --git a/tests/feature.test.ts b/tests/feature.test.ts\n",
+      "show --format= --name-only --find-renames near123": "docs/note.md",
+      "show --format= --stat --find-renames near123": " docs/note.md | 1 +",
+      "show --format= --binary --find-renames near123": "diff --git a/docs/note.md b/docs/note.md\n"
+    });
+    const writes: string[] = [];
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner,
+      runtime: createRuntime(tmpRepo, writes, "approve"),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["code-diff"]),
+      sessionService: createSessionService(),
+      roundService: createRoundService(),
+      reportPollIntervalMs: 5
+    });
+
+    expect((await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", {
+      codeDiffSource: "coder"
+    })).status).toBe("started");
+    await waitFor(async () => (await service.getState(tmpRepo!, "demo-task")).gates["code-diff"].status === "completed");
+
+    const record = (await service.getState(tmpRepo, "demo-task")).gates["code-diff"];
+    expect(record.commits).toEqual([
+      "abc1234 implement route",
+      "bcd2345 add tests",
+      "near123 [VCM harness] Lowercase marker is ordinary"
+    ]);
+    expect(record.changedFiles).toEqual(["src/feature.ts", "tests/feature.test.ts", "docs/note.md"]);
+    const prompt = writes.find((write) => write.includes("[VCM GATE REVIEW]")) ?? "";
+    expect(prompt).not.toContain("har1234");
+    expect(prompt).not.toContain("rust-analyzer");
+    expect(runnerCalls.some((call) => call.args.includes("har1234"))).toBe(false);
+  });
+
+  it("advances the code-diff checkpoint when a range contains only Harness commits", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-harness-only-"));
+    await writeHarnessFiles(tmpRepo);
+    let head = "harness-head";
+    const sessionStarts: string[] = [];
+    const runner = createRunner(tmpRepo, [], {
+      "rev-parse HEAD": ({ cwd }) => cwd === tmpRepo ? "base-sha" : head,
+      "merge-base --is-ancestor base-sha harness-head": "",
+      "merge-base --is-ancestor harness-head code-head": "",
+      "log --oneline --reverse base-sha..harness-head": "har1234 [VCM Harness] Refresh harness",
+      "log --oneline --reverse harness-head..code-head": "abc1234 implement route",
+      "show --format= --name-only --find-renames abc1234": "src/feature.ts",
+      "show --format= --stat --find-renames abc1234": " src/feature.ts | 4 ++",
+      "show --format= --binary --find-renames abc1234": "diff --git a/src/feature.ts b/src/feature.ts\n"
+    });
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner,
+      runtime: createRuntime(tmpRepo, [], "approve"),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["code-diff"]),
+      sessionService: createSessionService(sessionStarts),
+      roundService: createRoundService(),
+      reportPollIntervalMs: 5
+    });
+
+    const harnessOnly = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", {
+      codeDiffSource: "coder"
+    });
+    expect(harnessOnly.status).toBe("not_required");
+    expect(harnessOnly.message).toBe("No non-Harness commits to review.");
+    expect(harnessOnly.record).toMatchObject({
+      status: "not_required",
+      baseCommit: "base-sha",
+      headCommit: "harness-head",
+      commits: [],
+      changedFiles: []
+    });
+    expect(sessionStarts).toEqual([]);
+
+    head = "code-head";
+    const codeReview = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", {
+      codeDiffSource: "coder"
+    });
+    expect(codeReview.status).toBe("started");
+    expect(codeReview.record.baseCommit).toBe("harness-head");
+    await waitFor(async () => (await service.getState(tmpRepo!, "demo-task")).gates["code-diff"].status === "completed");
   });
 
   it.each<CodeDiffSource>(["coder", "architect-debug", "architect-diagnosis"])(
@@ -803,9 +910,12 @@ describe("gate-review-service", () => {
       "rev-parse HEAD": ({ cwd }) => cwd === tmpRepo ? "base-sha" : "head-sha",
       "merge-base --is-ancestor base-sha head-sha": "",
       "log --oneline --reverse base-sha..head-sha": "abc1234 implement route\nbcd2345 add tests",
-      "diff --name-only --find-renames base-sha..head-sha": "src/feature.ts\ntests/feature.test.ts",
-      "diff --stat --find-renames base-sha..head-sha": " 2 files changed",
-      "diff --binary --find-renames base-sha..head-sha": "diff --git a/src/feature.ts b/src/feature.ts\n"
+      "show --format= --name-only --find-renames abc1234": "src/feature.ts",
+      "show --format= --stat --find-renames abc1234": " src/feature.ts | 2 +",
+      "show --format= --binary --find-renames abc1234": "diff --git a/src/feature.ts b/src/feature.ts\n",
+      "show --format= --name-only --find-renames bcd2345": "tests/feature.test.ts",
+      "show --format= --stat --find-renames bcd2345": " tests/feature.test.ts | 2 +",
+      "show --format= --binary --find-renames bcd2345": "diff --git a/tests/feature.test.ts b/tests/feature.test.ts\n"
     });
     const service = createGateReviewService({
       fs: createNodeFileSystemAdapter(),
@@ -845,7 +955,14 @@ describe("gate-review-service", () => {
     await writeHarnessFiles(tmpRepo);
     const service = createGateReviewService({
       fs: createNodeFileSystemAdapter(),
-      runner: createRunner(tmpRepo, []),
+      runner: createRunner(tmpRepo, [], {
+        "rev-parse HEAD": ({ cwd }) => cwd === tmpRepo ? "base-sha" : "head-sha",
+        "merge-base --is-ancestor base-sha head-sha": "",
+        "log --oneline --reverse base-sha..head-sha": "abc1234 implement route",
+        "show --format= --name-only --find-renames abc1234": "src/feature.ts",
+        "show --format= --stat --find-renames abc1234": " src/feature.ts | 4 ++",
+        "show --format= --binary --find-renames abc1234": "diff --git a/src/feature.ts b/src/feature.ts\n"
+      }),
       runtime: createRuntime(tmpRepo, [], "approve"),
       projectService: createProjectService(),
       taskService: createTaskService(tmpRepo),
@@ -931,9 +1048,9 @@ describe("gate-review-service", () => {
       "rev-parse HEAD": ({ cwd }) => cwd === tmpRepo ? "base-sha" : "head-sha",
       "merge-base --is-ancestor base-sha head-sha": "",
       "log --oneline --reverse base-sha..head-sha": "abc1234 fix debug path",
-      "diff --name-only --find-renames base-sha..head-sha": "src/feature.ts",
-      "diff --stat --find-renames base-sha..head-sha": " src/feature.ts | 2 +-",
-      "diff --binary --find-renames base-sha..head-sha": "diff --git a/src/feature.ts b/src/feature.ts\n"
+      "show --format= --name-only --find-renames abc1234": "src/feature.ts",
+      "show --format= --stat --find-renames abc1234": " src/feature.ts | 2 +-",
+      "show --format= --binary --find-renames abc1234": "diff --git a/src/feature.ts b/src/feature.ts\n"
     });
     const writes: string[] = [];
     const service = createGateReviewService({
@@ -973,9 +1090,9 @@ describe("gate-review-service", () => {
       "rev-parse HEAD": ({ cwd }) => cwd === tmpRepo ? "base-sha" : "head-sha",
       "merge-base --is-ancestor base-sha head-sha": "",
       "log --oneline --reverse base-sha..head-sha": "abc1234 repair ownership",
-      "diff --name-only --find-renames base-sha..head-sha": "src/feature.ts",
-      "diff --stat --find-renames base-sha..head-sha": " src/feature.ts | 8 ++++----",
-      "diff --binary --find-renames base-sha..head-sha": "diff --git a/src/feature.ts b/src/feature.ts\n"
+      "show --format= --name-only --find-renames abc1234": "src/feature.ts",
+      "show --format= --stat --find-renames abc1234": " src/feature.ts | 8 ++++----",
+      "show --format= --binary --find-renames abc1234": "diff --git a/src/feature.ts b/src/feature.ts\n"
     });
     const writes: string[] = [];
     const service = createGateReviewService({
@@ -1013,12 +1130,12 @@ describe("gate-review-service", () => {
       "merge-base --is-ancestor base-sha debug-head": "",
       "log --oneline --reverse base-sha..coder-head": "abc1234 implement feature",
       "log --oneline --reverse base-sha..debug-head": "abc1234 implement feature\ndef5678 fix rejected code",
-      "diff --name-only --find-renames base-sha..coder-head": "src/feature.ts",
-      "diff --name-only --find-renames base-sha..debug-head": "src/feature.ts",
-      "diff --stat --find-renames base-sha..coder-head": " src/feature.ts | 8 +++++---",
-      "diff --stat --find-renames base-sha..debug-head": " src/feature.ts | 10 ++++++----",
-      "diff --binary --find-renames base-sha..coder-head": "diff --git a/src/feature.ts b/src/feature.ts\n+coder\n",
-      "diff --binary --find-renames base-sha..debug-head": "diff --git a/src/feature.ts b/src/feature.ts\n+debug\n"
+      "show --format= --name-only --find-renames abc1234": "src/feature.ts",
+      "show --format= --stat --find-renames abc1234": " src/feature.ts | 8 +++++---",
+      "show --format= --binary --find-renames abc1234": "diff --git a/src/feature.ts b/src/feature.ts\n+coder\n",
+      "show --format= --name-only --find-renames def5678": "src/feature.ts",
+      "show --format= --stat --find-renames def5678": " src/feature.ts | 2 +-",
+      "show --format= --binary --find-renames def5678": "diff --git a/src/feature.ts b/src/feature.ts\n+debug\n"
     });
     const service = createGateReviewService({
       fs: createNodeFileSystemAdapter(),
