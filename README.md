@@ -474,14 +474,18 @@ Use it to:
 - merge task harness commits back to the connected repository branch when
   appropriate
 
-VCM bundles the Claude Code LSP bridge and loads it for Architect, Coder, and
-Reviewer sessions, including CCR launches. The project environment must still
+VCM bundles the Claude Code LSP bridge and loads it only for Architect sessions,
+including CCR launches. The project environment must still
 provide the language server for each detected language: `rust-analyzer`,
 `typescript-language-server`, `pyright-langserver`, `gopls`, `clangd`, or
-`jdtls`. Their Agent definitions preload `vcm-code-navigation`. Architect,
-Coder, and Reviewer use LSP for semantic relationships. Harness Studio reports
+`jdtls`. Architect preloads `vcm-code-navigation` and uses LSP for semantic
+relationships; other roles use generated context and ordinary source reads.
+Harness Studio reports
 whether the server executable and plugin can run; the role Session performs the
-real workspace warm-up and semantic query retries.
+real workspace indexing and semantic query retries. The backend watches
+top-level Architect LSP calls. A call without a matching result for ten minutes
+causes one stop-and-resume recovery of the same Claude Session per Round; a
+second stall or failed resume pauses the Round for user action.
 
 Harness Engineer is task-scoped and runs from the active task worktree. The
 backend automatically starts a fresh Harness Engineer for each active task or

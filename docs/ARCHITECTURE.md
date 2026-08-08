@@ -30,6 +30,7 @@ layers plus supporting tools.
   endpoint and the gateway), `task-close-service` (backend-owned unconditional
   task close, shared by the GUI endpoint and the gateway), `session-service`, `round-service`,
   `runtime-coordinator-service`, `runtime-recovery-service`,
+  `architect-lsp-watchdog-service`,
   `terminal-process-exit-service`, `message-service`, `task-workflow-service`,
   `workflow-control-service`,
   `architect-restart-service`,
@@ -207,8 +208,16 @@ the backend process; detection does not start a persistent language server or
 scan the repository recursively. A successful probe means the server is
 runnable, not that a role workspace is indexed or semantically ready. Architect
 uses bounded workspace-query retries through `vcm-code-navigation`; the skill
-does not issue an unconditional warm-up query. Harness Studio renders server availability and the exact
-backend diagnostic. The project runtime, not VCM, owns installation of
+does not issue an unconditional warm-up query. Runtime Coordinator attaches the
+Architect LSP watchdog only while Architect owns a running Round. The watchdog
+replays the current Turn transcript, pairs top-level `LSP` tool uses with their
+tool results, and treats an unmatched call older than ten minutes as stalled. It
+may stop and resume the same Claude Session once per Round without converting
+the expected old-process exit into a Round stop. A repeated stall or failed
+resume records failed role recovery and stops the Round for the normal pause
+alert. LSP liveness diagnostics are stored separately from role activity state.
+Harness Studio renders server availability and the exact backend diagnostic.
+The project runtime, not VCM, owns installation of
 `rust-analyzer`, `typescript-language-server`, `pyright-langserver`, `gopls`,
 `clangd`, or `jdtls`.
 

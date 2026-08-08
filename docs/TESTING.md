@@ -86,6 +86,7 @@ Notes:
   downstream repos.
 - Code-navigation or Harness code-intelligence changes: run
   `claude-adapter.test.ts`, `session-service.test.ts`,
+  `architect-lsp-watchdog-service.test.ts`,
   `harness-service.test.ts`, `harness-templates-sync.test.ts`,
   `harness-studio-layout.test.ts`, and `ccr-integration.e2e.test.ts`. Verify the
   bundled plugin loads only for Architect on native and CCR launches; Coder and
@@ -189,6 +190,7 @@ tests/
 | INT-GATE-004 | Gate Review cancellation and replacement | Gate Review routes + service + Reviewer Session | A late result cannot overwrite a newer request after cancellation | Cancel requires the current request ID; Reviewer restarts; the replacement request alone owns Gate state, stable report, architecture disposition, and PM callback | L2, on Gate request lifecycle change | Covered by service race tests and backend E2E with mock Claude runtime |
 | INT-RT-003 | Manual Harness Feedback delivery | Harness Studio + `POST /api/projects/harness/feedback/send` | A user can send one pending report to the active task's Harness Engineer without automatic queue processing | Only a path still present in the pending Inbox is accepted; the exact absolute path is submitted; the report remains pending | L1, on Harness Feedback changes | Covered by service and route unit tests; live PTY coverage remains absent |
 | INT-RT-004 | Task worktree Harness revision freshness | Harness Apply/status + task Session routes | Session freshness uses the same task worktree revision that Harness updates | All seven roles snapshot and compare the worktree revision; a conflicting base revision is ignored; task-scoped auxiliary notifications stay in task Session storage | L2, on Harness or Session changes | Covered by `session-service.test.ts` and `harness-revision.e2e.test.ts` with a real linked worktree and mock Claude runtime |
+| INT-RT-005 | Architect LSP stall recovery | Architect transcript + Session Service + Runtime Coordinator + Round Service | A dangling top-level LSP call cannot leave a Round running forever | Matching results cancel the watchdog; one ten-minute stall resumes the same Claude Session without stopping the Round; a second stall or failed resume stops and pauses the Round | L2, on Architect LSP or Session recovery changes | Covered by service tests plus `runtime-recovery.e2e.test.ts` with a real transcript file and mock Claude PTY; a live language-server hang remains environment-dependent |
 
 ### Backend E2E (implemented: `tests/e2e/backend/`)
 

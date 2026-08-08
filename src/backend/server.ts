@@ -14,6 +14,7 @@ import { createAppSettingsService, type AppSettingsService } from "./services/ap
 import { createCcrIntegrationService, type CcrIntegrationService } from "./services/ccr-integration-service.js";
 import { createAutoMemoryService, type AutoMemoryService } from "./services/auto-memory-service.js";
 import { createArchitectRestartService, type ArchitectRestartService } from "./services/architect-restart-service.js";
+import { createArchitectLspWatchdogService } from "./services/architect-lsp-watchdog-service.js";
 import { createClaudeTranscriptService } from "./services/claude-transcript-service.js";
 import { createGateReviewService, type GateReviewService } from "./services/gate-review-service.js";
 import { createHarnessFeedbackService, type HarnessFeedbackService } from "./services/harness-feedback-service.js";
@@ -404,6 +405,11 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     sessionService
   });
   const transcripts = createClaudeTranscriptService();
+  const architectLspWatchdog = createArchitectLspWatchdogService({
+    transcripts,
+    sessionService,
+    roundService
+  });
   const translationService = createTranslationService({
     runtime,
     sessionRegistry: registry,
@@ -487,6 +493,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     harnessFeedbackService,
     autoMemoryService,
     roundService,
+    architectLspWatchdog,
     gatewayService,
     async getStateRoot(repoRoot) {
       return (await projectService.loadConfig(repoRoot)).stateRoot;

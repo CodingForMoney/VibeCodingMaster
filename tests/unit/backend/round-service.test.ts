@@ -921,6 +921,63 @@ describe("round-service", () => {
     });
   });
 
+  it("atomically stops a round while preserving failed role recovery", async () => {
+    const fs = createMemoryFs();
+    let currentTime = "2026-05-31T00:00:00.000Z";
+    const statusUpdates: string[] = [];
+    const service = createRoundService({
+      fs,
+      now: () => currentTime,
+      id: () => "round_1",
+      onSessionStatusChange: async ({ status }) => {
+        statusUpdates.push(status);
+      }
+    });
+
+    await service.recordClaudeHookEvent({
+      repoRoot: "/repo",
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "architect",
+      eventName: "UserPromptSubmit"
+    });
+    currentTime = "2026-05-31T00:10:00.000Z";
+    const failed = await service.recordRoleRecoveryFailure({
+      repoRoot: "/repo",
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      recovery: {
+        role: "architect",
+        status: "failed",
+        attempt: 1,
+        maxAttempts: 1,
+        lastFailureAt: currentTime,
+        error: "Architect LSP recovery failed."
+      }
+    });
+
+    expect(failed).toMatchObject({
+      status: "stopped",
+      activeRole: "architect",
+      stopReason: "terminal-exit",
+      roleRecovery: {
+        role: "architect",
+        status: "failed",
+        attempt: 1,
+        maxAttempts: 1,
+        error: "Architect LSP recovery failed."
+      },
+      flowPause: {
+        paused: true,
+        reason: "role-recovery-failed",
+        role: "architect"
+      }
+    });
+    expect(statusUpdates).toEqual(["running", "stopped"]);
+  });
+
   it("persists and clears role recovery state", async () => {
     const fs = createMemoryFs();
     const service = createRoundService({

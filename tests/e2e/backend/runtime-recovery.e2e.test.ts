@@ -12,6 +12,70 @@ import { createMockClaudeE2eApp, type MockClaudeE2eApp } from "./helpers/e2e-app
 import { createE2eRepo } from "./helpers/e2e-repo.js";
 
 describe("backend E2E runtime restart recovery", () => {
+  it("resumes the same Architect Claude session after a dangling LSP call", async () => {
+    const repo = await createE2eRepo();
+    let currentTime = "2026-08-08T00:00:00.000Z";
+    const e2e = await createMockClaudeE2eApp({ now: () => currentTime });
+
+    try {
+      const task = await connectAndCreateTask(e2e.app, repo, "mock-lsp-stall");
+      e2e.mockRuntime.onPrompt("architect", "Run semantic analysis", async (ctx) => {
+        await ctx.userPromptSubmit();
+        await fs.appendFile(ctx.transcriptPath, `${JSON.stringify({
+          type: "assistant",
+          uuid: "architect-lsp-stall",
+          timestamp: currentTime,
+          message: {
+            stop_reason: "tool_use",
+            content: [{
+              type: "tool_use",
+              id: "lsp-call-1",
+              name: "LSP",
+              input: { operation: "findReferences" }
+            }]
+          }
+        })}\n`, "utf8");
+      });
+
+      const originalRuntime = await startRole(e2e.app, task.taskSlug, "architect");
+      e2e.mockRuntime.write(originalRuntime.id, "Run semantic analysis");
+      await e2e.mockRuntime.waitForIdle();
+      const before = await getWorkspaceState(e2e.app, task.taskSlug);
+      const originalSession = before.taskStatus.sessions.find((entry) => entry.role === "architect");
+      expect(originalSession?.claudeSessionId).toBeTruthy();
+
+      currentTime = "2026-08-08T00:11:00.000Z";
+      await e2e.deps.runtimeCoordinator.reconcileProject(repo.repoRoot, {
+        taskSlug: task.taskSlug
+      });
+
+      await waitFor(async () => {
+        const workspace = await getWorkspaceState(e2e.app, task.taskSlug);
+        const recovered = workspace.taskStatus.sessions.find((entry) => entry.role === "architect");
+        expect(recovered).toMatchObject({
+          status: "running",
+          activityStatus: "running",
+          claudeSessionId: originalSession?.claudeSessionId,
+          lastArchitectLspRecovery: {
+            roundId: workspace.roundState.roundId,
+            toolUseId: "lsp-call-1",
+            operation: "findReferences"
+          }
+        });
+        expect(recovered?.id).not.toBe(originalRuntime.id);
+        expect(workspace.roundState).toMatchObject({
+          status: "running",
+          activeRole: "architect"
+        });
+        expect(workspace.roundState.roleRecovery).toBeUndefined();
+        expect(workspace.roundState.flowPause).toBeUndefined();
+      });
+    } finally {
+      await e2e.close();
+      await repo.cleanup();
+    }
+  });
+
   it("keeps a quiet live parent turn running while a foreground Agent call is unresolved", async () => {
     const repo = await createE2eRepo();
     const fixedNow = "2000-01-01T00:00:00.000Z";

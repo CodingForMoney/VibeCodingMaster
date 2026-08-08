@@ -7,6 +7,7 @@ import type { TaskRecord } from "../../shared/types/task.js";
 import { VcmError } from "../errors.js";
 import type { GatewayService } from "../gateway/gateway-service.js";
 import type { AppSettingsService } from "./app-settings-service.js";
+import type { ArchitectLspWatchdogService } from "./architect-lsp-watchdog-service.js";
 import type { AutoMemoryService } from "./auto-memory-service.js";
 import type { HarnessFeedbackService } from "./harness-feedback-service.js";
 import type { HarnessService } from "./harness-service.js";
@@ -47,6 +48,7 @@ export interface RuntimeCoordinatorServiceDeps {
   harnessFeedbackService: Pick<HarnessFeedbackService, "startTaskRetrospective">;
   autoMemoryService: Pick<AutoMemoryService, "reconcileTask" | "getTaskRetrospectiveReadiness">;
   roundService: Pick<RoundService, "getSessionRoundState">;
+  architectLspWatchdog: ArchitectLspWatchdogService;
   gatewayService: Pick<GatewayService, "getStatus">;
   getStateRoot(repoRoot: string): Promise<string>;
   setInterval?: (callback: () => void, delayMs: number) => unknown;
@@ -101,10 +103,18 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
       const preferences = await deps.appSettings.getPreferences();
 
       if (!activeTask) {
+        deps.architectLspWatchdog.clearProject(repoRoot);
         return { activeTask: null, gatewayStatus };
       }
 
       const taskRepoRoot = getTaskRuntimeRepoRoot(activeTask);
+      const stateRoot = await deps.getStateRoot(repoRoot);
+      await deps.architectLspWatchdog.reconcileTask({
+        repoRoot,
+        taskRepoRoot,
+        stateRoot,
+        taskSlug: activeTask.taskSlug
+      });
       const harnessInitialized = await deps.harnessService.getHarnessStatus(taskRepoRoot)
         .then((status) => status.initialized)
         .catch(() => false);
@@ -158,6 +168,7 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
       void reconcileCurrentProject().catch(() => undefined);
     },
     stop() {
+      deps.architectLspWatchdog.stop();
       if (reconcileTimer === undefined) {
         return;
       }
@@ -170,6 +181,7 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
   async function reconcileCurrentProject(): Promise<void> {
     const project = await deps.projectService.getCurrentProject();
     if (!project) {
+      deps.architectLspWatchdog.stop();
       return;
     }
     await reconcileProject(project.repoRoot);

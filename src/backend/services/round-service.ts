@@ -15,6 +15,7 @@ export interface RoundService {
   recordClaudeHookEvent(input: RecordRoundHookEventInput): Promise<VcmSessionRoundState>;
   recordManualInterrupt(input: RecordManualInterruptInput): Promise<VcmSessionRoundState>;
   recordTerminalExit(input: RecordTerminalExitInput): Promise<VcmSessionRoundState>;
+  recordRoleRecoveryFailure(input: SetRoleRecoveryInput): Promise<VcmSessionRoundState>;
   setRoleRecovery(input: SetRoleRecoveryInput): Promise<VcmSessionRoundState>;
   clearRoleRecovery(input: ClearRoleRecoveryInput): Promise<VcmSessionRoundState>;
   stopSession(sessionId: string): void;
@@ -424,6 +425,31 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
         await save(input, next);
         clearSettleTimer(input);
         await updateSessionStatus(input, "stopped");
+        return toSessionRoundState(next, timestamp);
+      });
+    },
+    async recordRoleRecoveryFailure(input) {
+      return withTaskLock(input, async () => {
+        const timestamp = now();
+        const state = await load(input);
+        const stopped = applyTerminalExit({
+          state,
+          taskSlug: input.taskSlug,
+          role: input.recovery.role,
+          timestamp
+        });
+        const next = {
+          ...stopped,
+          roleRecovery: normalizeRoleRecovery({
+            ...input.recovery,
+            status: "failed",
+            failedAt: input.recovery.failedAt ?? timestamp
+          }),
+          updatedAt: timestamp
+        };
+        await save(input, next);
+        clearSettleTimer(input);
+        await updateSessionStatus(input, next.currentRound?.status === "running" ? "running" : "stopped");
         return toSessionRoundState(next, timestamp);
       });
     },

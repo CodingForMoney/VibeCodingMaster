@@ -21,6 +21,7 @@ import { createHarnessService } from "../../../../src/backend/services/harness-s
 import { createHarnessFeedbackService } from "../../../../src/backend/services/harness-feedback-service.js";
 import { createAutoMemoryService } from "../../../../src/backend/services/auto-memory-service.js";
 import { createArchitectRestartService } from "../../../../src/backend/services/architect-restart-service.js";
+import { createArchitectLspWatchdogService } from "../../../../src/backend/services/architect-lsp-watchdog-service.js";
 import { createCommandDispatcher } from "../../../../src/backend/services/command-dispatcher.js";
 import { createStatusService } from "../../../../src/backend/services/status-service.js";
 import { createMessageService } from "../../../../src/backend/services/message-service.js";
@@ -224,6 +225,11 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     sessionService
   });
   const transcripts = createClaudeTranscriptService();
+  const architectLspWatchdog = createArchitectLspWatchdogService({
+    transcripts,
+    sessionService,
+    roundService
+  });
   const translationService = createTranslationService({
     runtime: mockRuntime,
     sessionRegistry: registry,
@@ -316,6 +322,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     harnessFeedbackService,
     autoMemoryService,
     roundService,
+    architectLspWatchdog,
     gatewayService,
     async getStateRoot(repoRoot) {
       return (await projectService.loadConfig(repoRoot)).stateRoot;

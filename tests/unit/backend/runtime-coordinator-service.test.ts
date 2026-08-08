@@ -339,6 +339,13 @@ function createCoordinator(input: {
         };
       }
     },
+    architectLspWatchdog: {
+      async reconcileTask(request) {
+        input.calls.push(`architect-lsp-watchdog:${request.taskSlug}`);
+      },
+      clearProject() {},
+      stop() {}
+    },
     gatewayService: {
       async getStatus() {
         input.calls.push("gateway-status");

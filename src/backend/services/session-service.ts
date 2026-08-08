@@ -7,6 +7,8 @@ import {
   CCR_GPT_SESSION_MODEL,
   isCcrSessionModel,
   type ClaudePermissionMode,
+  type ArchitectLspRecoveryRecord,
+  type ArchitectLspStallState,
   type RoleSessionRecord,
   type SessionEffort,
   type SessionModel,
@@ -62,6 +64,29 @@ export interface SessionService {
   recordTerminalProcessExit(repoRoot: string, input: RecordTerminalProcessExitInput): Promise<TerminalProcessExitRecord | undefined>;
   markRoleActivityRunning(repoRoot: string, taskSlug: string, role: RoleName, expectedSessionId?: string): Promise<RoleSessionRecord | undefined>;
   markRoleActivityIdle(repoRoot: string, taskSlug: string, role: RoleName): Promise<RoleSessionRecord | undefined>;
+  setArchitectLspStall(
+    repoRoot: string,
+    taskSlug: string,
+    expectedSessionId: string | undefined,
+    stall: ArchitectLspStallState
+  ): Promise<RoleSessionRecord | undefined>;
+  recoverArchitectLspSession(
+    repoRoot: string,
+    taskSlug: string,
+    input: RecoverArchitectLspSessionInput
+  ): Promise<RoleSessionRecord>;
+  stopArchitectLspSessionForFailure(
+    repoRoot: string,
+    taskSlug: string,
+    stall: ArchitectLspStallState
+  ): Promise<RoleSessionRecord | undefined>;
+}
+
+export interface RecoverArchitectLspSessionInput {
+  expectedSessionId: string;
+  stall: ArchitectLspStallState;
+  recovery: ArchitectLspRecoveryRecord;
+  recoveryPrompt: string;
 }
 
 export interface SessionServiceDeps {
@@ -1026,7 +1051,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     }
 
     const timestamp = now();
-    const turnWasRunning = current.activityStatus === "running";
+    const turnWasRunning = current.activityStatus === "running"
+      && current.expectedRuntimeExitReason !== "architect-lsp-recovery";
     const updated: RoleSessionRecord = {
       ...current,
       status: input.status,
@@ -1042,6 +1068,155 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const task = await deps.taskService.loadTask(repoRoot, taskSlug);
     await persistRoleSessionRecord(deps.fs, repoRoot, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
     return { record: updated, turnWasRunning };
+  }
+
+  async function persistTaskRoleRecord(
+    repoRoot: string,
+    taskSlug: string,
+    record: RoleSessionRecord
+  ): Promise<RoleSessionRecord> {
+    deps.registry.upsert(record);
+    const config = await deps.projectService.loadConfig(repoRoot);
+    const task = await deps.taskService.loadTask(repoRoot, taskSlug);
+    await persistRoleSessionRecord(
+      deps.fs,
+      repoRoot,
+      getTaskRuntimeRepoRoot(task),
+      config.stateRoot,
+      record
+    );
+    return record;
+  }
+
+  async function setArchitectLspStall(
+    repoRoot: string,
+    taskSlug: string,
+    expectedSessionId: string | undefined,
+    stall: ArchitectLspStallState
+  ): Promise<RoleSessionRecord | undefined> {
+    const current = await getTaskRoleSessionView(repoRoot, taskSlug, "architect");
+    if (!current || (expectedSessionId && current.id !== expectedSessionId)) {
+      return undefined;
+    }
+    return persistTaskRoleRecord(repoRoot, taskSlug, {
+      ...current,
+      architectLspStall: stall,
+      updatedAt: now()
+    });
+  }
+
+  async function stopArchitectLspSessionForFailure(
+    repoRoot: string,
+    taskSlug: string,
+    stall: ArchitectLspStallState
+  ): Promise<RoleSessionRecord | undefined> {
+    const current = await getTaskRoleSessionView(repoRoot, taskSlug, "architect");
+    if (!current) {
+      return undefined;
+    }
+
+    const prepared = await persistTaskRoleRecord(repoRoot, taskSlug, {
+      ...current,
+      architectLspStall: stall,
+      expectedRuntimeExitReason: "architect-lsp-recovery",
+      updatedAt: now()
+    });
+    let stopError: unknown;
+    try {
+      if (deps.runtime.getSession(prepared.id)) {
+        await deps.runtime.stop(prepared.id);
+      }
+    } catch (error) {
+      stopError = error;
+    }
+
+    const runtimeStillAlive = isRuntimeSessionAlive(deps.runtime.getSession(prepared.id));
+    const finalStall: ArchitectLspStallState = stopError
+      ? {
+          ...stall,
+          error: `${stall.error ?? "Architect LSP recovery failed."} Failed to stop the stalled runtime: ${String(stopError)}`
+        }
+      : stall;
+    return persistTaskRoleRecord(repoRoot, taskSlug, {
+      ...prepared,
+      status: runtimeStillAlive ? prepared.status : "exited",
+      activityStatus: runtimeStillAlive ? prepared.activityStatus : "idle",
+      pid: runtimeStillAlive ? prepared.pid : undefined,
+      architectLspStall: finalStall,
+      expectedRuntimeExitReason: undefined,
+      updatedAt: now()
+    });
+  }
+
+  async function recoverArchitectLspSession(
+    repoRoot: string,
+    taskSlug: string,
+    input: RecoverArchitectLspSessionInput
+  ): Promise<RoleSessionRecord> {
+    const current = await getTaskRoleSessionView(repoRoot, taskSlug, "architect");
+    if (!current
+      || current.id !== input.expectedSessionId
+      || current.status !== "running"
+      || current.activityStatus !== "running") {
+      throw new VcmError({
+        code: "ARCHITECT_LSP_SESSION_CHANGED",
+        message: "Architect session changed before LSP recovery could begin.",
+        statusCode: 409
+      });
+    }
+    if (!current.claudeSessionId) {
+      throw new VcmError({
+        code: "CLAUDE_SESSION_MISSING",
+        message: "Architect does not have a confirmed Claude session id to resume.",
+        statusCode: 409
+      });
+    }
+
+    const prepared = await persistTaskRoleRecord(repoRoot, taskSlug, {
+      ...current,
+      architectLspStall: {
+        ...input.stall,
+        status: "recovering"
+      },
+      expectedRuntimeExitReason: "architect-lsp-recovery",
+      updatedAt: now()
+    });
+    if (deps.runtime.getSession(prepared.id)) {
+      await deps.runtime.stop(prepared.id);
+    }
+    await persistTaskRoleRecord(repoRoot, taskSlug, {
+      ...prepared,
+      status: "exited",
+      activityStatus: "idle",
+      pid: undefined,
+      expectedRuntimeExitReason: undefined,
+      updatedAt: now()
+    });
+
+    const resumed = await launchRoleSession(repoRoot, taskSlug, "architect", {
+      permissionMode: prepared.permissionMode,
+      model: prepared.model,
+      effort: prepared.effort
+    }, "resume");
+    if ((await waitForSessionInputReady(resumed.id)) === "exited") {
+      throw new VcmError({
+        code: "ARCHITECT_LSP_RESUME_FAILED",
+        message: "Architect session exited before LSP recovery input could be submitted.",
+        statusCode: 409
+      });
+    }
+
+    await submitTerminalInput(deps.runtime, resumed.id, input.recoveryPrompt);
+    return persistTaskRoleRecord(repoRoot, taskSlug, {
+      ...resumed,
+      activityStatus: "running",
+      lastTurnStartedAt: now(),
+      lastHookEventAt: now(),
+      architectLspStall: undefined,
+      lastArchitectLspRecovery: input.recovery,
+      expectedRuntimeExitReason: undefined,
+      updatedAt: now()
+    });
   }
 
   return {
@@ -1166,6 +1341,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         lastTurnEndedAt: isTurnEnd ? timestamp : current.lastTurnEndedAt,
         lastTurnStartedAt: isTurnEnd || isCompact ? current.lastTurnStartedAt : timestamp,
         lastCompactAt: isCompact ? timestamp : current.lastCompactAt,
+        architectLspStall: input.eventName === "UserPromptSubmit"
+          ? undefined
+          : current.architectLspStall,
         updatedAt: timestamp
       };
       deps.registry.upsert(updated);
@@ -1554,7 +1732,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
           : undefined;
       }
       return markTaskRoleActivityIdle(repoRoot, taskSlug, role);
-    }
+    },
+    setArchitectLspStall,
+    recoverArchitectLspSession,
+    stopArchitectLspSessionForFailure
   };
 }
 
@@ -1683,6 +1864,7 @@ function withoutRuntimeOnlySessionFields(session: RoleSessionRecord): RoleSessio
   const {
     pid: _pid,
     runtimeSessionToken: _runtimeSessionToken,
+    expectedRuntimeExitReason: _expectedRuntimeExitReason,
     ...persisted
   } = session;
   return persisted;

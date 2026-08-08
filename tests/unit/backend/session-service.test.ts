@@ -1332,6 +1332,89 @@ describe("createSessionService", () => {
     });
   });
 
+  it("recovers a stalled Architect by resuming the same Claude session", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const writes: string[] = [];
+    let oldExitWouldStopRound: boolean | undefined;
+    let service: SessionService;
+    service = createTestSessionService(fs, runtimeInputs, writes, {
+      async onRuntimeStop(sessionId) {
+        const result = await service.recordTerminalProcessExit("/repo", {
+          sessionId,
+          status: "exited",
+          exitCode: 0
+        });
+        oldExitWouldStopRound = result?.turnWasRunning;
+      }
+    });
+    const started = await service.startRoleSession("/repo", "demo-task", "architect", {
+      permissionMode: "bypassPermissions",
+      model: "opus",
+      effort: "xhigh"
+    });
+    await recordCurrentClaudeHook(service, {
+      taskSlug: "demo-task",
+      role: "architect",
+      eventName: "UserPromptSubmit",
+      claudeSessionId: "architect-stalled-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/architect-stalled-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
+
+    const recovered = await service.recoverArchitectLspSession("/repo", "demo-task", {
+      expectedSessionId: started.id,
+      stall: {
+        status: "stalled",
+        roundId: "round-1",
+        toolUseId: "lsp-1",
+        operation: "findReferences",
+        startedAt: "2026-05-28T23:50:00.000Z",
+        detectedAt: "2026-05-29T00:00:00.000Z",
+        recoveryAttempt: 1
+      },
+      recovery: {
+        roundId: "round-1",
+        toolUseId: "lsp-1",
+        operation: "findReferences",
+        recoveredAt: "2026-05-29T00:00:00.000Z"
+      },
+      recoveryPrompt: "[VCM LSP RECOVERY] Continue the current Architect command."
+    });
+
+    expect(runtimeInputs).toHaveLength(2);
+    expect(oldExitWouldStopRound).toBe(false);
+    expect(runtimeInputs[1]?.args).toEqual([
+      ...LSP_PLUGIN_ARGS,
+      "--agent",
+      "architect",
+      "--resume",
+      "architect-stalled-session",
+      "--model",
+      "opus",
+      "--effort",
+      "xhigh",
+      "--permission-mode",
+      "bypassPermissions"
+    ]);
+    expect(writes).toEqual([
+      "\u001b[200~[VCM LSP RECOVERY] Continue the current Architect command.\u001b[201~",
+      "\r"
+    ]);
+    expect(recovered).toMatchObject({
+      id: "runtime_2",
+      claudeSessionId: "architect-stalled-session",
+      status: "running",
+      activityStatus: "running",
+      architectLspStall: undefined,
+      lastArchitectLspRecovery: {
+        roundId: "round-1",
+        toolUseId: "lsp-1",
+        operation: "findReferences"
+      }
+    });
+  });
+
   it("records Reviewer hook activity on the task-scoped session", async () => {
     const fs = createMemoryFs();
     const service = createTestSessionService(fs, []);
@@ -1520,6 +1603,7 @@ function createTestSessionService(
     deadProcessCalls?: number[];
     dropBeforeWriteCalls?: number[];
     workflowContext?: string;
+    onRuntimeStop?: (sessionId: string) => Promise<void> | void;
   } = {}
 ) {
   const worktreePath = options.worktreePath ?? TASK_WORKTREE;
@@ -1530,7 +1614,8 @@ function createTestSessionService(
     fs,
     runtime: createFakeRuntime(runtimeInputs, writes, {
       exitedCalls: options.exitedCalls,
-      dropBeforeWriteCalls: options.dropBeforeWriteCalls
+      dropBeforeWriteCalls: options.dropBeforeWriteCalls,
+      onStop: options.onRuntimeStop
     }),
     registry: createSessionRegistry(),
     claude: {
@@ -1650,7 +1735,11 @@ function createTestSessionService(
 function createFakeRuntime(
   inputs: CreateTerminalSessionInput[],
   writes: string[],
-  options: { exitedCalls?: number[]; dropBeforeWriteCalls?: number[] } = {}
+  options: {
+    exitedCalls?: number[];
+    dropBeforeWriteCalls?: number[];
+    onStop?: (sessionId: string) => Promise<void> | void;
+  } = {}
 ): TerminalRuntime {
   const sessions = new Map<string, TerminalSession>();
   const exitedCalls = new Set(options.exitedCalls ?? []);
@@ -1700,6 +1789,7 @@ function createFakeRuntime(
     resize() {},
     async stop(sessionId) {
       sessions.delete(sessionId);
+      await options.onStop?.(sessionId);
     },
     async restart(sessionId) {
       const current = sessions.get(sessionId);
