@@ -181,7 +181,8 @@ describe("createHarnessService", () => {
     expect(architectAgent).toContain("Maintain a `Code Reading Closure`");
     expect(architectAgent).toContain("`Previous Debug Failure`");
     expect(architectAgent).toContain("commit all Diagnosis implementation changes before reporting");
-    expect(architectAgent).toContain("In Docs-Only Flow, the Architect role result must record the decision");
+    expect(architectAgent).toContain("Write `.ai/vcm/handoffs/docs-sync-report.md` as the final result of Docs-Only Flow");
+    expect(architectAgent).toContain("In Docs-Only Flow, submit the complete report before returning to PM");
     expect(architectAgent).toContain("`Decision` must be `synced`, `unchanged`, or `blocked`");
     const testerAgent = await fs.readText("/repo/.claude/agents/tester.md");
     expect(frontmatterOf(testerAgent)).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Skill");

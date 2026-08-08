@@ -1,8 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { parseWorkflowProgress, renderWorkflowProgress } from "../../../src/backend/services/workflow-control-service.js";
+import { renderDocsSyncReportTemplate } from "../../../src/backend/templates/handoff.js";
 import { createMockClaudeE2eApp } from "./helpers/e2e-app.js";
-import { createE2eRepo } from "./helpers/e2e-repo.js";
+import { createE2eRepo, git } from "./helpers/e2e-repo.js";
 import {
   connectAndCreateTask,
   getWorkspaceState,
@@ -207,6 +209,121 @@ describe("backend E2E with mock Claude Code", () => {
     );
   });
 
+  it("completes Docs-Only Flow on the first Architect result with an accepted Docs Sync Report", async () => {
+    const env = await createMockClaudeE2eApp({ workflowControl: true });
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "docs-only-flow");
+
+    env.mockRuntime.onPrompt("project-manager", "Update the project guide", async (ctx) => {
+      await ctx.userPromptSubmit();
+      await ctx.writeFile(".ai/vcm/handoffs/messages/project-manager-architect.md", [
+        "---",
+        "type: task",
+        "---",
+        "Update the project guide and submit the Docs Sync Report.",
+        ""
+      ].join("\n"));
+      await ctx.stop();
+    });
+
+    env.mockRuntime.onPrompt("architect", "Update the project guide and submit the Docs Sync Report.", async (ctx) => {
+      await ctx.userPromptSubmit();
+      await ctx.writeFile("docs/GUIDE.md", "# Project Guide\n\nUpdated documentation.\n");
+      await ctx.writeFile(
+        ".ai/vcm/handoffs/docs-sync-report.md",
+        completeDocsSyncReport(task.taskSlug, "synced")
+      );
+      await git(ctx.cwd, "add", "--", "docs/GUIDE.md");
+      await git(ctx.cwd, "commit", "-m", "docs: update project guide");
+      await ctx.writeFile(".ai/vcm/handoffs/messages/architect-project-manager.md", [
+        "---",
+        "type: result",
+        "artifact_refs: .ai/vcm/handoffs/docs-sync-report.md",
+        "---",
+        "Docs-only update complete.",
+        ""
+      ].join("\n"));
+      await ctx.stop();
+    });
+
+    env.mockRuntime.onPrompt("project-manager", "Docs-only update complete.", async (ctx) => {
+      await ctx.userPromptSubmit();
+      await ctx.stop();
+    });
+
+    const pm = await startRole(env.app, task.taskSlug, "project-manager");
+    await startRole(env.app, task.taskSlug, "architect");
+    const initialProgress = [
+      `# Workflow Progress: ${task.taskSlug}`,
+      "",
+      "Revision: 1",
+      "Flow: none",
+      "Status: not-started",
+      "",
+      "## Dispatch History",
+      "",
+      "none",
+      "",
+      "## Proposed Dispatch",
+      "",
+      "Requested Flow: docs-only",
+      "Target Role: architect",
+      "Evidence: user accepted the documentation-only task",
+      "",
+      "## User Override",
+      "",
+      "Authorization ID: none",
+      "Authorization Quote: none",
+      "Violated Rule: none",
+      ""
+    ].join("\n");
+    const approval = await env.app.inject({
+      method: "POST",
+      url: `/api/tasks/${task.taskSlug}/artifacts/submit`,
+      payload: {
+        kind: "workflow-progress",
+        mode: "final",
+        role: "project-manager",
+        runtimeSessionToken: pm.runtimeSessionToken,
+        content: initialProgress
+      }
+    });
+    expect(approval.statusCode, approval.body).toBe(200);
+
+    const pmSession = env.mockRuntime.getSessionByRole(task.taskSlug, "project-manager");
+    env.mockRuntime.write(pmSession!.id, "Update the project guide");
+    await env.mockRuntime.waitForIdle();
+
+    const progressPath = path.join(task.worktreePath, ".ai/vcm/handoffs/workflow-progress.md");
+    const current = parseWorkflowProgress(await fs.readFile(progressPath, "utf8"), task.taskSlug);
+    expect(current.history).toEqual([expect.objectContaining({ flow: "docs-only", targetRole: "architect" })]);
+    await expect(fs.readFile(
+      path.join(task.worktreePath, ".ai/vcm/handoffs/docs-sync-report.md"),
+      "utf8"
+    )).resolves.toContain("## Decision\n\nsynced");
+
+    const completion = await env.app.inject({
+      method: "POST",
+      url: `/api/tasks/${task.taskSlug}/artifacts/submit`,
+      payload: {
+        kind: "workflow-progress",
+        mode: "final",
+        role: "project-manager",
+        runtimeSessionToken: pm.runtimeSessionToken,
+        content: renderWorkflowProgress({
+          ...current,
+          revision: current.revision + 1,
+          status: "completed",
+          proposal: undefined
+        })
+      }
+    });
+    expect(completion.statusCode, completion.body).toBe(200);
+    expect(parseWorkflowProgress(await fs.readFile(progressPath, "utf8"), task.taskSlug).status).toBe("completed");
+  });
+
   it("retries a retryable StopFailure by sending a recovery prompt to the same role session", async () => {
     const env = await createMockClaudeE2eApp();
     cleanups.push(() => env.close());
@@ -379,3 +496,9 @@ describe("backend E2E with mock Claude Code", () => {
     expect(writes).toContain("does not authorize or advance any workflow step");
   });
 });
+
+function completeDocsSyncReport(taskSlug: string, decision: "synced" | "unchanged"): string {
+  return renderDocsSyncReportTemplate(taskSlug)
+    .replaceAll("TBD", "Verified documentation-only task evidence.")
+    .replace("synced|unchanged|blocked", decision);
+}

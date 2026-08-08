@@ -541,7 +541,7 @@ async function getAllowedTransitions(
   const flow = current.flow;
   if (flow === "docs-only") {
     const docs = await artifactState(fs, input, "docs-sync-report.md", "docs-sync-report");
-    return docs.value === "synced" || docs.value === "unchanged"
+    return docs.complete && (docs.value === "synced" || docs.value === "unchanged")
       ? []
       : ["docs-only/architect", "code-change/architect", "validation-only/tester"];
   }
@@ -756,8 +756,8 @@ async function validateCompletion(
   }
   if (candidate.flow === "docs-only") {
     const docs = await artifactState(fs, input, "docs-sync-report.md", "docs-sync-report");
-    if (docs.value !== "synced" && docs.value !== "unchanged") {
-      throw workflowError("WORKFLOW_COMPLETION_INVALID", "Docs-only completion requires a synced or unchanged Docs Sync Report.");
+    if (!docs.complete || (docs.value !== "synced" && docs.value !== "unchanged")) {
+      throw workflowError("WORKFLOW_COMPLETION_INVALID", "Docs-only completion requires a complete Docs Sync Report with Decision: synced or Decision: unchanged.");
     }
     return;
   }

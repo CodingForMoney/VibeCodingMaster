@@ -260,6 +260,59 @@ describe("workflow control service", () => {
     });
   });
 
+  it("rejects Docs-Only completion without a complete accepted Docs Sync Report", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await advance(service, fs, context, "architect", "docs-only", "accepted docs task");
+    const current = await readProgress(fs, context);
+    const completion = renderWorkflowProgress({
+      ...current,
+      revision: current.revision + 1,
+      status: "completed",
+      proposal: undefined
+    });
+
+    await expect(service.submitProgress(context, completion)).rejects.toMatchObject({
+      code: "WORKFLOW_COMPLETION_INVALID"
+    });
+
+    await fs.writeText(
+      path.join(context.taskRepoRoot, context.handoffDir, "docs-sync-report.md"),
+      "# Docs Sync Report\n\n## Decision\n\nsynced\n"
+    );
+    await expect(service.submitProgress(context, completion)).rejects.toMatchObject({
+      code: "WORKFLOW_COMPLETION_INVALID"
+    });
+
+    await writeFinalArtifact(fs, context, "docs-sync-report.md", renderDocsSyncReportTemplate(context.taskSlug), [
+      ["synced|unchanged|blocked", "blocked"]
+    ]);
+    await expect(service.submitProgress(context, completion)).rejects.toMatchObject({
+      code: "WORKFLOW_COMPLETION_INVALID"
+    });
+  });
+
+  for (const decision of ["synced", "unchanged"] as const) {
+    it(`completes Docs-Only Flow from a complete ${decision} Docs Sync Report`, async () => {
+      const { context, fs } = await createContext(roots);
+      const service = createWorkflowControlService({ fs, now: sequenceClock() });
+      await advance(service, fs, context, "architect", "docs-only", "accepted docs task");
+      await writeFinalArtifact(fs, context, "docs-sync-report.md", renderDocsSyncReportTemplate(context.taskSlug), [
+        ["synced|unchanged|blocked", decision]
+      ]);
+
+      const current = await readProgress(fs, context);
+      await service.submitProgress(context, renderWorkflowProgress({
+        ...current,
+        revision: current.revision + 1,
+        status: "completed",
+        proposal: undefined
+      }));
+
+      expect((await readProgress(fs, context)).status).toBe("completed");
+    });
+  }
+
   it("requires a fresh Architecture Gate after Final Acceptance sends an Architect follow-up", async () => {
     const { context, fs } = await createContext(roots);
     const service = createWorkflowControlService({ fs, now: sequenceClock() });

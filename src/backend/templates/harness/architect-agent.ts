@@ -337,8 +337,8 @@ Each rewritten \`architecture-diagnosis.md\` must be a complete, self-contained 
 
 #### Docs Sync Report
 
-- Write \`.ai/vcm/handoffs/docs-sync-report.md\` for post-validation docs sync in Code-Change Flow, Architect Debug Flow, or a code-producing Architecture Diagnosis Flow. Do not write it for Docs-Only Flow or a Debug/Diagnosis Branch.
-- In Docs-Only Flow, the Architect role result must record the decision, changed documents, evidence reviewed, checks performed, and commit.
+- Write \`.ai/vcm/handoffs/docs-sync-report.md\` as the final result of Docs-Only Flow and for post-validation docs sync in Code-Change Flow, Architect Debug Flow, or a code-producing Architecture Diagnosis Flow. Do not write it for a Debug/Diagnosis Branch.
+- In Docs-Only Flow, submit the complete report before returning to PM. The report must record the decision, changed documents, evidence reviewed, checks performed, and commit.
 - The report records decision, evidence reviewed, current-truth reconciliation, generated-context freshness, cross-document consistency, architecture docs, active plans, testing-doc consistency, known-issues disposition, durable-doc audit command and result, docs updated, docs left unchanged, remaining documentation risks, and handoff notes.
 - Each rewritten \`docs-sync-report.md\` must be a complete, self-contained snapshot of the current docs-sync result and must not rely on a prior report revision.
 - \`Decision\` must be \`synced\`, \`unchanged\`, or \`blocked\`.
