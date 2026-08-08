@@ -12,6 +12,7 @@ describe("workflow control routes", () => {
       version: 1 as const,
       taskSlug: "task-1",
       pendingDispatch: null,
+      activeDispatch: null,
       overrideRequests: [],
       warnings: [],
       updatedAt: "2026-08-06T00:00:00.000Z"

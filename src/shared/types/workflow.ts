@@ -10,6 +10,24 @@ export const WORKFLOW_FLOWS = [
 
 export type WorkflowFlow = typeof WORKFLOW_FLOWS[number];
 
+export const WORKFLOW_EVIDENCE_ARTIFACTS = [
+  "architecture-plan.md",
+  "coder-completion.md",
+  "test-report.md",
+  "architect-debug.md",
+  "architecture-diagnosis.md",
+  "docs-sync-report.md"
+] as const;
+
+export const WORKFLOW_EVIDENCE_GATES = [
+  "architecture-plan",
+  "validation-adequacy",
+  "code-diff"
+] as const;
+
+export type WorkflowEvidenceArtifact = typeof WORKFLOW_EVIDENCE_ARTIFACTS[number];
+export type WorkflowEvidenceGate = typeof WORKFLOW_EVIDENCE_GATES[number];
+
 export interface WorkflowDispatchHistoryEntry {
   sequence: number;
   flow: WorkflowFlow;
@@ -53,6 +71,15 @@ export interface WorkflowPendingDispatch {
   updatedAt: string;
 }
 
+export interface WorkflowDispatchEvidenceBaseline {
+  sequence: number;
+  flow: WorkflowFlow;
+  targetRole: DispatchableRole;
+  artifactHashes: Record<WorkflowEvidenceArtifact, string>;
+  gateFingerprints: Record<WorkflowEvidenceGate, string>;
+  confirmedAt: string;
+}
+
 export interface WorkflowOverrideRequest {
   id: string;
   status: "pending" | "approved" | "rejected" | "consumed";
@@ -74,6 +101,7 @@ export interface WorkflowControlState {
   version: 1;
   taskSlug: string;
   pendingDispatch: WorkflowPendingDispatch | null;
+  activeDispatch: WorkflowDispatchEvidenceBaseline | null;
   overrideRequests: WorkflowOverrideRequest[];
   warnings: string[];
   updatedAt: string;

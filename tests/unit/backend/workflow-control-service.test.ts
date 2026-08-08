@@ -10,6 +10,8 @@ import {
   type WorkflowControlContext
 } from "../../../src/backend/services/workflow-control-service.js";
 import {
+  renderArchitectDebugTemplate,
+  renderArchitectureDiagnosisTemplate,
   renderArchitecturePlanTemplate,
   renderCoderCompletionTemplate,
   renderDocsSyncReportTemplate,
@@ -238,6 +240,109 @@ describe("workflow control service", () => {
     ]);
   });
 
+  it("resumes Architecture Diagnosis validation after one user-authorized repair without reusing stale evidence", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock(), id: () => "override-1" });
+
+    await advance(service, fs, context, "architect", "architecture-diagnosis", "accepted diagnosis task");
+    await writeArchitectureDiagnosis(fs, context, "initial diagnosis");
+    await advance(service, fs, context, "tester", undefined, "implemented diagnosis");
+    await writeTestReport(fs, context, "fail");
+    await writeGateIndex(fs, context, { validation: "request_changes" }, "2026-08-06T00:00:10.000Z");
+
+    await expect(propose(service, fs, context, "architect", undefined, "repair after Tester failure"))
+      .rejects.toMatchObject({
+        code: "WORKFLOW_TRANSITION_DENIED",
+        hint: expect.stringContaining("Architecture Diagnosis stopped after the current Tester failure")
+      });
+
+    await advanceWithOverride(
+      service,
+      fs,
+      context,
+      "architect",
+      "repair after Tester failure",
+      "Continue Architecture Diagnosis repair after the reported Tester failure."
+    );
+
+    await expect(propose(service, fs, context, "tester", undefined, "revalidate repair"))
+      .rejects.toMatchObject({ code: "WORKFLOW_TRANSITION_DENIED" });
+
+    await writeArchitectureDiagnosis(fs, context, "repaired diagnosis");
+    const restored = createWorkflowControlService({ fs, now: sequenceClock(), id: () => "override-2" });
+    await advance(restored, fs, context, "tester", undefined, "revalidate repaired diagnosis");
+    await writeTestReport(fs, context, "pass");
+
+    await expect(propose(restored, fs, context, "tester", undefined, "stale validation revision"))
+      .rejects.toMatchObject({ code: "WORKFLOW_TRANSITION_DENIED" });
+
+    await writeGateIndex(fs, context, { validation: "request_changes" }, "2026-08-06T00:00:20.000Z");
+    await advance(restored, fs, context, "tester", undefined, "current validation revision");
+
+    expect((await readProgress(fs, context)).history.map((entry) => entry.targetRole)).toEqual([
+      "architect",
+      "tester",
+      "architect",
+      "tester",
+      "tester"
+    ]);
+  });
+
+  it("routes a failed Architect Debug validation through Diagnosis and back to Tester", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+
+    await advance(service, fs, context, "architect", "architect-debug", "accepted debug task");
+    await writeArchitectDebug(fs, context, "debug repair");
+    await advance(service, fs, context, "tester", undefined, "validate debug repair");
+    await writeTestReport(fs, context, "fail");
+
+    await advance(service, fs, context, "architect", "architecture-diagnosis", "debug validation failed");
+    await writeArchitectureDiagnosis(fs, context, "diagnosis repair");
+    await advance(service, fs, context, "tester", undefined, "validate diagnosis repair");
+
+    expect((await readProgress(fs, context)).history.map((entry) => `${entry.flow}/${entry.targetRole}`)).toEqual([
+      "architect-debug/architect",
+      "architect-debug/tester",
+      "architecture-diagnosis/architect",
+      "architecture-diagnosis/tester"
+    ]);
+  });
+
+  it("distinguishes post-Gate Diagnosis docs sync from another implementation repair", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+
+    await advance(service, fs, context, "architect", "architecture-diagnosis", "accepted diagnosis task");
+    await writeArchitectureDiagnosis(fs, context, "implemented diagnosis");
+    await advance(service, fs, context, "tester", undefined, "validate diagnosis implementation");
+    await writeTestReport(fs, context, "pass");
+    await writeGateIndex(fs, context, {
+      validation: "approve",
+      codeDiff: "approve",
+      codeDiffSource: "architect-diagnosis"
+    });
+
+    await advance(service, fs, context, "architect", undefined, "approved validation and code diff");
+    await writeFinalArtifact(fs, context, "docs-sync-report.md", renderDocsSyncReportTemplate(context.taskSlug), [
+      ["synced|unchanged|blocked", "synced"]
+    ]);
+    await writeFinalArtifact(fs, context, "final-acceptance.md", renderFinalAcceptanceTemplate(context.taskSlug), [[
+      "accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|needs-docs-sync|blocked-by-user-decision",
+      "accepted"
+    ]]);
+
+    const current = await readProgress(fs, context);
+    await service.submitProgress(context, renderWorkflowProgress({
+      ...current,
+      revision: current.revision + 1,
+      status: "completed",
+      proposal: undefined
+    }));
+
+    expect((await readProgress(fs, context)).status).toBe("completed");
+  });
+
   it("allows only the explicit Docs-Only flow switches", async () => {
     const { context, fs } = await createContext(roots);
     const service = createWorkflowControlService({ fs, now: sequenceClock() });
@@ -420,6 +525,101 @@ async function advance(
   await service.confirmDispatch(context, messageId);
 }
 
+async function propose(
+  service: WorkflowControlService,
+  fs: FileSystemAdapter,
+  context: WorkflowControlContext,
+  targetRole: DispatchableRole,
+  requestedFlow: WorkflowProgressDocument["flow"],
+  evidence: string
+): Promise<void> {
+  const current = await readProgress(fs, context);
+  await service.submitProgress(context, renderWorkflowProgress({
+    ...current,
+    revision: current.revision + 1,
+    proposal: { targetRole, requestedFlow, evidence }
+  }));
+}
+
+async function advanceWithOverride(
+  service: WorkflowControlService,
+  fs: FileSystemAdapter,
+  context: WorkflowControlContext,
+  targetRole: DispatchableRole,
+  evidence: string,
+  authorizationText: string
+): Promise<void> {
+  const current = await readProgress(fs, context);
+  const effectiveFlow = current.flow!;
+  const violatedRule = `Transition ${effectiveFlow}/${targetRole} is not legal after the confirmed Workflow Progress history.`;
+  const proposal: WorkflowProgressDocument = {
+    ...current,
+    revision: current.revision + 1,
+    proposal: {
+      targetRole,
+      evidence,
+      authorizationId: "request",
+      authorizationQuote: authorizationText,
+      violatedRule
+    }
+  };
+  await expect(service.submitProgress(context, renderWorkflowProgress(proposal))).rejects.toMatchObject({
+    code: "WORKFLOW_OVERRIDE_PENDING"
+  });
+  await service.approveOverride(context, "override-1", authorizationText);
+  proposal.proposal!.authorizationId = "override-1";
+  await service.submitProgress(context, renderWorkflowProgress(proposal));
+  const messageId = `message-${proposal.revision}`;
+  await service.claimDispatch({
+    ...context,
+    routePath: routePath(targetRole),
+    targetRole,
+    routeContentHash: `route-${proposal.revision}`,
+    messageId
+  });
+  await service.confirmDispatch(context, messageId);
+}
+
+async function writeArchitectureDiagnosis(
+  fs: FileSystemAdapter,
+  context: WorkflowControlContext,
+  assessment: string
+): Promise<void> {
+  await writeFinalArtifact(
+    fs,
+    context,
+    "architecture-diagnosis.md",
+    renderArchitectureDiagnosisTemplate(context.taskSlug),
+    [
+      ["## Architecture Assessment\n\nTBD", `## Architecture Assessment\n\n${assessment}`],
+      ["analysis completed|diagnosis implementation completed|user clarification required", "diagnosis implementation completed"]
+    ]
+  );
+}
+
+async function writeArchitectDebug(
+  fs: FileSystemAdapter,
+  context: WorkflowControlContext,
+  rootCause: string
+): Promise<void> {
+  await writeFinalArtifact(fs, context, "architect-debug.md", renderArchitectDebugTemplate(context.taskSlug), [
+    ["Status: pending|completed", "Status: completed"],
+    ["## Confirmed Root Cause\n\nTBD", `## Confirmed Root Cause\n\n${rootCause}`]
+  ]);
+}
+
+async function writeTestReport(
+  fs: FileSystemAdapter,
+  context: WorkflowControlContext,
+  result: "pass" | "fail"
+): Promise<void> {
+  await writeFinalArtifact(fs, context, "test-report.md", renderTestReportTemplate(context.taskSlug), [
+    ["Test Result: pass|fail|incomplete", `Test Result: ${result}`],
+    ["L3 Required: yes|no", "L3 Required: no"],
+    ["Status: none|repair-required|repaired|production-change-required", "Status: none"]
+  ]);
+}
+
 async function readProgress(fs: FileSystemAdapter, context: WorkflowControlContext): Promise<WorkflowProgressDocument> {
   const progressPath = path.join(context.taskRepoRoot, context.handoffDir, "workflow-progress.md");
   if (!(await fs.pathExists(progressPath))) {
@@ -453,17 +653,25 @@ async function writeFinalArtifact(
 async function writeGateIndex(
   fs: FileSystemAdapter,
   context: WorkflowControlContext,
-  decisions: { architecture?: "approve"; validation?: "approve"; codeDiff?: "approve" },
+  decisions: {
+    architecture?: "approve" | "request_changes";
+    validation?: "approve" | "request_changes";
+    codeDiff?: "approve" | "request_changes";
+    codeDiffSource?: "coder" | "architect-debug" | "architect-diagnosis";
+  },
   updatedAt = "2026-08-06T00:00:00.000Z"
 ): Promise<void> {
-  const record = (gate: string, decision?: "approve", codeDiffSource?: string) => ({
+  const record = (gate: string, decision?: "approve" | "request_changes", codeDiffSource?: string) => ({
     gate,
     required: true,
     status: decision ? "completed" : "pending",
     decision,
+    requestId: decision ? `request-${gate}-${updatedAt}` : undefined,
+    inputHash: decision ? `input-${gate}-${updatedAt}` : undefined,
     codeDiffSource,
     reportPath: `.ai/vcm/gate-reviews/${gate}-review.md`,
     promptPath: `.ai/vcm/gate-reviews/${gate}-prompt.md`,
+    completedAt: decision ? updatedAt : undefined,
     updatedAt
   });
   const gateDir = path.join(context.taskRepoRoot, ".ai/vcm/gate-reviews");
@@ -475,7 +683,7 @@ async function writeGateIndex(
     gates: {
       "architecture-plan": record("architecture-plan", decisions.architecture),
       "validation-adequacy": record("validation-adequacy", decisions.validation),
-      "code-diff": record("code-diff", decisions.codeDiff, decisions.codeDiff ? "coder" : undefined)
+      "code-diff": record("code-diff", decisions.codeDiff, decisions.codeDiff ? decisions.codeDiffSource ?? "coder" : undefined)
     },
     updatedAt
   });
