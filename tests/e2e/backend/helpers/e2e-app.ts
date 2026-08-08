@@ -308,6 +308,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     translationWorkerService,
     architectRestartService,
     roleStallDetector,
+    workflowControlService,
     retrySetTimeout(callback) {
       return globalThis.setTimeout(callback, 0);
     },

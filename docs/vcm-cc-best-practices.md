@@ -50,7 +50,9 @@ docs/CODING_STANDARDS.md
 .claude/agents/vcm-coder-worker.md
 .claude/agents/vcm-architect-scaffold-worker.md
 .claude/skills/vcm-route-message/SKILL.md
+.claude/skills/vcm-ask-user/SKILL.md
 .claude/skills/vcm-task-state/SKILL.md
+.claude/skills/vcm-workflow-review/SKILL.md
 .claude/skills/vcm-final-acceptance/SKILL.md
 .claude/skills/vcm-long-running-validation/SKILL.md
 .claude/skills/vcm-harness-bootstrap/SKILL.md
@@ -62,6 +64,7 @@ docs/CODING_STANDARDS.md
 .ai/tools/generate-module-index
 .ai/tools/generate-public-surface
 .ai/tools/request-gate-review
+.ai/tools/vcm-ask-user
 .ai/tools/update-task-state
 .ai/tools/check-scaffold-ledger
 .ai/tools/request-architect-restart
@@ -254,6 +257,9 @@ Task workflow state is PM-declared recovery context. PM may use
 dispatch. Workflow permission comes from the append-only
 `workflow-progress.md` record and one backend-owned pending approval. Round,
 Turn, Session, and Gate Review state remain separate observed runtime facts.
+User-question waiting is a hard workflow-control state: `vcm-ask-user` records
+the exact question and cancels the pending approval before PM asks it. Only a
+new direct user prompt clears that wait.
 
 ## 6. Task and Worktree Model
 
@@ -520,9 +526,10 @@ workflow approval metadata. The approval is consumed only when the target
 role's matching `UserPromptSubmit` confirms delivery.
 
 If VCM rejects a transition, PM remains in the current turn. A direct user may
-authorize that exact rejected transition through the VCM approval dialog. The
-authorization is bound to one revision, flow, target, evidence, and violated
-rule and can be consumed only once.
+authorize that exact rejected transition. PM first uses `vcm-ask-user`, waits
+for the reply, and then copies the user's exact authorization into the next
+Workflow Progress submission. The authorization is bound to one revision,
+flow, target, evidence, and violated rule and can be consumed only once.
 
 Role-authored workflow Markdown must be submitted through
 `.ai/tools/vcm-artifact`. Roles write candidates outside `.ai/vcm`; VCM checks

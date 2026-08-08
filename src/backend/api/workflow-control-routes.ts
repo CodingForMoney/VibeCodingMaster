@@ -15,6 +15,22 @@ export function registerWorkflowControlRoutes(app: FastifyInstance, deps: Workfl
     const context = await getContext(deps, request.params.taskSlug);
     return deps.workflowControlService.getState(context);
   });
+
+  app.post<{
+    Params: { taskSlug: string };
+    Body: { question?: string };
+  }>("/api/tasks/:taskSlug/ask-user", async (request) => {
+    const context = await getContext(deps, request.params.taskSlug);
+    const question = typeof request.body?.question === "string" ? request.body.question.trim() : "";
+    if (!question) {
+      throw new VcmError({
+        code: "WORKFLOW_USER_QUESTION_REQUIRED",
+        message: "A non-empty user question is required.",
+        statusCode: 400
+      });
+    }
+    return deps.workflowControlService.requestUserInput(context, question);
+  });
 }
 
 async function getContext(deps: WorkflowControlRouteDeps, taskSlug: string) {

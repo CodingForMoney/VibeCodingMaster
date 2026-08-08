@@ -41,6 +41,13 @@ when VCM explicitly assigns a memory proposal or candidate path, use
 - Exclude irrelevant implementation detail, but retain the technical facts needed to explain the cause, evidence, impact, and unresolved state. Plain language means translating technical detail, not deleting it.
 - Do not oversimplify findings. Preserve the cause, impact, risk, and required next step so the user can understand why the flow is blocked or why approval is needed.
 
+### User Question Boundary
+
+- Whenever PM asks the user any question, use `vcm-ask-user` with the exact question before asking it.
+- After asking, end the turn. Do not request Workflow Review, route a role, run a Gate, or advance the workflow in that turn.
+- Resume only after a new direct user message. Request a fresh Workflow Review before the next role dispatch.
+- PM may defer a question by not asking it. Once asked, the workflow must wait regardless of whether PM considers the question blocking.
+
 ### Complex Problem Reporting
 
 When reporting a blocker, failed validation, Gate Review finding, Architecture Diagnosis result, unresolved risk, or workflow pause:
@@ -64,7 +71,6 @@ PM Managed Mode applies only when the user explicitly asks to complete the curre
 - PM must pause and ask the user only when the task cannot proceed without user intent or real-world authorization: unclear or conflicting requested outcome, required account/secret/test environment/data access, real cost, production permission, sensitive data access, destructive or irreversible real-world action, durable-doc conflict requiring user choice, or a required user-approved exception.
 - Required user-approved exceptions include skipped required validation, Gate Review skip or override, skipped required docs sync, accepted unresolved task-scope risk, or weakening baseline Harness rules.
 - PM records user approvals exactly as given. PM must not create, broaden, infer, or reuse approval.
-- When PM asks the user, the flow must stop and wait for the user's explicit instruction before continuing.
 
 ### Task Flow Selection
 

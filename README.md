@@ -190,6 +190,12 @@ restart, but it does not infer transitions or choose the next role. Current
 artifacts, Gate Review state, Round/Turn state, and the role rules remain
 authoritative.
 
+Whenever Project Manager asks the user a question, it first uses
+`vcm-ask-user`. VCM records the wait and cancels any pending role dispatch in
+one state update. Stop Hook then ends the PM turn without route scanning. Only
+a new direct user message clears the wait, and the next role dispatch requires
+a fresh Workflow Review.
+
 Typical flow:
 
 ```text
@@ -329,7 +335,8 @@ strict `workflow-progress.md` transition through `vcm-workflow-review`. VCM
 checks the confirmed dispatch history and current task artifacts, then grants
 one matching route. The target role's `UserPromptSubmit` consumes that approval
 and appends the confirmed transition. A rejected transition can be bypassed
-only by an exact one-time user authorization recorded through the VCM dialog.
+only by the user's exact one-time authorization recorded in the next Workflow
+Progress submission.
 
 If the flow stops, VCM always shows a blocking pause alert. `Pause alert sound`
 only controls the looping sound. Enabling Gateway turns that preference off once;

@@ -21,7 +21,7 @@ describe("createHarnessService", () => {
   it("plans and applies recommended harness files when they are missing", async () => {
     const fs = createMemoryFs();
     const service = createHarnessService({ fs });
-    const expectedHarnessFileCount = 32;
+    const expectedHarnessFileCount = 34;
 
     const status = await service.getHarnessStatus("/repo");
     expect(status.needsApply).toBe(true);
@@ -68,6 +68,8 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.github/pull_request_template.md")).toContain("Final acceptance completed for code-change flow");
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("name: vcm-route-message");
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("## Purpose");
+    expect(await fs.readText("/repo/.claude/skills/vcm-ask-user/SKILL.md")).toContain("Every question pauses the workflow");
+    expect(await fs.readText("/repo/.ai/tools/vcm-ask-user")).toContain("/ask-user");
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("This skill writes a route file");
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("VCM uses project-manager as the routing hub.");
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("Non-PM roles must not route directly to each other.");

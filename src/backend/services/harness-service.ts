@@ -71,6 +71,7 @@ import { renderVcmLongRunningValidationSkillRules } from "../templates/harness/v
 import { renderVcmProposeMemorySkillRules } from "../templates/harness/vcm-propose-memory-skill.js";
 import { renderVcmReportHarnessIssueSkillRules } from "../templates/harness/vcm-report-harness-issue-skill.js";
 import { renderVcmRouteMessageSkillRules } from "../templates/harness/vcm-route-message-skill.js";
+import { renderAskUserTool, renderVcmAskUserSkillRules } from "../templates/harness/vcm-ask-user-skill.js";
 import { renderUpdateTaskStateTool, renderVcmTaskStateSkillRules } from "../templates/harness/vcm-task-state-skill.js";
 import { renderVcmWorkflowReviewSkillRules } from "../templates/harness/vcm-workflow-review-skill.js";
 import { renderCheckScaffoldLedgerTool } from "../templates/harness/check-scaffold-ledger.js";
@@ -290,6 +291,17 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     renderRules: renderVcmRouteMessageSkillRules
   },
   {
+    kind: "skill-vcm-ask-user",
+    path: ".claude/skills/vcm-ask-user/SKILL.md",
+    title: "VCM Ask User Skill",
+    frontmatter: renderSkillFrontmatter(
+      "vcm-ask-user",
+      "Use whenever project-manager asks the user a question and must pause the workflow."
+    ),
+    ownership: "whole-file",
+    renderRules: renderVcmAskUserSkillRules
+  },
+  {
     kind: "skill-vcm-task-state",
     path: ".claude/skills/vcm-task-state/SKILL.md",
     title: "VCM Task State Skill",
@@ -453,6 +465,13 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "Request Gate Review Tool",
     ownership: "raw-file",
     renderRules: renderRequestGateReviewTool
+  },
+  {
+    kind: "tool-vcm-ask-user",
+    path: ".ai/tools/vcm-ask-user",
+    title: "VCM Ask User Tool",
+    ownership: "raw-file",
+    renderRules: renderAskUserTool
   },
   {
     kind: "tool-update-task-state",

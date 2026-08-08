@@ -116,6 +116,196 @@ describe("createClaudeHookService", () => {
     ]);
   });
 
+  it("clears a PM user wait only for a new direct user prompt", async () => {
+    const calls: string[] = [];
+    let awaitingUser: { question: string; requestedAt: string } | null = {
+      question: "Confirm the behavior?",
+      requestedAt: "2026-06-01T00:00:00.000Z"
+    };
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      sessionService: {
+        getRoleSession: boundRoleSession,
+        async recordClaudeHookEvent(_repoRoot, input) {
+          return {
+            ...(await boundRoleSession(_repoRoot, input.taskSlug, input.role)),
+            id: "runtime_project-manager"
+          };
+        }
+      } as SessionService,
+      messageService: {
+        async confirmPromptSubmitted() {
+          return undefined;
+        }
+      } as unknown as MessageService,
+      roundService: {
+        async recordClaudeHookEvent() {
+          return {} as never;
+        }
+      } as RoundService,
+      translationService: {
+        async recordConversationBoundary() {}
+      } as Pick<TranslationService, "recordConversationBoundary">,
+      appSettings: createAppSettingsStub(),
+      workflowControlService: {
+        async getState() {
+          return { awaitingUser } as never;
+        },
+        async resolveUserInput() {
+          calls.push("resolved");
+          awaitingUser = null;
+          return { awaitingUser } as never;
+        }
+      }
+    });
+
+    await service.handleHook({
+      taskSlug: "demo-task",
+      role: "project-manager",
+      event: {
+        hook_event_name: "UserPromptSubmit",
+        session_id: "claude_pm",
+        prompt: "Yes, use the documented behavior."
+      }
+    });
+    expect(calls).toEqual(["resolved"]);
+
+    awaitingUser = {
+      question: "Confirm the behavior?",
+      requestedAt: "2026-06-01T00:01:00.000Z"
+    };
+    await service.handleHook({
+      taskSlug: "demo-task",
+      role: "project-manager",
+      event: {
+        hook_event_name: "UserPromptSubmit",
+        session_id: "claude_pm",
+        prompt: "[VCM MESSAGE]\nid: msg_123\n[/VCM MESSAGE]"
+      }
+    });
+    expect(calls).toEqual(["resolved"]);
+    expect(awaitingUser).not.toBeNull();
+  });
+
+  it("blocks a PM Stop that asks a question without registering the user wait", async () => {
+    const calls: string[] = [];
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      sessionService: {
+        getRoleSession: boundRoleSession,
+        async recordClaudeHookEvent() {
+          calls.push("session");
+          return undefined;
+        }
+      } as unknown as SessionService,
+      messageService: {
+        async scanAndDispatchPendingRouteFiles() {
+          calls.push("scan");
+          return [];
+        }
+      } as unknown as MessageService,
+      roundService: {} as RoundService,
+      translationService: {} as Pick<TranslationService, "recordConversationBoundary">,
+      appSettings: createAppSettingsStub(),
+      workflowControlService: {
+        async getState() {
+          return { awaitingUser: null } as never;
+        },
+        async resolveUserInput() {
+          return {} as never;
+        }
+      }
+    });
+
+    const result = await service.handleStopHook({
+      taskSlug: "demo-task",
+      role: "project-manager",
+      event: {
+        hook_event_name: "Stop",
+        session_id: "claude_pm",
+        last_assistant_message: "Should I continue with option A?"
+      }
+    });
+
+    expect(result.stopDecision).toMatchObject({
+      behavior: "block",
+      reason: expect.stringContaining("vcm-ask-user")
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("ends an awaiting PM turn without settling or dispatching route files", async () => {
+    const calls: string[] = [];
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      sessionService: {
+        getRoleSession: boundRoleSession,
+        async recordClaudeHookEvent(_repoRoot, input) {
+          calls.push("session");
+          return {
+            ...(await boundRoleSession(_repoRoot, input.taskSlug, input.role)),
+            id: "runtime_project-manager",
+            activityStatus: "idle"
+          };
+        }
+      } as SessionService,
+      messageService: {
+        async listPendingRouteFiles() {
+          calls.push("list");
+          return [];
+        },
+        async scanAndDispatchPendingRouteFiles() {
+          calls.push("scan");
+          return [];
+        }
+      } as unknown as MessageService,
+      roundService: {
+        async recordClaudeHookEvent(input) {
+          calls.push(input.settleGuard ? "round:settle" : "round:no-settle");
+          return {} as never;
+        }
+      } as RoundService,
+      translationService: {
+        async recordConversationBoundary() {
+          calls.push("boundary");
+        }
+      } as Pick<TranslationService, "recordConversationBoundary">,
+      appSettings: createAppSettingsStub(),
+      workflowControlService: {
+        async getState() {
+          return {
+            awaitingUser: {
+              question: "Which option should be used?",
+              requestedAt: "2026-06-01T00:00:00.000Z"
+            }
+          } as never;
+        },
+        async resolveUserInput() {
+          return {} as never;
+        }
+      }
+    });
+
+    const result = await service.handleStopHook({
+      taskSlug: "demo-task",
+      role: "project-manager",
+      event: {
+        hook_event_name: "Stop",
+        session_id: "claude_pm",
+        last_assistant_message: "Which option should be used?"
+      }
+    });
+
+    expect(result).toMatchObject({
+      sessionUpdated: true,
+      dispatchedCount: 0
+    });
+    expect(calls).toEqual(["session", "round:no-settle", "boundary"]);
+  });
+
   it("marks Stop activity idle and scans pending route files", async () => {
     const calls: string[] = [];
     let capturedSettleGuard: RoundSettleGuard | undefined;

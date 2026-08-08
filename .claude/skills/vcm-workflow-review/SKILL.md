@@ -50,7 +50,7 @@ If VCM rejects the transition, remain in the current PM turn and choose a legal 
 
 ## User Authorization
 
-Only the user's explicit instruction may authorize a rejected transition. Ask the user directly and wait. After the user authorizes the exact exception, resubmit the unchanged transition with:
+Only the user's explicit instruction may authorize a rejected transition. Use `vcm-ask-user` with the exact authorization question, ask it, and wait. After the user authorizes the exact exception, resubmit the unchanged transition with:
 
 ```text
 Authorization Text: <user's exact authorization>

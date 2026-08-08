@@ -45,6 +45,7 @@ import { renderVcmLongRunningValidationSkillRules } from "../templates/harness/v
 import { renderVcmProposeMemorySkillRules } from "../templates/harness/vcm-propose-memory-skill.js";
 import { renderVcmReportHarnessIssueSkillRules } from "../templates/harness/vcm-report-harness-issue-skill.js";
 import { renderVcmRouteMessageSkillRules } from "../templates/harness/vcm-route-message-skill.js";
+import { renderAskUserTool, renderVcmAskUserSkillRules } from "../templates/harness/vcm-ask-user-skill.js";
 import { renderUpdateTaskStateTool, renderVcmTaskStateSkillRules } from "../templates/harness/vcm-task-state-skill.js";
 import { renderVcmWorkflowReviewSkillRules } from "../templates/harness/vcm-workflow-review-skill.js";
 import { renderCheckScaffoldLedgerTool } from "../templates/harness/check-scaffold-ledger.js";
@@ -376,6 +377,17 @@ const WHOLE_FILES = [
     )
   },
   {
+    path: ".claude/skills/vcm-ask-user/SKILL.md",
+    category: "skill",
+    mode: 0o644,
+    content: renderSkillFile(
+      "VCM Ask User Skill",
+      "vcm-ask-user",
+      "Use whenever project-manager asks the user a question and must pause the workflow.",
+      renderVcmAskUserSkillRules()
+    )
+  },
+  {
     path: ".claude/skills/vcm-task-state/SKILL.md",
     category: "skill",
     mode: 0o644,
@@ -446,6 +458,12 @@ const WHOLE_FILES = [
     category: "runtime-tool",
     mode: 0o755,
     content: renderRequestGateReviewTool()
+  },
+  {
+    path: ".ai/tools/vcm-ask-user",
+    category: "runtime-tool",
+    mode: 0o755,
+    content: renderAskUserTool()
   },
   {
     path: ".ai/tools/update-task-state",
@@ -753,6 +771,7 @@ function fixedDirectories() {
     ".claude/skills/vcm-harness-bootstrap/",
     ".claude/skills/vcm-long-running-validation/",
     ".claude/skills/vcm-route-message/",
+    ".claude/skills/vcm-ask-user/",
     ".claude/skills/vcm-task-state/",
     ".claude/skills/vcm-workflow-review/",
     ".claude/skills/vcm-gate-review/",

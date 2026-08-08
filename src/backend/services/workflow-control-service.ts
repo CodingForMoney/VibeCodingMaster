@@ -46,6 +46,8 @@ export interface WorkflowRouteAuthorizationInput extends WorkflowControlContext 
 
 export interface WorkflowControlService {
   getState(input: WorkflowControlContext): Promise<WorkflowControlState>;
+  requestUserInput(input: WorkflowControlContext, question: string): Promise<WorkflowControlState>;
+  resolveUserInput(input: WorkflowControlContext): Promise<WorkflowControlState>;
   submitProgress(input: WorkflowControlContext, content: string): Promise<WorkflowProgressSubmissionResult>;
   assertRouteAuthorized(input: WorkflowRouteAuthorizationInput): Promise<void>;
   claimDispatch(input: Required<WorkflowRouteAuthorizationInput>): Promise<void>;
@@ -94,6 +96,7 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
     return withLock(statePath(input), async () => {
       const state = await getState(input);
       failOnStateWarnings(state);
+      failWhileAwaitingUser(state);
       if (state.pendingDispatch) {
         throw workflowError(
           "WORKFLOW_DISPATCH_PENDING",
@@ -214,6 +217,7 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
   async function assertRouteAuthorized(input: WorkflowRouteAuthorizationInput): Promise<void> {
     const state = await getState(input);
     failOnStateWarnings(state);
+    failWhileAwaitingUser(state);
     const pending = state.pendingDispatch;
     if (!pending || pending.status !== "pending") {
       throw workflowError(
@@ -281,6 +285,7 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
     await withLock(statePath(input), async () => {
       const state = await getState(input);
       failOnStateWarnings(state);
+      failWhileAwaitingUser(state);
       const pending = state.pendingDispatch;
       if (!pending || pending.status !== "dispatching" || pending.messageId !== messageId) {
         throw workflowError(
@@ -349,12 +354,56 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
 
   return {
     getState,
+    requestUserInput,
+    resolveUserInput,
     submitProgress,
     assertRouteAuthorized,
     claimDispatch,
     releaseDispatch,
     confirmDispatch
   };
+
+  async function requestUserInput(
+    input: WorkflowControlContext,
+    question: string
+  ): Promise<WorkflowControlState> {
+    return withLock(statePath(input), async () => {
+      const state = await getState(input);
+      const normalizedQuestion = question.trim();
+      if (!normalizedQuestion) {
+        throw workflowError(
+          "WORKFLOW_USER_QUESTION_REQUIRED",
+          "A non-empty user question is required."
+        );
+      }
+      const timestamp = now();
+      const next: WorkflowControlState = {
+        ...state,
+        awaitingUser: {
+          question: normalizedQuestion,
+          requestedAt: timestamp
+        },
+        pendingDispatch: null,
+        updatedAt: timestamp
+      };
+      await saveState(input, next);
+      return next;
+    });
+  }
+
+  async function resolveUserInput(input: WorkflowControlContext): Promise<WorkflowControlState> {
+    return withLock(statePath(input), async () => {
+      const state = await getState(input);
+      if (!state.awaitingUser) return state;
+      const next: WorkflowControlState = {
+        ...state,
+        awaitingUser: null,
+        updatedAt: now()
+      };
+      await saveState(input, next);
+      return next;
+    });
+  }
 
   async function saveState(input: WorkflowControlContext, state: WorkflowControlState): Promise<void> {
     await deps.fs.writeJsonAtomic(statePath(input), state);
@@ -1194,12 +1243,22 @@ function normalizeState(value: unknown, taskSlug: string, timestamp: string): Wo
   const flowRun = value.flowRun === undefined || value.flowRun === null
     ? null
     : isFlowRun(value.flowRun) ? value.flowRun : undefined;
-  if (pendingDispatch === undefined || activeDispatch === undefined || flowRun === undefined || userAuthorizations === undefined) {
+  const awaitingUser = value.awaitingUser === undefined || value.awaitingUser === null
+    ? null
+    : isAwaitingUser(value.awaitingUser) ? value.awaitingUser : undefined;
+  if (
+    pendingDispatch === undefined
+    || activeDispatch === undefined
+    || flowRun === undefined
+    || userAuthorizations === undefined
+    || awaitingUser === undefined
+  ) {
     return { ...emptyState(taskSlug, timestamp), warnings: ["Workflow control state has an unsupported shape."] };
   }
   return {
     version: 1,
     taskSlug,
+    awaitingUser,
     pendingDispatch,
     activeDispatch,
     flowRun,
@@ -1213,6 +1272,7 @@ function emptyState(taskSlug: string, timestamp: string): WorkflowControlState {
   return {
     version: 1,
     taskSlug,
+    awaitingUser: null,
     pendingDispatch: null,
     activeDispatch: null,
     flowRun: null,
@@ -1285,12 +1345,26 @@ function failOnStateWarnings(state: WorkflowControlState): void {
   if (state.warnings.length > 0) throw workflowError("WORKFLOW_STATE_INVALID", state.warnings.join(" "));
 }
 
+function failWhileAwaitingUser(state: WorkflowControlState): void {
+  if (!state.awaitingUser) return;
+  throw workflowError(
+    "WORKFLOW_AWAITING_USER",
+    "Project Manager is waiting for the user's answer and cannot advance the workflow.",
+    "Wait for a new direct user message. The previous workflow approval was canceled; request a fresh approval after the answer arrives."
+  );
+}
+
 function progressValidationError(errors: string[]): VcmError {
   return workflowError("WORKFLOW_PROGRESS_INVALID", `Workflow Progress validation failed:\n${errors.map((error) => `- ${error}`).join("\n")}`);
 }
 
 function workflowError(code: string, message: string, hint?: string): VcmError {
-  return new VcmError({ code, message, hint, statusCode: code.includes("PENDING") ? 409 : 422 });
+  return new VcmError({
+    code,
+    message,
+    hint,
+    statusCode: code.includes("PENDING") || code.includes("AWAITING_USER") ? 409 : 422
+  });
 }
 
 async function writeAtomic(fs: FileSystemAdapter, target: string, content: string): Promise<void> {
@@ -1300,6 +1374,13 @@ async function writeAtomic(fs: FileSystemAdapter, target: string, content: strin
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isAwaitingUser(value: unknown): value is WorkflowControlState["awaitingUser"] {
+  return isRecord(value)
+    && typeof value.question === "string"
+    && value.question.trim().length > 0
+    && typeof value.requestedAt === "string";
 }
 
 function isPendingDispatch(value: unknown): value is WorkflowPendingDispatch {

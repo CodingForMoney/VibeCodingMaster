@@ -83,7 +83,8 @@ Notes:
   dispatch, completed-flow restart, same-flow restart, Docs-to-Validation and
   Validation-to-Code switches, nested Debug/Diagnosis replacement and parent
   restoration, service restart during a branch, illegal switches, stale
-  evidence rejection, and one-time route authorization.
+  evidence rejection, one-time route authorization, PM user-question waits,
+  canceled approvals, direct-user unlock, and VCM-message non-unlock.
 - `src/frontend/**` change: L0 + the affected `tests/unit/frontend/**` files; add
   L3 (`npm run e2e`) when changing a core user journey (connect repo, create task,
   start/resume a role session, send a message, translation panel).
@@ -197,6 +198,7 @@ tests/
 | INT-RT-003 | Manual Harness Feedback delivery | Harness Studio + `POST /api/projects/harness/feedback/send` | A user can send one pending report to the active task's Harness Engineer without automatic queue processing | Only a path still present in the pending Inbox is accepted; the exact absolute path is submitted; the report remains pending | L1, on Harness Feedback changes | Covered by service and route unit tests; live PTY coverage remains absent |
 | INT-RT-004 | Task worktree Harness revision freshness | Harness Apply/status + task Session routes | Session freshness uses the same task worktree revision that Harness updates | All seven roles snapshot and compare the worktree revision; a conflicting base revision is ignored; task-scoped auxiliary notifications stay in task Session storage | L2, on Harness or Session changes | Covered by `session-service.test.ts` and `harness-revision.e2e.test.ts` with a real linked worktree and mock Claude runtime |
 | INT-RT-005 | Workflow-role stall warning and explicit recovery | Claude progress hooks + Role Stall Detector + Session Service + Round Service | A missing model/tool completion is visible without automatic flow mutation | A timed-out phase exposes one warning through task workspace state; progress clears it; Ignore suppresses that generation; Recover revalidates the runtime token and active Round, resumes the same Claude Session, and leaves the Round running | L2, on Hook, Session recovery, or runtime warning changes | Covered by `role-stall-detector-service.test.ts` and `runtime-recovery.e2e.test.ts` with mock Claude hooks and PTY; a live provider hang remains environment-dependent |
+| INT-RT-006 | PM question hard pause | `vcm-ask-user` + Workflow Control + Claude Stop/UserPromptSubmit hooks | Every PM question stops routing until the user answers | Registering a question clears pending dispatch in the same state update; Stop performs no route or settle scan; VCM-marked prompts do not unlock; a new direct user prompt clears the wait; the old approval remains canceled | L2, on PM communication, Workflow Control, or Hook change | Covered by workflow-control service/route tests, Claude Hook unit tests, and backend mock-Claude E2E |
 
 ### Backend E2E (implemented: `tests/e2e/backend/`)
 
@@ -205,6 +207,8 @@ services with controlled runtime doubles:
 
 - PM-to-role routing, round completion, retryable failures, and manual
   interruption without retry.
+- PM question hard pause, pending-approval cancellation, direct-user reply
+  unlock, and refusal to dispatch a stale route after the answer.
 - Session ID persistence, restart/close behavior, backend restart recovery, and
   resuming a recovered Claude session.
 - Complete architecture, code, test, Gate Review callback, Final Acceptance,

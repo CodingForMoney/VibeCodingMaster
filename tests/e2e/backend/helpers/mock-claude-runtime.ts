@@ -358,8 +358,8 @@ export class MockClaudePromptContext {
     await this.runtime.dispatchHook(this.entry, eventName, extra);
   }
 
-  async stop(): Promise<void> {
-    await this.runtime.dispatchHook(this.entry, "Stop");
+  async stop(extra: Record<string, unknown> = {}): Promise<void> {
+    await this.runtime.dispatchHook(this.entry, "Stop", extra);
   }
 
   async stopFailure(input: { error: string; errorDetails?: string; retryable?: boolean }): Promise<void> {

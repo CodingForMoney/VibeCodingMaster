@@ -64,6 +64,38 @@ describe("workflow control service", () => {
     expect((await service.getState(context)).pendingDispatch).toBeNull();
   });
 
+  it("atomically pauses for a user question and permanently cancels the pending dispatch", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await service.submitProgress(context, renderWorkflowProgress(initialProposal("architect")));
+
+    const paused = await service.requestUserInput(context, "Which behavior should be authoritative?");
+    expect(paused).toMatchObject({
+      awaitingUser: {
+        question: "Which behavior should be authoritative?"
+      },
+      pendingDispatch: null
+    });
+
+    const restored = createWorkflowControlService({ fs, now: sequenceClock() });
+    await expect(restored.submitProgress(
+      context,
+      renderWorkflowProgress(initialProposal("architect"))
+    )).rejects.toMatchObject({ code: "WORKFLOW_AWAITING_USER" });
+    await expect(restored.assertRouteAuthorized({
+      ...context,
+      routePath: routePath("architect"),
+      targetRole: "architect"
+    })).rejects.toMatchObject({ code: "WORKFLOW_AWAITING_USER" });
+
+    expect((await restored.resolveUserInput(context)).awaitingUser).toBeNull();
+    await expect(restored.assertRouteAuthorized({
+      ...context,
+      routePath: routePath("architect"),
+      targetRole: "architect"
+    })).rejects.toMatchObject({ code: "WORKFLOW_ROUTE_NOT_APPROVED" });
+  });
+
   it("denies skipping directly to Coder and accepts exact direct user authorization once", async () => {
     const { context, fs } = await createContext(roots);
     const service = createWorkflowControlService({ fs, now: sequenceClock(), id: () => "authorization-1" });

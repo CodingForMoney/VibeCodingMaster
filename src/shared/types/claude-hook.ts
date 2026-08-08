@@ -17,6 +17,7 @@ export interface ClaudeHookPayload {
   transcript_path?: string;
   cwd?: string;
   prompt?: string;
+  last_assistant_message?: string;
   [key: string]: unknown;
 }
 

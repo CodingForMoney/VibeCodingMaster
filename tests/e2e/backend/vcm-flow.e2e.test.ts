@@ -117,6 +117,89 @@ describe("backend E2E with mock Claude Code", () => {
     expect(savedProgress).toContain("| 1 | code-change | architect |");
   });
 
+  it("pauses every PM question, cancels old approval, and requires a direct user reply", async () => {
+    const env = await createMockClaudeE2eApp({ workflowControl: true });
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "workflow-user-wait");
+    let architectReceivedRoute = false;
+
+    env.mockRuntime.onPrompt("project-manager", "Ask the user before routing", async (ctx) => {
+      await ctx.userPromptSubmit();
+      const paused = await env.app.inject({
+        method: "POST",
+        url: `/api/tasks/${task.taskSlug}/ask-user`,
+        payload: { question: "Which behavior should be authoritative?" }
+      });
+      expect(paused.statusCode, paused.body).toBe(200);
+      await ctx.writeFile(".ai/vcm/handoffs/messages/project-manager-architect.md", [
+        "---",
+        "type: task",
+        "---",
+        "This stale route must not be dispatched.",
+        ""
+      ].join("\n"));
+      await ctx.stop({ last_assistant_message: "Which behavior should be authoritative?" });
+    });
+    env.mockRuntime.onPrompt("project-manager", "Use the documented behavior", async (ctx) => {
+      await ctx.userPromptSubmit();
+      await ctx.stop({ last_assistant_message: "Acknowledged." });
+    });
+    env.mockRuntime.onPrompt("architect", "This stale route must not be dispatched", async (ctx) => {
+      architectReceivedRoute = true;
+      await ctx.userPromptSubmit();
+      await ctx.stop();
+    });
+
+    const pm = await startRole(env.app, task.taskSlug, "project-manager");
+    await startRole(env.app, task.taskSlug, "architect");
+    const initialProgress = renderWorkflowProgress({
+      taskSlug: task.taskSlug,
+      revision: 1,
+      status: "not-started",
+      history: [],
+      proposal: {
+        requestedFlow: "code-change",
+        targetRole: "architect",
+        evidence: "accepted task"
+      }
+    });
+    const approval = await env.app.inject({
+      method: "POST",
+      url: `/api/tasks/${task.taskSlug}/artifacts/submit`,
+      payload: {
+        kind: "workflow-progress",
+        mode: "final",
+        role: "project-manager",
+        runtimeSessionToken: pm.runtimeSessionToken,
+        content: initialProgress
+      }
+    });
+    expect(approval.statusCode, approval.body).toBe(200);
+
+    const pmSession = env.mockRuntime.getSessionByRole(task.taskSlug, "project-manager");
+    env.mockRuntime.write(pmSession!.id, "Ask the user before routing");
+    await env.mockRuntime.waitForIdle();
+
+    const context = {
+      taskRepoRoot: task.worktreePath,
+      stateRoot: ".ai/vcm",
+      handoffDir: ".ai/vcm/handoffs",
+      taskSlug: task.taskSlug
+    };
+    expect(await env.deps.workflowControlService!.getState(context)).toMatchObject({
+      awaitingUser: { question: "Which behavior should be authoritative?" },
+      pendingDispatch: null
+    });
+    expect(architectReceivedRoute).toBe(false);
+
+    env.mockRuntime.write(pmSession!.id, "Use the documented behavior");
+    await env.mockRuntime.waitForIdle();
+    expect((await env.deps.workflowControlService!.getState(context)).awaitingUser).toBeNull();
+    expect(architectReceivedRoute).toBe(false);
+  });
+
   it("routes a PM turn to Architect and back through real hooks, messages, and round state", async () => {
     const env = await createMockClaudeE2eApp();
     cleanups.push(() => env.close());

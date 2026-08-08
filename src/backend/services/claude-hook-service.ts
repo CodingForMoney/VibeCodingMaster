@@ -28,6 +28,7 @@ import type { TranslationService } from "./translation-service.js";
 import type { TranslationWorkerService } from "./translation-worker-service.js";
 import type { ArchitectRestartService } from "./architect-restart-service.js";
 import type { RoleStallDetectorService } from "./role-stall-detector-service.js";
+import type { WorkflowControlService } from "./workflow-control-service.js";
 
 const MAX_ROLE_RETRY_ATTEMPTS = 20;
 const ROLE_RETRY_BASE_DELAY_MS = 60_000;
@@ -91,6 +92,10 @@ export interface ClaudeHookServiceDeps {
     "recordArchitectStop" | "recordRouteAccepted"
   >;
   roleStallDetector?: Pick<RoleStallDetectorService, "recordHook">;
+  workflowControlService?: Pick<
+    WorkflowControlService,
+    "getState" | "resolveUserInput"
+  >;
 }
 
 export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHookService {
@@ -306,6 +311,18 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     if (memoryResult) {
       return memoryResult;
     }
+    const prompt = stringOrUndefined(input.event.prompt);
+    if (
+      input.role === "project-manager"
+      && prompt
+      && isDirectUserPrompt(prompt)
+      && deps.workflowControlService
+    ) {
+      const workflowState = await deps.workflowControlService.getState(createWorkflowControlContext(context));
+      if (workflowState.awaitingUser) {
+        await deps.workflowControlService.resolveUserInput(createWorkflowControlContext(context));
+      }
+    }
     const session = await deps.sessionService.recordClaudeHookEvent(context.project.repoRoot, {
       taskSlug: context.taskSlug,
       role: input.role,
@@ -360,7 +377,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       handoffDir: context.task.handoffDir,
       taskSlug: context.taskSlug,
       role: input.role,
-      prompt: stringOrUndefined(input.event.prompt)
+      prompt
     });
     if (submitted) {
       await deps.architectRestartService?.recordRouteAccepted(
@@ -399,6 +416,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       return completedHookResult(input, eventName);
     }
     await clearStopFailureRecoveryState(context, input.role);
+    let pmAwaitingUser = false;
 
     if (options.allowBlock && deps.jobGuard) {
       const verdict = await deps.jobGuard.evaluateStop({
@@ -422,12 +440,43 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       }
     }
 
+    if (input.role === "project-manager" && deps.workflowControlService) {
+      const workflowState = await deps.workflowControlService.getState(createWorkflowControlContext(context));
+      if (workflowState.awaitingUser) {
+        pmAwaitingUser = true;
+      } else {
+        const lastAssistantMessage = stringOrUndefined(input.event.last_assistant_message);
+        if (options.allowBlock && lastAssistantMessage && asksUserQuestion(lastAssistantMessage)) {
+          return {
+            ok: true,
+            eventName,
+            taskSlug: context.taskSlug,
+            role: input.role,
+            sessionUpdated: false,
+            dispatchedCount: 0,
+            stopDecision: {
+              behavior: "block",
+              reason: "You asked the user a question without registering the wait. Use vcm-ask-user with the exact question, then ask that question and stop. Do not advance or route the workflow."
+            }
+          };
+        }
+      }
+    }
+
     await deps.roleStallDetector?.recordHook({
       ...createStallContext(context),
       role: input.role as VcmRoleName,
       eventName,
       event: input.event
     });
+
+    if (pmAwaitingUser) {
+      return recordTurnEnd(input, context, eventName, {
+        dispatchRouteFiles: false,
+        notifyGateway: true,
+        settleGuard: false
+      });
+    }
 
     return recordTurnEnd(input, context, eventName, {
       dispatchRouteFiles: !isReviewerRoleName(input.role),
@@ -760,6 +809,17 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       handoffDir: context.task.handoffDir,
       taskSlug: context.taskSlug,
       ...(stoppedRole ? { stoppedRole } : {})
+    };
+  }
+
+  function createWorkflowControlContext(
+    context: Awaited<ReturnType<typeof getHookContext>>
+  ) {
+    return {
+      taskRepoRoot: context.taskRepoRoot,
+      stateRoot: context.config.stateRoot,
+      handoffDir: context.task.handoffDir,
+      taskSlug: context.taskSlug
     };
   }
 
@@ -1249,4 +1309,22 @@ function normalizeDiagnosticString(value: unknown, maxLength: number): string | 
 
 function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function isDirectUserPrompt(prompt: string): boolean {
+  const normalized = prompt.trim();
+  return normalized.length > 0 && !/^\[VCM(?:\s|\])/i.test(normalized);
+}
+
+function asksUserQuestion(message: string): boolean {
+  const withoutCodeBlocks = message.replace(/```[\s\S]*?```/g, "");
+  const lines = withoutCodeBlocks
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return lines.some((line) =>
+    /[?？]["')\]}】”’]*$/.test(line)
+    || /^(?:please\s+(?:answer|choose|confirm|decide|provide|select|tell)|(?:can|could|do|does|is|are|should|will|would)\s+you\b)/i.test(line)
+    || /^(?:请(?:回答|选择|确认|决定|提供|告知)|你(?:是否|能否|要不要|可否)|是否需要你|需要你(?:选择|确认|决定|提供|告知))/.test(line)
+  );
 }

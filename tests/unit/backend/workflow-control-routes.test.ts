@@ -8,6 +8,7 @@ describe("workflow control routes", () => {
     const state = {
       version: 1 as const,
       taskSlug: "task-1",
+      awaitingUser: null,
       pendingDispatch: null,
       activeDispatch: null,
       flowRun: null,
@@ -37,6 +38,15 @@ describe("workflow control routes", () => {
       workflowControlService: {
         async getState() {
           return state;
+        },
+        async requestUserInput(_context, question) {
+          return {
+            ...state,
+            awaitingUser: {
+              question,
+              requestedAt: "2026-08-06T00:01:00.000Z"
+            }
+          };
         }
       } as never
     });
@@ -47,6 +57,18 @@ describe("workflow control routes", () => {
     });
     expect(stateResponse.statusCode, stateResponse.body).toBe(200);
     expect(stateResponse.json()).toEqual(state);
+
+    const questionResponse = await app.inject({
+      method: "POST",
+      url: "/api/tasks/task-1/ask-user",
+      payload: { question: "  Confirm this exception?  " }
+    });
+    expect(questionResponse.statusCode, questionResponse.body).toBe(200);
+    expect(questionResponse.json()).toMatchObject({
+      awaitingUser: {
+        question: "Confirm this exception?"
+      }
+    });
 
     const removedApprovalResponse = await app.inject({
       method: "POST",

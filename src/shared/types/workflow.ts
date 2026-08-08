@@ -104,9 +104,15 @@ export interface WorkflowUserAuthorization {
   consumedAt?: string;
 }
 
+export interface WorkflowAwaitingUser {
+  question: string;
+  requestedAt: string;
+}
+
 export interface WorkflowControlState {
   version: 1;
   taskSlug: string;
+  awaitingUser: WorkflowAwaitingUser | null;
   pendingDispatch: WorkflowPendingDispatch | null;
   activeDispatch: WorkflowDispatchEvidenceBaseline | null;
   flowRun: WorkflowFlowRun | null;

@@ -481,7 +481,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     jobGuard: createJobGuardService(),
     translationWorkerService,
     architectRestartService,
-    roleStallDetector
+    roleStallDetector,
+    workflowControlService
   });
   const runtimeCoordinator = createRuntimeCoordinatorService({
     appSettings,

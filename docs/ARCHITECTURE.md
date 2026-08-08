@@ -285,6 +285,15 @@ switched flows from older history. Completion requires evidence produced after
 the current role dispatch; an active branch cannot consume parent Final
 Acceptance or complete independently.
 
+User-question waiting is owned by the same workflow-control record. The
+`vcm-ask-user` tool writes the exact question and clears `pendingDispatch` in
+one locked state update. While `awaitingUser` exists, Workflow Progress
+submission and route authorization fail closed. PM Stop processing records the
+turn end without route dispatch or Round settle scanning. A PM
+`UserPromptSubmit` clears the wait only when its prompt is a direct user message
+without a VCM marker; internal role messages and callbacks cannot unlock it.
+The canceled approval is never restored.
+
 ## Auto Memory Ownership
 
 Harness Engineer owns the reviewed content of shared memory in the root
@@ -496,9 +505,9 @@ Gate Review, final acceptance, session launch, or task close.
 This state is recovery and display context only. Dispatch authorization is
 owned separately by `workflow-control-service`, the managed
 `workflow-progress.md` history, and `.ai/vcm/workflow-control.json`. The latter
-stores the pending one-time dispatch and user override decisions in the active
-task worktree. The frontend reads this state from the aggregated project
-runtime endpoint and only submits explicit user approve or reject actions.
+stores the pending one-time dispatch, hard user-question wait, and exact user
+override evidence in the active task worktree. The frontend only renders this
+backend-owned state.
 
 ## Task Close Ownership
 
