@@ -96,8 +96,8 @@ describe("createHarnessService", () => {
     expect(codeNavigationSkill).toContain("record that limitation and leave the relationship unresolved");
     expect(codeNavigationSkill).toContain("If `LSP` is unavailable, report a VCM LSP configuration failure");
     expect(codeNavigationSkill).not.toContain("ToolSearch");
-    expect(codeNavigationSkill).toContain("Start each navigation run with LSP `documentSymbol`");
-    expect(codeNavigationSkill).toContain("retry the same bounded workspace query at most two more times");
+    expect(codeNavigationSkill).not.toContain("documentSymbol");
+    expect(codeNavigationSkill).toContain("Retry the same bounded workspace query at most two more times");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain("name: vcm-report-harness-issue");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain(".ai/vcm/harness-feedback/pending/");
     const proposeMemorySkill = await fs.readText("/repo/.claude/skills/vcm-propose-memory/SKILL.md");
@@ -200,8 +200,8 @@ describe("createHarnessService", () => {
     const diagnosisReviewerAgent = await fs.readText("/repo/.claude/agents/reviewer.md");
     expect(frontmatterOf(diagnosisReviewerAgent)).toContain(`disallowedTools: ${REVIEWER_DISALLOWED_TOOLS.join(", ")}`);
     expect(frontmatterOf(diagnosisReviewerAgent)).not.toMatch(/^tools:/m);
-    expect(diagnosisReviewerAgent).toContain("Follow the preloaded `vcm-code-navigation` skill");
-    expect(frontmatterOf(diagnosisReviewerAgent)).toContain("skills:\n  - vcm-code-navigation");
+    expect(diagnosisReviewerAgent).toContain("## Code Inspection");
+    expect(frontmatterOf(diagnosisReviewerAgent)).not.toContain("vcm-code-navigation");
     expect(diagnosisReviewerAgent).toContain("verify that the commits implement the diagnosed");
     expect(diagnosisReviewerAgent).toContain("local workaround for the surface failure");
     expect(diagnosisReviewerAgent).toContain("Independently apply the Tester L3 trigger rules");
@@ -215,7 +215,8 @@ describe("createHarnessService", () => {
     const coderAgent = await fs.readText("/repo/.claude/agents/coder.md");
     expect(frontmatterOf(coderAgent)).toContain(`disallowedTools: ${CODE_ROLE_DISALLOWED_TOOLS.join(", ")}`);
     expect(frontmatterOf(coderAgent)).not.toMatch(/^tools:/m);
-    expect(frontmatterOf(coderAgent)).toContain("skills:\n  - vcm-code-navigation");
+    expect(frontmatterOf(coderAgent)).not.toContain("vcm-code-navigation");
+    expect(coderAgent).toContain("### Code Navigation");
     expect(coderAgent).toContain("Implement assigned file/function-level scaffold items");
     expect(coderAgent).toContain("read and follow `docs/CODING_STANDARDS.md`");
     expect(await fs.readText("/repo/docs/CODING_STANDARDS.md")).toContain("Unit test coverage is required for every changed callable unit");
@@ -441,6 +442,28 @@ describe("createHarnessService", () => {
     expect(frontmatterOf(updated)).not.toMatch(/^tools:/m);
     expect(frontmatterOf(updated)).toContain("skills:\n  - vcm-code-navigation");
     expect(frontmatterOf(updated)).toContain("model: custom-model");
+  });
+
+  it("removes the Architect-only navigation skill from Coder and Reviewer frontmatter", async () => {
+    const fs = createMemoryFs();
+    const service = createHarnessService({ fs });
+    await service.applyHarness("/repo");
+
+    for (const role of ["coder", "reviewer"]) {
+      const agentPath = `/repo/.claude/agents/${role}.md`;
+      const current = await fs.readText(agentPath);
+      await fs.writeText(
+        agentPath,
+        current.replace("\n---\n", "\nskills:\n  - custom-project-skill\n  - vcm-code-navigation\n---\n")
+      );
+    }
+
+    await service.applyHarness("/repo");
+    for (const role of ["coder", "reviewer"]) {
+      const updated = await fs.readText(`/repo/.claude/agents/${role}.md`);
+      expect(frontmatterOf(updated)).toContain("skills:\n  - custom-project-skill");
+      expect(frontmatterOf(updated)).not.toContain("vcm-code-navigation");
+    }
   });
 
   it("restores Skill access for roles that invoke VCM skills", async () => {

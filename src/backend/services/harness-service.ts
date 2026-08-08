@@ -164,6 +164,7 @@ interface HarnessFileDefinition {
   requiredTools?: string[];
   requiredDisallowedTools?: string[];
   requiredSkills?: string[];
+  removedSkills?: string[];
   defaultContentAfterBlock?: string;
   legacyWholeFile?: string;
   renderRules(): string;
@@ -265,7 +266,7 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "VCM Code Navigation Skill",
     frontmatter: renderSkillFrontmatter(
       "vcm-code-navigation",
-      "Use when Architect, Coder, or Reviewer must resolve code symbols, references, implementations, call hierarchies, or bounded dependency paths."
+      "Use when Architect must resolve code symbols, references, implementations, call hierarchies, or bounded dependency paths."
     ),
     ownership: "whole-file",
     renderRules: renderVcmCodeNavigationSkillRules
@@ -386,11 +387,11 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "Reviewer Agent",
     memoryBlock: true,
     requiredDisallowedTools: REVIEWER_DISALLOWED_TOOLS,
-    requiredSkills: ["vcm-code-navigation"],
+    removedSkills: ["vcm-code-navigation"],
     frontmatter: renderAgentFrontmatter(
       "reviewer",
       "VCM independent gate review role for architecture plans, validation adequacy, and code diffs.",
-      { disallowedTools: REVIEWER_DISALLOWED_TOOLS.join(", "), skills: ["vcm-code-navigation"] }
+      { disallowedTools: REVIEWER_DISALLOWED_TOOLS.join(", ") }
     ),
     renderRules: renderReviewerAgentRules
   },
@@ -501,11 +502,11 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "Coder Agent",
     memoryBlock: true,
     requiredDisallowedTools: CODE_ROLE_DISALLOWED_TOOLS,
-    requiredSkills: ["vcm-code-navigation"],
+    removedSkills: ["vcm-code-navigation"],
     frontmatter: renderAgentFrontmatter(
       "coder",
       "VCM implementation role for scoped code changes and focused tests.",
-      { disallowedTools: CODE_ROLE_DISALLOWED_TOOLS.join(", "), skills: ["vcm-code-navigation"] }
+      { disallowedTools: CODE_ROLE_DISALLOWED_TOOLS.join(", ") }
     ),
     renderRules: renderCoderHarnessRules
   },
@@ -1860,7 +1861,8 @@ function normalizeAgentFrontmatter(content: string, definition: HarnessFileDefin
     allowedToolsUpdated,
     definition.requiredDisallowedTools
   );
-  return (definition.requiredSkills ?? []).reduce(ensureAgentSkill, disallowedToolsUpdated);
+  const skillsUpdated = (definition.requiredSkills ?? []).reduce(ensureAgentSkill, disallowedToolsUpdated);
+  return (definition.removedSkills ?? []).reduce(removeAgentSkill, skillsUpdated);
 }
 
 function ensureAgentSkill(content: string, requiredSkill: string): string {
@@ -1888,6 +1890,34 @@ function ensureAgentSkill(content: string, requiredSkill: string): string {
 
   const nextSkills = `${skillsMatch[0].trimEnd()}\n  - ${requiredSkill}`;
   return content.replace(frontmatter, frontmatter.replace(skillsMatch[0], nextSkills));
+}
+
+function removeAgentSkill(content: string, removedSkill: string): string {
+  const frontmatterMatch = content.match(/^---\r?\n[\s\S]*?\r?\n---/);
+  if (!frontmatterMatch) {
+    return content;
+  }
+
+  const frontmatter = frontmatterMatch[0];
+  const skillsMatch = frontmatter.match(/^skills:[ \t]*(?:\r?\n((?:\s+-\s+[^\r\n]+\r?\n?)*))?/m);
+  if (!skillsMatch) {
+    return content;
+  }
+
+  const listedSkills = (skillsMatch[1] ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.match(/^\s+-\s+(.+)$/)?.[1]?.trim())
+    .filter((skill): skill is string => Boolean(skill));
+  const remainingSkills = listedSkills.filter((skill) => skill !== removedSkill);
+  if (remainingSkills.length === listedSkills.length) {
+    return content;
+  }
+
+  const lineEnding = skillsMatch[0].includes("\r\n") ? "\r\n" : "\n";
+  const replacement = remainingSkills.length > 0
+    ? `skills:${lineEnding}${remainingSkills.map((skill) => `  - ${skill}`).join(lineEnding)}${lineEnding}`
+    : "";
+  return content.replace(frontmatter, frontmatter.replace(skillsMatch[0], replacement));
 }
 
 function migrateLegacyHarnessFile(

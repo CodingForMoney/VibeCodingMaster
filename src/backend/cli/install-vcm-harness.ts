@@ -96,8 +96,7 @@ const AGENT_FRONTMATTER = {
   },
   coder: {
     description: "VCM implementation role for scoped code changes and focused tests.",
-    disallowedTools: CODE_ROLE_DISALLOWED_TOOLS.join(", "),
-    skills: ["vcm-code-navigation"]
+    disallowedTools: CODE_ROLE_DISALLOWED_TOOLS.join(", ")
   },
   tester: {
     description: "VCM testing role for validation, test adequacy, approved-scope validation, and risk findings.",
@@ -105,8 +104,7 @@ const AGENT_FRONTMATTER = {
   },
   reviewer: {
     description: "VCM independent gate review role for architecture plans, validation adequacy, and code diffs.",
-    disallowedTools: REVIEWER_DISALLOWED_TOOLS.join(", "),
-    skills: ["vcm-code-navigation"]
+    disallowedTools: REVIEWER_DISALLOWED_TOOLS.join(", ")
   },
   translator: {
     description: "VCM task-scoped translation tool role for conversation translation, file translation, bootstrap, and memory updates."
@@ -137,7 +135,9 @@ const REQUIRED_AGENT_TOOLS = {
   "harness-engineer": ["Skill"]
 };
 const REQUIRED_AGENT_SKILLS = {
-  architect: ["vcm-code-navigation"],
+  architect: ["vcm-code-navigation"]
+};
+const REMOVED_AGENT_SKILLS = {
   coder: ["vcm-code-navigation"],
   reviewer: ["vcm-code-navigation"]
 };
@@ -320,7 +320,7 @@ const WHOLE_FILES = [
     content: renderSkillFile(
       "VCM Code Navigation Skill",
       "vcm-code-navigation",
-      "Use when Architect, Coder, or Reviewer must resolve code symbols, references, implementations, call hierarchies, or bounded dependency paths.",
+      "Use when Architect must resolve code symbols, references, implementations, call hierarchies, or bounded dependency paths.",
       renderVcmCodeNavigationSkillRules()
     )
   },
@@ -826,6 +826,9 @@ async function installManagedFile({ projectRoot, definition, dryRun, operations 
   for (const requiredSkill of REQUIRED_AGENT_SKILLS[definition.agentName] ?? []) {
     nextContent = ensureAgentSkill(nextContent, requiredSkill);
   }
+  for (const removedSkill of REMOVED_AGENT_SKILLS[definition.agentName] ?? []) {
+    nextContent = removeAgentSkill(nextContent, removedSkill);
+  }
 
   await writeIfChanged({
     targetPath,
@@ -963,6 +966,34 @@ function ensureAgentSkill(content, requiredSkill) {
 
   const nextSkills = `${skillsMatch[0].trimEnd()}\n  - ${requiredSkill}`;
   return content.replace(frontmatter, frontmatter.replace(skillsMatch[0], nextSkills));
+}
+
+function removeAgentSkill(content, removedSkill) {
+  const frontmatterMatch = content.match(/^---\r?\n[\s\S]*?\r?\n---/);
+  if (!frontmatterMatch) {
+    return content;
+  }
+
+  const frontmatter = frontmatterMatch[0];
+  const skillsMatch = frontmatter.match(/^skills:[ \t]*(?:\r?\n((?:\s+-\s+[^\r\n]+\r?\n?)*))?/m);
+  if (!skillsMatch) {
+    return content;
+  }
+
+  const listedSkills = (skillsMatch[1] ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.match(/^\s+-\s+(.+)$/)?.[1]?.trim())
+    .filter(Boolean);
+  const remainingSkills = listedSkills.filter((skill) => skill !== removedSkill);
+  if (remainingSkills.length === listedSkills.length) {
+    return content;
+  }
+
+  const lineEnding = skillsMatch[0].includes("\r\n") ? "\r\n" : "\n";
+  const replacement = remainingSkills.length > 0
+    ? `skills:${lineEnding}${remainingSkills.map((skill) => `  - ${skill}`).join(lineEnding)}${lineEnding}`
+    : "";
+  return content.replace(frontmatter, frontmatter.replace(skillsMatch[0], replacement));
 }
 
 function migrateLegacyManagedFile(definition, currentContent, block) {

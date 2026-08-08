@@ -188,15 +188,16 @@ languages and conventions, and subsequent VCM updates preserve them:
 Regenerate both after changing module layout, public exports, or HTTP routes.
 
 VCM ships the local `vcm-lsp-bridge` Claude Code plugin. Session Service passes
-it through `--plugin-dir` and enables the LSP tool for Architect, Coder, and
-Reviewer sessions on both native Claude and CCR launches. Auxiliary roles do not
-load the plugin. Architect, Coder, and Reviewer preload the
-`vcm-code-navigation` skill through Agent frontmatter.
+it through `--plugin-dir` and enables the LSP tool only for Architect sessions
+on both native Claude and CCR launches. Other roles do not load the plugin.
+Architect preloads the `vcm-code-navigation` skill through Agent frontmatter.
 
-Architect, Coder, and Reviewer use LSP semantic navigation for definitions,
-references, implementations, and call relationships, then Read the resolved
-code. Unresolved project-owned relationships remain unresolved. The shared
-PreToolUse guard supervises Bash execution but does not prohibit text search.
+Architect uses LSP semantic navigation for definitions, references,
+implementations, and call relationships, then Read the resolved code. Unresolved
+project-owned relationships remain unresolved. Coder and Reviewer use generated
+context, Glob, Grep, and complete source reads without starting separate language
+servers. The shared PreToolUse guard supervises Bash execution but does not
+prohibit text search.
 
 `code-intelligence-service` derives project languages from the active task
 worktree's root manifests and `module-index.json`. It validates the bundled
@@ -204,9 +205,9 @@ plugin declaration, resolves the matching language-server executable from the
 backend `PATH`, and runs a bounded version probe. Probe results are cached for
 the backend process; detection does not start a persistent language server or
 scan the repository recursively. A successful probe means the server is
-runnable, not that a role workspace is indexed or semantically ready. Each role
-Session performs a file-symbol warm-up and bounded workspace-query retry through
-`vcm-code-navigation`. Harness Studio renders server availability and the exact
+runnable, not that a role workspace is indexed or semantically ready. Architect
+uses bounded workspace-query retries through `vcm-code-navigation`; the skill
+does not issue an unconditional warm-up query. Harness Studio renders server availability and the exact
 backend diagnostic. The project runtime, not VCM, owns installation of
 `rust-analyzer`, `typescript-language-server`, `pyright-langserver`, `gopls`,
 `clangd`, or `jdtls`.

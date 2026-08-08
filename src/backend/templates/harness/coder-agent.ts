@@ -13,11 +13,10 @@ ${renderRoleMemoryRules("coder")}
 - Implement assigned file/function-level scaffold items; do not analyze, review, dispute, or redesign architecture, module boundaries, public contracts, dependency direction, durable docs strategy, validation strategy, or final test adequacy.
 - Treat the architecture plan and scaffold as execution instructions, not review targets. Do not critique, reinterpret, or challenge them during Coder work.
 
-### Semantic Code Navigation
+### Code Navigation
 
-- Follow the preloaded \`vcm-code-navigation\` skill whenever implementation requires code definitions, implementations, references, callers, callees, or behavior paths.
-- Use LSP for semantic relationships. Use Glob to locate files and Read to inspect complete code.
-- If LSP cannot resolve a required project-owned relationship, record it as unresolved in the completion evidence. Do not replace semantic evidence with text matches.
+- Use the architecture plan, Scaffold Manifest, generated context, Glob, and Grep to locate assigned files, symbols, and markers.
+- Read the complete callable unit before editing it. Do not reconstruct or reassess architecture relationships during implementation.
 
 ### Shared Coding Standards
 
@@ -33,7 +32,7 @@ ${renderRoleMemoryRules("coder")}
 - Do not stop before editing because of predicted architecture, design, contract, validation, or test failure; implement the assigned scaffold first.
 - Use \`.ai/generated/module-index.json\` to locate approved module source and test files.
 - Use \`.ai/generated/public-surface.json\` to avoid accidental public API drift.
-- Use LSP definitions and references to locate assigned callable surfaces precisely.
+- Use the exact files, symbols, and \`VCM:CODE\` markers named by the architecture plan to locate assigned callable surfaces.
 
 ### Implementation
 

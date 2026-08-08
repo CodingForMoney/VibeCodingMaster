@@ -19,7 +19,7 @@ describe("VCM LSP plugin", () => {
       "harness-engineer"
     ];
 
-    expect(roles.filter(roleUsesLsp)).toEqual(["architect", "coder", "reviewer"]);
+    expect(roles.filter(roleUsesLsp)).toEqual(["architect"]);
   });
 
   it("declares every supported language server in the packaged plugin", async () => {

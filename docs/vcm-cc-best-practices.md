@@ -709,20 +709,21 @@ before `.ai/generated/*` is considered reliable.
 Generated artifacts are derived context. Regenerate them after relevant source,
 manifest, module, or public API changes. Do not hand-edit them as durable truth.
 
-For code reading, generated context locates the boundary; it does not replace
-semantic navigation or source inspection. VCM loads its bundled LSP bridge for
-Architect, Coder, and Reviewer; the project runtime must provide the matching
-language-server executable. Their Agent definitions preload
-`vcm-code-navigation`. The skill
-warms the role Session with a file-symbol request before using definitions,
-implementations, references, and call hierarchy, then requires every resolved
-callable unit to be read in full. A successful executable probe alone is not
-workspace readiness. Startup or indexing time does not permit replacing a
-required semantic query with text matching. Use generated context, architecture documents, and runtime
-evidence for boundaries LSP does not model. If LSP cannot resolve a required
-project-owned relationship after the bounded retry, keep it unresolved. Expand
-one dependency hop at a time instead of injecting an unrestricted repository
-graph.
+For Architect code reading, generated context locates the boundary; it does not
+replace semantic navigation or source inspection. VCM loads its bundled LSP
+bridge only for Architect, and the project runtime must provide the matching
+language-server executable. The Architect definition preloads
+`vcm-code-navigation`. The skill uses definitions, implementations, references,
+and call hierarchy when those semantic relationships are required, then requires
+every resolved callable unit to be read in full. It does not run an unconditional
+file-symbol warm-up. A successful executable probe alone is not workspace
+readiness. Startup or indexing time does not permit replacing a required semantic
+query with text matching. Use generated context, architecture documents, and
+runtime evidence for boundaries LSP does not model. If LSP cannot resolve a
+required project-owned relationship after the bounded retry, keep it unresolved.
+Expand one dependency hop at a time instead of injecting an unrestricted
+repository graph. Coder and Reviewer use generated context, Glob, Grep, and full
+source reads without loading separate language servers.
 
 ## 15. Harness Bootstrap and Feedback
 

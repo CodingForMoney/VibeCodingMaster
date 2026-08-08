@@ -82,10 +82,8 @@ describe("createSessionService", () => {
     const service = createTestSessionService(fs, runtimeInputs);
 
     await service.startRoleSession("/repo", "demo-task", "coder");
-    expect(runtimeInputs[0]?.env).toMatchObject({
-      ENABLE_LSP_TOOL: "true",
-      ENABLE_TOOL_SEARCH: "false"
-    });
+    expect(runtimeInputs[0]?.env?.ENABLE_LSP_TOOL).toBeUndefined();
+    expect(runtimeInputs[0]?.env?.ENABLE_TOOL_SEARCH).toBeUndefined();
     const stopped = await recordCurrentRoleHook(service, {
       taskSlug: "demo-task",
       role: "coder",
@@ -159,7 +157,6 @@ describe("createSessionService", () => {
 
     expect(started.model).toBe("claude-opus-4-8");
     expect(runtimeInputs[0]?.args).toEqual([
-      ...LSP_PLUGIN_ARGS,
       "--agent",
       "coder",
       "--model",
@@ -210,7 +207,6 @@ describe("createSessionService", () => {
     expect(runtimeInputs[0]?.command).toBe("claude");
     expect(runtimeInputs[0]?.cwd).toBe(TASK_WORKTREE);
     expect(runtimeInputs[0]?.args).toEqual([
-      ...LSP_PLUGIN_ARGS,
       "--agent",
       "reviewer",
       "--model",
@@ -264,7 +260,6 @@ describe("createSessionService", () => {
     expect(nextTask.taskSlug).toBe("another-task");
     expect(secondRuntimeInputs[0]?.cwd).toBe("/repo/.claude/worktrees/another-task");
     expect(secondRuntimeInputs[0]?.args).toEqual([
-      ...LSP_PLUGIN_ARGS,
       "--agent",
       "reviewer",
       "--model",
@@ -1134,7 +1129,6 @@ describe("createSessionService", () => {
     expect(restarted.claudeSessionId).toBe("");
     expect(restarted.transcriptPath).toBeUndefined();
     expect(secondRuntimeInputs[0]?.args).toEqual([
-      ...LSP_PLUGIN_ARGS,
       "--agent",
       "coder",
       "--model",
@@ -1204,7 +1198,6 @@ describe("createSessionService", () => {
 
     await service.resumeRoleSession("/repo", "demo-task", "coder");
     expect(runtimeInputs[0]?.args).toEqual([
-      ...LSP_PLUGIN_ARGS,
       "--agent",
       "coder",
       "--resume",

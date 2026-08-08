@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createClaudeAdapter } from "../../../src/backend/adapters/claude-adapter.js";
-import {
-  CODE_ROLE_RUNTIME_DISALLOWED_TOOLS,
-  REVIEWER_RUNTIME_DISALLOWED_TOOLS
-} from "../../../src/backend/role-tool-policy.js";
+import { CODE_ROLE_RUNTIME_DISALLOWED_TOOLS } from "../../../src/backend/role-tool-policy.js";
 
 describe("createClaudeAdapter", () => {
   const adapter = createClaudeAdapter({
@@ -294,8 +291,7 @@ describe("createClaudeAdapter", () => {
     });
   });
 
-  it("preserves the Reviewer no-edit boundary while exposing dynamic LSP tools", () => {
-    expect(REVIEWER_RUNTIME_DISALLOWED_TOOLS).not.toContain("Skill");
+  it("does not expose LSP runtime tools to Reviewer", () => {
     const command = adapter.buildRoleStartCommand(
       "reviewer",
       "claude",
@@ -309,10 +305,7 @@ describe("createClaudeAdapter", () => {
       ["/opt/vcm/plugins/vcm-lsp-bridge"]
     );
 
-    expect(command.args).toEqual(expect.arrayContaining([
-      "--disallowedTools",
-      REVIEWER_RUNTIME_DISALLOWED_TOOLS.join(",")
-    ]));
-    expect(command.args).not.toContain("--allowedTools");
+    expect(command.args).toEqual(expect.arrayContaining(["--allowedTools", "Glob,Grep"]));
+    expect(command.args).not.toContain("--disallowedTools");
   });
 });

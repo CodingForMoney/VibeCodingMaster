@@ -52,7 +52,7 @@ export const REVIEWER_RUNTIME_DISALLOWED_TOOLS = [
   ...NON_VCM_ROLE_RUNTIME_TOOLS
 ];
 
-const LSP_ROLE_NAMES = new Set<RoleName>(["architect", "coder", "reviewer"]);
+const LSP_ROLE_NAMES = new Set<RoleName>(["architect"]);
 
 export function roleUsesLsp(role: RoleName): boolean {
   return LSP_ROLE_NAMES.has(role);
