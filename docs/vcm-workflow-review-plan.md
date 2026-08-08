@@ -44,10 +44,9 @@ Requested Flow: none|code-change|architect-debug|architecture-diagnosis|docs-onl
 Target Role: none|architect|coder|tester
 Evidence: <real artifact or accepted user request>
 
-## User Override
+## User Authorization
 
-Authorization ID: none
-Authorization Quote: none
+Authorization Text: none
 Violated Rule: none
 ```
 
@@ -70,7 +69,7 @@ The pending approval is stored in task runtime state at:
 ```
 
 It is bound to the accepted Workflow Progress revision and history hash, exact
-target role, expected PM route path, effective flow, and optional user override.
+target role, expected PM route path, effective flow, and optional user authorization.
 
 `vcm-route-message` contains only the role message. It carries no workflow
 approval metadata. Both artifact submission and automatic route dispatch check
@@ -95,19 +94,18 @@ A different target, stale Workflow Progress, missing approval, or second route
 is rejected. Reports from Architect, Coder, Tester, and Reviewer to Project
 Manager do not require approval.
 
-## User Override
+## User Authorization
 
-An illegal transition can proceed only after direct user authorization in VCM:
+An illegal transition can proceed only after direct user authorization:
 
-1. Project Manager resubmits the exact rejected transition with `Authorization
-   ID: request`, a proposed authorization quote, and the exact rejection rule.
-2. VCM stores the request and shows a blocking approval dialog.
-3. VCM records the user's approve or reject decision directly.
-4. After approval, Project Manager resubmits the same transition with the
-   returned authorization ID and exact authorization text.
-5. The resulting approval is consumed by one matching dispatch.
+1. The role whose action is rejected asks the user directly and waits.
+2. For a rejected workflow transition, Project Manager resubmits the unchanged
+   transition with the user's exact authorization text and exact rejection rule.
+3. VCM records the authorization only when both fields match the rejected
+   transition.
+4. The authorization is consumed by one matching dispatch.
 
-An override is bound to one task, base revision, history hash, flow, target,
+An authorization is bound to one task, submitting role, operation, base revision, history hash, flow, target,
 evidence, violated rule, and exact authorization text. It bypasses only the
 workflow transition rule; it does not bypass role ownership, routing,
 filesystem, artifact, Gate, or runtime safety rules.

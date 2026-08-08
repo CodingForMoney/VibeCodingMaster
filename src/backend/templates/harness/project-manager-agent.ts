@@ -301,7 +301,7 @@ Communication-Only Flow does not run Gate Review, validation, docs sync, Final A
 
 ### Dispatch
 
-- Use \`vcm-workflow-review\` before every dispatch to Architect, Coder, or Tester. Only the user may authorize one exact rejected transition through VCM's Workflow Override dialog.
+- Use \`vcm-workflow-review\` before every dispatch to Architect, Coder, or Tester. If VCM rejects a transition, only the user's exact authorization may permit that one transition.
 - Use the \`vcm-route-message\` skill for every role dispatch, question, result, blocker, or finding.
 - Formal route messages contain PM-owned routing context only.
 - PM dispatch messages must include: target role, accepted task scope, current task repo root and branch, reason for this route, source artifact or evidence, required output artifact, next gate, stop conditions, and user constraints.

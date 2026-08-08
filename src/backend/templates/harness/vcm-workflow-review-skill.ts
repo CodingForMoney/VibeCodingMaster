@@ -24,10 +24,9 @@ Requested Flow: <none|code-change|architect-debug|architecture-diagnosis|docs-on
 Target Role: <architect|coder|tester>
 Evidence: <current artifact, Gate result, or user request supporting this dispatch>
 
-## User Override
+## User Authorization
 
-Authorization ID: none
-Authorization Quote: none
+Authorization Text: none
 Violated Rule: none
 \`\`\`
 
@@ -43,20 +42,19 @@ An accepted submission grants exactly one matching PM route. Then use \`vcm-rout
 
 If VCM rejects the transition, remain in the current PM turn and choose a legal dispatch. Do not write the route file first.
 
-## User Override
+## User Authorization
 
-Only direct user authorization may override a rejected transition. To request confirmation, resubmit the same transition with:
+Only the user's explicit instruction may authorize a rejected transition. Ask the user directly and wait. After the user authorizes the exact exception, resubmit the unchanged transition with:
 
 \`\`\`text
-Authorization ID: request
-Authorization Quote: <exact proposed exception for the user>
+Authorization Text: <user's exact authorization>
 Violated Rule: <copy the exact VCM rejection reason>
 \`\`\`
 
-Wait for VCM's user decision callback. If approved, resubmit the unchanged transition with the returned Authorization ID, exact Authorization Text, and the same Violated Rule. The approval applies once and only to that exact transition.
+VCM binds that authorization to this exact task state, flow, target role, evidence, and violated rule. It applies once and is consumed by the matching dispatch. Do not infer, broaden, or reuse authorization.
 
 ## Completion
 
-When the active flow has completed without another role dispatch, increment Revision, copy the confirmed history exactly, set \`Status: completed\`, and set every Proposed Dispatch and User Override value to \`none\`. VCM accepts completion only when the flow's required final artifact and Gate evidence exists.
+When the active flow has completed without another role dispatch, increment Revision, copy the confirmed history exactly, set \`Status: completed\`, and set every Proposed Dispatch and User Authorization value to \`none\`. VCM accepts completion only when the flow's required final artifact and Gate evidence exists.
 `;
 }

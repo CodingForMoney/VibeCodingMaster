@@ -32,7 +32,7 @@ describe("workflow control service", () => {
 
   it("approves one legal initial dispatch and confirms it into the durable history", async () => {
     const { context, fs } = await createContext(roots);
-    const service = createWorkflowControlService({ fs, now: sequenceClock(), id: () => "override-1" });
+    const service = createWorkflowControlService({ fs, now: sequenceClock(), id: () => "authorization-1" });
     await service.submitProgress(context, renderWorkflowProgress(initialProposal("architect")));
 
     await service.assertRouteAuthorized({
@@ -64,9 +64,9 @@ describe("workflow control service", () => {
     expect((await service.getState(context)).pendingDispatch).toBeNull();
   });
 
-  it("denies skipping directly to Coder and accepts only an exact one-time user override", async () => {
+  it("denies skipping directly to Coder and accepts exact direct user authorization once", async () => {
     const { context, fs } = await createContext(roots);
-    const service = createWorkflowControlService({ fs, now: sequenceClock(), id: () => "override-1" });
+    const service = createWorkflowControlService({ fs, now: sequenceClock(), id: () => "authorization-1" });
     const deniedReason = "Transition code-change/coder is not legal after the confirmed Workflow Progress history.";
     const proposal = initialProposal("coder");
 
@@ -76,16 +76,9 @@ describe("workflow control service", () => {
 
     proposal.proposal = {
       ...proposal.proposal!,
-      authorizationId: "request",
-      authorizationQuote: "Allow Coder to start before Architect for this dispatch only.",
+      authorizationText: "Allow Coder to start before Architect for this dispatch only.",
       violatedRule: deniedReason
     };
-    await expect(service.submitProgress(context, renderWorkflowProgress(proposal))).rejects.toMatchObject({
-      code: "WORKFLOW_OVERRIDE_PENDING"
-    });
-    await service.approveOverride(context, "override-1", proposal.proposal.authorizationQuote!);
-
-    proposal.proposal.authorizationId = "override-1";
     await service.submitProgress(context, renderWorkflowProgress(proposal));
     await service.claimDispatch({
       ...context,
@@ -96,14 +89,31 @@ describe("workflow control service", () => {
     });
     await service.confirmDispatch(context, "message-1");
 
-    expect((await service.getState(context)).overrideRequests).toEqual([
-      expect.objectContaining({ id: "override-1", status: "consumed" })
+    expect((await service.getState(context)).userAuthorizations).toEqual([
+      expect.objectContaining({ id: "authorization-1", status: "consumed" })
     ]);
     await expect(service.assertRouteAuthorized({
       ...context,
       routePath: routePath("coder"),
       targetRole: "coder"
     })).rejects.toMatchObject({ code: "WORKFLOW_ROUTE_NOT_APPROVED" });
+  });
+
+  it("rejects incomplete or mismatched direct user authorization", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    const proposal = initialProposal("coder");
+
+    proposal.proposal = {
+      ...proposal.proposal!,
+      authorizationText: "Allow this exact Coder dispatch once.",
+      violatedRule: "A different rule."
+    };
+
+    await expect(service.submitProgress(context, renderWorkflowProgress(proposal))).rejects.toMatchObject({
+      code: "WORKFLOW_USER_AUTHORIZATION_INVALID"
+    });
+    expect((await service.getState(context)).userAuthorizations).toEqual([]);
   });
 
   it("rejects modified history and recovers pending approval after service recreation", async () => {
@@ -762,16 +772,10 @@ async function advanceWithOverride(
     proposal: {
       targetRole,
       evidence,
-      authorizationId: "request",
-      authorizationQuote: authorizationText,
+      authorizationText,
       violatedRule
     }
   };
-  await expect(service.submitProgress(context, renderWorkflowProgress(proposal))).rejects.toMatchObject({
-    code: "WORKFLOW_OVERRIDE_PENDING"
-  });
-  await service.approveOverride(context, "override-1", authorizationText);
-  proposal.proposal!.authorizationId = "override-1";
   await service.submitProgress(context, renderWorkflowProgress(proposal));
   const messageId = `message-${proposal.revision}`;
   await service.claimDispatch({

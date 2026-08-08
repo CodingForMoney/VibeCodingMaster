@@ -566,10 +566,9 @@ Requested Flow: none
 Target Role: none
 Evidence: none
 
-## User Override
+## User Authorization
 
-Authorization ID: none
-Authorization Quote: none
+Authorization Text: none
 Violated Rule: none
 `;
 }

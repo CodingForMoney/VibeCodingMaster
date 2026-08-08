@@ -42,8 +42,7 @@ export interface WorkflowProgressProposal {
   requestedFlow?: WorkflowFlow;
   targetRole: DispatchableRole;
   evidence: string;
-  authorizationId?: string;
-  authorizationQuote?: string;
+  authorizationText?: string;
   violatedRule?: string;
 }
 
@@ -88,9 +87,11 @@ export interface WorkflowFlowRun {
   startedAtSequence: number;
 }
 
-export interface WorkflowOverrideRequest {
+export interface WorkflowUserAuthorization {
   id: string;
-  status: "pending" | "approved" | "rejected" | "consumed";
+  status: "accepted" | "consumed";
+  role: "project-manager";
+  operation: "workflow-dispatch";
   baseRevision: number;
   baseHistoryHash: string;
   requestedFlow?: WorkflowFlow;
@@ -98,10 +99,8 @@ export interface WorkflowOverrideRequest {
   targetRole: DispatchableRole;
   evidence: string;
   violatedRule: string;
-  proposedAuthorizationQuote: string;
-  authorizationText?: string;
+  authorizationText: string;
   createdAt: string;
-  decidedAt?: string;
   consumedAt?: string;
 }
 
@@ -111,13 +110,9 @@ export interface WorkflowControlState {
   pendingDispatch: WorkflowPendingDispatch | null;
   activeDispatch: WorkflowDispatchEvidenceBaseline | null;
   flowRun: WorkflowFlowRun | null;
-  overrideRequests: WorkflowOverrideRequest[];
+  userAuthorizations: WorkflowUserAuthorization[];
   warnings: string[];
   updatedAt: string;
-}
-
-export interface WorkflowOverrideDecisionRequest {
-  authorizationText?: string;
 }
 
 export interface TaskWorkflowDeclaration {

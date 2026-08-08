@@ -13,7 +13,7 @@ import type {
   WorkflowEvidenceGate,
   WorkflowFlow,
   WorkflowFlowRun,
-  WorkflowOverrideRequest,
+  WorkflowUserAuthorization,
   WorkflowPendingDispatch,
   WorkflowProgressDocument
 } from "../../shared/types/workflow.js";
@@ -51,8 +51,6 @@ export interface WorkflowControlService {
   claimDispatch(input: Required<WorkflowRouteAuthorizationInput>): Promise<void>;
   releaseDispatch(input: WorkflowControlContext, messageId: string): Promise<void>;
   confirmDispatch(input: WorkflowControlContext, messageId: string): Promise<void>;
-  approveOverride(input: WorkflowControlContext, overrideId: string, authorizationText: string): Promise<WorkflowControlState>;
-  rejectOverride(input: WorkflowControlContext, overrideId: string): Promise<WorkflowControlState>;
 }
 
 export interface WorkflowControlServiceDeps {
@@ -69,7 +67,7 @@ const MISSING_EVIDENCE_HASH = "<missing>";
 
 export function createWorkflowControlService(deps: WorkflowControlServiceDeps): WorkflowControlService {
   const now = deps.now ?? (() => new Date().toISOString());
-  const id = deps.id ?? (() => `wfovr_${randomUUID()}`);
+  const id = deps.id ?? (() => `wfauth_${randomUUID()}`);
   const locks = new Map<string, Promise<unknown>>();
 
   async function getState(input: WorkflowControlContext): Promise<WorkflowControlState> {
@@ -141,60 +139,43 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
         candidate.proposal.targetRole
       );
       let overrideAuthorizationId: string | undefined;
+      let userAuthorization: WorkflowUserAuthorization | undefined;
 
       if (!verdict.allowed) {
-        const authorizationId = candidate.proposal.authorizationId;
-        if (authorizationId === "request") {
-          const existingPending = state.overrideRequests.find((entry) => entry.status === "pending");
-          if (existingPending) {
-            throw workflowError(
-              "WORKFLOW_OVERRIDE_PENDING",
-              `Workflow override ${existingPending.id} is already waiting for the user's decision.`,
-              "Wait for the current user decision before requesting another workflow override."
-            );
-          }
-          const quote = candidate.proposal.authorizationQuote?.trim();
-          const violatedRule = candidate.proposal.violatedRule?.trim();
-          if (!quote || !violatedRule || violatedRule !== verdict.reason) {
-            throw workflowError(
-              "WORKFLOW_OVERRIDE_REQUEST_INVALID",
-              `Override request must include the proposed user authorization and the exact violated rule: ${verdict.reason}`,
-              "Copy the rejection reason exactly into Violated Rule and record the user's proposed authorization text."
-            );
-          }
-          const pending = createOverrideRequest(
-            id(), current, candidate, effectiveFlow, baseHistoryHash, verdict.reason, quote, now()
-          );
-          const next = {
-            ...state,
-            overrideRequests: [...state.overrideRequests, pending],
-            updatedAt: now()
-          };
-          await saveState(input, next);
-          throw workflowError(
-            "WORKFLOW_OVERRIDE_PENDING",
-            `Workflow override ${pending.id} requires direct user confirmation in VCM.`,
-            "Wait for the user's decision. If approved, resubmit with the returned Authorization ID and exact authorization text."
-          );
-        }
-        if (authorizationId && authorizationId !== "none") {
-          const override = state.overrideRequests.find((entry) => entry.id === authorizationId);
-          validateApprovedOverride(override, current, candidate, effectiveFlow, baseHistoryHash, verdict.reason);
-          overrideAuthorizationId = override!.id;
-        } else {
+        const authorizationText = candidate.proposal.authorizationText?.trim();
+        const violatedRule = candidate.proposal.violatedRule?.trim();
+        if (!authorizationText && !violatedRule) {
           throw workflowError(
             "WORKFLOW_TRANSITION_DENIED",
             verdict.reason,
             verdict.allowedTransitions.length > 0
-              ? `Allowed next dispatches: ${verdict.allowedTransitions.join(", ")}. Recheck the flow, or request an exact one-time user override.`
+              ? `Allowed next dispatches: ${verdict.allowedTransitions.join(", ")}. Recheck the flow, or ask the user directly for an exact one-time authorization.`
               : verdict.blockedHint
           );
         }
-      } else if (candidate.proposal.authorizationId && candidate.proposal.authorizationId !== "none") {
+        if (!authorizationText || violatedRule !== verdict.reason) {
+          throw workflowError(
+            "WORKFLOW_USER_AUTHORIZATION_INVALID",
+            `User authorization must include the exact authorization text and exact violated rule: ${verdict.reason}`,
+            "Ask the user directly, then copy the user's authorization verbatim into Authorization Text and the rejection reason verbatim into Violated Rule."
+          );
+        }
+        if (state.userAuthorizations.some((entry) => entry.authorizationText === authorizationText)) {
+          throw workflowError(
+            "WORKFLOW_USER_AUTHORIZATION_REUSED",
+            "This user authorization has already been recorded for another workflow transition.",
+            "Ask the user for a new explicit authorization for this exact transition."
+          );
+        }
+        userAuthorization = createUserAuthorization(
+          id(), current, candidate, effectiveFlow, baseHistoryHash, verdict.reason, authorizationText, now()
+        );
+        overrideAuthorizationId = userAuthorization.id;
+      } else if (candidate.proposal.authorizationText || candidate.proposal.violatedRule) {
         throw workflowError(
-          "WORKFLOW_OVERRIDE_NOT_REQUIRED",
-          "This workflow transition is legal and must not consume a user override.",
-          "Set every User Override field to none."
+          "WORKFLOW_USER_AUTHORIZATION_NOT_REQUIRED",
+          "This workflow transition is legal and must not consume user authorization.",
+          "Set every User Authorization field to none."
         );
       }
 
@@ -214,20 +195,16 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
       };
       const accepted: WorkflowProgressDocument = {
         ...candidate,
-        proposal: {
-          ...candidate.proposal,
-          authorizationId: overrideAuthorizationId,
-          authorizationQuote: overrideAuthorizationId
-            ? state.overrideRequests.find((entry) => entry.id === overrideAuthorizationId)?.authorizationText
-            : undefined,
-          violatedRule: overrideAuthorizationId ? verdict.reason : undefined
-        }
+        proposal: candidate.proposal
       };
       const normalized = renderWorkflowProgress(accepted);
       await writeAtomic(deps.fs, progressPath(input), normalized);
       await saveState(input, {
         ...state,
         pendingDispatch,
+        userAuthorizations: userAuthorization
+          ? [...state.userAuthorizations, userAuthorization]
+          : state.userAuthorizations,
         updatedAt: timestamp
       });
       return { path: relativeProgressPath(input), content: normalized };
@@ -353,7 +330,7 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
         history: [...current.history, entry],
         proposal: undefined
       };
-      const overrideRequests = state.overrideRequests.map((entry) =>
+      const userAuthorizations = state.userAuthorizations.map((entry) =>
         entry.id === pending.overrideAuthorizationId
           ? { ...entry, status: "consumed" as const, consumedAt: timestamp }
           : entry
@@ -364,64 +341,9 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
         pendingDispatch: null,
         activeDispatch,
         flowRun,
-        overrideRequests,
+        userAuthorizations,
         updatedAt: timestamp
       });
-    });
-  }
-
-  async function approveOverride(
-    input: WorkflowControlContext,
-    overrideId: string,
-    authorizationText: string
-  ): Promise<WorkflowControlState> {
-    return decideOverride(input, overrideId, "approved", authorizationText);
-  }
-
-  async function rejectOverride(input: WorkflowControlContext, overrideId: string): Promise<WorkflowControlState> {
-    return decideOverride(input, overrideId, "rejected");
-  }
-
-  async function decideOverride(
-    input: WorkflowControlContext,
-    overrideId: string,
-    decision: "approved" | "rejected",
-    authorizationText?: string
-  ): Promise<WorkflowControlState> {
-    return withLock(statePath(input), async () => {
-      const state = await getState(input);
-      failOnStateWarnings(state);
-      const existing = state.overrideRequests.find((entry) => entry.id === overrideId);
-      if (!existing || existing.status !== "pending") {
-        throw workflowError(
-          "WORKFLOW_OVERRIDE_NOT_PENDING",
-          `Workflow override ${overrideId} is not pending.`,
-          "Refresh the task state and act only on the current pending override."
-        );
-      }
-      const normalizedAuthorization = authorizationText?.trim();
-      if (decision === "approved" && !normalizedAuthorization) {
-        throw workflowError(
-          "WORKFLOW_OVERRIDE_AUTHORIZATION_REQUIRED",
-          "Direct user authorization text is required.",
-          "Describe the exact one-time workflow exception being authorized."
-        );
-      }
-      const timestamp = now();
-      const next: WorkflowControlState = {
-        ...state,
-        overrideRequests: state.overrideRequests.map((entry) => entry.id === overrideId
-          ? {
-              ...entry,
-              status: decision,
-              authorizationText: decision === "approved" ? normalizedAuthorization : undefined,
-              decidedAt: timestamp
-            }
-          : entry),
-        updatedAt: timestamp
-      };
-      await saveState(input, next);
-      return next;
     });
   }
 
@@ -431,9 +353,7 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
     assertRouteAuthorized,
     claimDispatch,
     releaseDispatch,
-    confirmDispatch,
-    approveOverride,
-    rejectOverride
+    confirmDispatch
   };
 
   async function saveState(input: WorkflowControlContext, state: WorkflowControlState): Promise<void> {
@@ -484,23 +404,21 @@ export function parseWorkflowProgress(content: string, expectedTaskSlug?: string
     errors.push("A completed/no-dispatch proposal must use Requested Flow, Target Role, and Evidence value none.");
   }
 
-  const overrideSection = readArtifactSectionContent(content, "User Override") ?? "";
-  const authorizationId = rawField(overrideSection, "Authorization ID");
-  const authorizationQuote = rawField(overrideSection, "Authorization Quote");
-  const violatedRule = rawField(overrideSection, "Violated Rule");
-  if (!authorizationId || !authorizationQuote || !violatedRule) {
-    errors.push("User Override requires Authorization ID, Authorization Quote, and Violated Rule fields.");
+  const authorizationSection = readArtifactSectionContent(content, "User Authorization") ?? "";
+  const authorizationText = rawField(authorizationSection, "Authorization Text");
+  const violatedRule = rawField(authorizationSection, "Violated Rule");
+  if (!authorizationText || !violatedRule) {
+    errors.push("User Authorization requires Authorization Text and Violated Rule fields.");
   } else if (proposal) {
-    const allNone = authorizationId === "none" && authorizationQuote === "none" && violatedRule === "none";
-    const allSet = authorizationId !== "none" && authorizationQuote !== "none" && violatedRule !== "none";
-    if (!allNone && !allSet) errors.push("User Override fields must all be none or all contain the exact override data.");
+    const allNone = authorizationText === "none" && violatedRule === "none";
+    const allSet = authorizationText !== "none" && violatedRule !== "none";
+    if (!allNone && !allSet) errors.push("User Authorization fields must both be none or both contain exact authorization evidence.");
     if (allSet) {
-      proposal.authorizationId = authorizationId;
-      proposal.authorizationQuote = authorizationQuote;
+      proposal.authorizationText = authorizationText;
       proposal.violatedRule = violatedRule;
     }
-  } else if (authorizationId !== "none" || authorizationQuote !== "none" || violatedRule !== "none") {
-    errors.push("User Override fields must be none when no role dispatch is proposed.");
+  } else if (authorizationText !== "none" || violatedRule !== "none") {
+    errors.push("User Authorization fields must be none when no role dispatch is proposed.");
   }
 
   if (errors.length > 0) throw progressValidationError(errors);
@@ -541,10 +459,9 @@ Requested Flow: ${proposal?.requestedFlow ?? "none"}
 Target Role: ${proposal?.targetRole ?? "none"}
 Evidence: ${proposal?.evidence ?? "none"}
 
-## User Override
+## User Authorization
 
-Authorization ID: ${proposal?.authorizationId ?? "none"}
-Authorization Quote: ${proposal?.authorizationQuote ?? "none"}
+Authorization Text: ${proposal?.authorizationText ?? "none"}
 Violated Rule: ${proposal?.violatedRule ?? "none"}
 `;
 }
@@ -1173,44 +1090,21 @@ function validateCandidateAgainstCurrent(current: WorkflowProgressDocument, cand
   if (errors.length > 0) throw progressValidationError(errors);
 }
 
-function validateApprovedOverride(
-  override: WorkflowOverrideRequest | undefined,
-  current: WorkflowProgressDocument,
-  candidate: WorkflowProgressDocument,
-  effectiveFlow: WorkflowFlow,
-  baseHistoryHash: string,
-  violation: string
-): void {
-  const proposal = candidate.proposal!;
-  if (!override || override.status !== "approved") throw workflowError("WORKFLOW_OVERRIDE_INVALID", "The supplied workflow override is not approved.");
-  if (
-    override.baseRevision !== current.revision
-    || override.baseHistoryHash !== baseHistoryHash
-    || override.effectiveFlow !== effectiveFlow
-    || override.requestedFlow !== proposal.requestedFlow
-    || override.targetRole !== proposal.targetRole
-    || override.evidence !== proposal.evidence
-    || override.violatedRule !== violation
-    || override.authorizationText !== proposal.authorizationQuote
-    || proposal.violatedRule !== violation
-  ) {
-    throw workflowError("WORKFLOW_OVERRIDE_MISMATCH", "The approved override does not match this exact workflow transition.");
-  }
-}
-
-function createOverrideRequest(
-  overrideId: string,
+function createUserAuthorization(
+  authorizationId: string,
   current: WorkflowProgressDocument,
   candidate: WorkflowProgressDocument,
   effectiveFlow: WorkflowFlow,
   baseHistoryHash: string,
   violation: string,
-  quote: string,
+  authorizationText: string,
   timestamp: string
-): WorkflowOverrideRequest {
+): WorkflowUserAuthorization {
   return {
-    id: overrideId,
-    status: "pending",
+    id: authorizationId,
+    status: "accepted",
+    role: "project-manager",
+    operation: "workflow-dispatch",
     baseRevision: current.revision,
     baseHistoryHash,
     requestedFlow: candidate.proposal!.requestedFlow,
@@ -1218,7 +1112,7 @@ function createOverrideRequest(
     targetRole: candidate.proposal!.targetRole,
     evidence: candidate.proposal!.evidence,
     violatedRule: violation,
-    proposedAuthorizationQuote: quote,
+    authorizationText,
     createdAt: timestamp
   };
 }
@@ -1288,9 +1182,11 @@ function normalizeState(value: unknown, taskSlug: string, timestamp: string): Wo
   const pendingDispatch = value.pendingDispatch === null
     ? null
     : isPendingDispatch(value.pendingDispatch) ? value.pendingDispatch : undefined;
-  const overrideRequests = Array.isArray(value.overrideRequests)
-    && value.overrideRequests.every(isOverrideRequest)
-    ? value.overrideRequests
+  const userAuthorizations = Array.isArray(value.userAuthorizations)
+    && value.userAuthorizations.every(isUserAuthorization)
+    ? value.userAuthorizations
+    : value.userAuthorizations === undefined && Array.isArray(value.overrideRequests)
+      ? []
     : undefined;
   const activeDispatch = value.activeDispatch === undefined || value.activeDispatch === null
     ? null
@@ -1298,7 +1194,7 @@ function normalizeState(value: unknown, taskSlug: string, timestamp: string): Wo
   const flowRun = value.flowRun === undefined || value.flowRun === null
     ? null
     : isFlowRun(value.flowRun) ? value.flowRun : undefined;
-  if (pendingDispatch === undefined || activeDispatch === undefined || flowRun === undefined || overrideRequests === undefined) {
+  if (pendingDispatch === undefined || activeDispatch === undefined || flowRun === undefined || userAuthorizations === undefined) {
     return { ...emptyState(taskSlug, timestamp), warnings: ["Workflow control state has an unsupported shape."] };
   }
   return {
@@ -1307,7 +1203,7 @@ function normalizeState(value: unknown, taskSlug: string, timestamp: string): Wo
     pendingDispatch,
     activeDispatch,
     flowRun,
-    overrideRequests,
+    userAuthorizations,
     warnings: [],
     updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : timestamp
   };
@@ -1320,7 +1216,7 @@ function emptyState(taskSlug: string, timestamp: string): WorkflowControlState {
     pendingDispatch: null,
     activeDispatch: null,
     flowRun: null,
-    overrideRequests: [],
+    userAuthorizations: [],
     warnings: [],
     updatedAt: timestamp
   };
@@ -1423,10 +1319,12 @@ function isPendingDispatch(value: unknown): value is WorkflowPendingDispatch {
     && typeof value.updatedAt === "string";
 }
 
-function isOverrideRequest(value: unknown): value is WorkflowOverrideRequest {
+function isUserAuthorization(value: unknown): value is WorkflowUserAuthorization {
   if (!isRecord(value)) return false;
   return typeof value.id === "string"
-    && ["pending", "approved", "rejected", "consumed"].includes(String(value.status))
+    && (value.status === "accepted" || value.status === "consumed")
+    && value.role === "project-manager"
+    && value.operation === "workflow-dispatch"
     && Number.isInteger(value.baseRevision)
     && typeof value.baseHistoryHash === "string"
     && (value.requestedFlow === undefined || Boolean(asFlow(typeof value.requestedFlow === "string" ? value.requestedFlow : undefined)))
@@ -1434,10 +1332,8 @@ function isOverrideRequest(value: unknown): value is WorkflowOverrideRequest {
     && Boolean(asTargetRole(typeof value.targetRole === "string" ? value.targetRole : undefined))
     && typeof value.evidence === "string"
     && typeof value.violatedRule === "string"
-    && typeof value.proposedAuthorizationQuote === "string"
-    && (value.authorizationText === undefined || typeof value.authorizationText === "string")
+    && typeof value.authorizationText === "string"
     && typeof value.createdAt === "string"
-    && (value.decidedAt === undefined || typeof value.decidedAt === "string")
     && (value.consumedAt === undefined || typeof value.consumedAt === "string");
 }
 

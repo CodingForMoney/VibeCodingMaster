@@ -40,7 +40,6 @@ import {
   type SessionModel
 } from "../shared/types/session.js";
 import type { TaskRecord } from "../shared/types/task.js";
-import type { WorkflowControlState, WorkflowOverrideRequest } from "../shared/types/workflow.js";
 import { AppShell } from "./components/app-shell.js";
 import { HarnessStudioModal } from "./components/harness-studio-modal.js";
 import { RepositoryDiffModal } from "./components/repository-diff-modal.js";
@@ -96,7 +95,6 @@ export function App() {
   const [activeEvents, setActiveEvents] = useState<{ taskSlug: string; events: string[] } | null>(null);
   const [activeSessionRoundState, setActiveSessionRoundState] = useState<{ taskSlug: string; roundState: VcmSessionRoundState } | null>(null);
   const [activeGateReview, setActiveGateReview] = useState<{ taskSlug: string; state: GateReviewIndex } | null>(null);
-  const [workflowControlState, setWorkflowControlState] = useState<WorkflowControlState | null>(null);
   const [activeRole, setActiveRole] = useState<RoleName>("project-manager");
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
   const [pauseAlertSound, setPauseAlertSound] = useState(true);
@@ -471,7 +469,6 @@ export function App() {
     setAutoMemoryState(state.autoMemoryState);
     setAutoMemoryStateTaskSlug(taskSlug && state.autoMemoryState ? taskSlug : null);
     setGatewayStatus(state.gatewayStatus);
-    setWorkflowControlState(state.workflowControlState);
 
     if (taskSlug && state.harnessStatus) {
       setHarnessStatus(state.harnessStatus);
@@ -507,7 +504,6 @@ export function App() {
       setHarnessFeedbackState(null);
       setAutoMemoryState(null);
       setAutoMemoryStateTaskSlug(null);
-      setWorkflowControlState(null);
       return null;
     }
 
@@ -616,7 +612,6 @@ export function App() {
     setHarnessStatusTaskSlug(null);
     setHarnessBootstrapStatusTaskSlug(null);
     setHarnessFeedbackState(null);
-    setWorkflowControlState(null);
   }, [project?.repoRoot, activeTask?.taskSlug]);
 
   useScheduledPoll(
@@ -761,7 +756,6 @@ export function App() {
   const reviewerEnabled = Boolean(
     sidebarGateReview && Object.values(sidebarGateReview.gates).some((gate) => gate.required)
   );
-  const pendingWorkflowOverride = workflowControlState?.overrideRequests.find((request) => request.status === "pending") ?? null;
   return (
     <AppShell
       sidebar={(
@@ -1169,29 +1163,6 @@ export function App() {
       )}
     >
       <UiErrorCenter />
-      {activeTask && pendingWorkflowOverride ? (
-        <WorkflowOverrideModal
-          busy={busy}
-          request={pendingWorkflowOverride}
-          onApprove={(authorizationText) => {
-            void withBusy(async () => {
-              setWorkflowControlState(await apiClient.approveWorkflowOverride(
-                activeTask.taskSlug,
-                pendingWorkflowOverride.id,
-                authorizationText
-              ));
-            }, "Approve workflow override");
-          }}
-          onReject={() => {
-            void withBusy(async () => {
-              setWorkflowControlState(await apiClient.rejectWorkflowOverride(
-                activeTask.taskSlug,
-                pendingWorkflowOverride.id
-              ));
-            }, "Reject workflow override");
-          }}
-        />
-      ) : null}
       {flowPauseNotice ? (
         <div className="flow-pause-alert-backdrop">
           <section
@@ -1539,61 +1510,6 @@ export function App() {
         }}
       />
     </AppShell>
-  );
-}
-
-function WorkflowOverrideModal({
-  busy,
-  onApprove,
-  onReject,
-  request
-}: {
-  busy: boolean;
-  onApprove(authorizationText: string): void;
-  onReject(): void;
-  request: WorkflowOverrideRequest;
-}) {
-  const [authorizationText, setAuthorizationText] = useState(request.proposedAuthorizationQuote);
-
-  useEffect(() => {
-    setAuthorizationText(request.proposedAuthorizationQuote);
-  }, [request.id, request.proposedAuthorizationQuote]);
-
-  return (
-    <div className="modal-backdrop workflow-override-backdrop">
-      <section className="workflow-override-modal" role="alertdialog" aria-modal="true" aria-labelledby="workflow-override-title">
-        <header>
-          <div>
-            <p className="workflow-override-kicker">Workflow exception</p>
-            <h2 id="workflow-override-title">Authorize one dispatch?</h2>
-          </div>
-        </header>
-        <dl>
-          <div><dt>Flow</dt><dd>{request.effectiveFlow}</dd></div>
-          <div><dt>Target role</dt><dd>{request.targetRole}</dd></div>
-          <div><dt>Rejected rule</dt><dd>{request.violatedRule}</dd></div>
-          <div><dt>Evidence</dt><dd>{request.evidence}</dd></div>
-        </dl>
-        <label htmlFor="workflow-override-authorization">Exact authorization recorded by VCM</label>
-        <textarea
-          id="workflow-override-authorization"
-          rows={4}
-          value={authorizationText}
-          onChange={(event) => setAuthorizationText(event.target.value)}
-        />
-        <footer>
-          <button type="button" disabled={busy} onClick={onReject}>Reject</button>
-          <button
-            type="button"
-            className="primary"
-            disabled={busy || !authorizationText.trim()}
-            onClick={() => onApprove(authorizationText.trim())}
-          >
-            Approve Once
-          </button>
-        </footer>
-      </section>
-    </div>
   );
 }
 

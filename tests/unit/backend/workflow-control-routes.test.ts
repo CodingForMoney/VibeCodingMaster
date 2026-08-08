@@ -3,18 +3,15 @@ import { describe, expect, it } from "vitest";
 import { registerWorkflowControlRoutes } from "../../../src/backend/api/workflow-control-routes.js";
 
 describe("workflow control routes", () => {
-  it("records direct user authorization and notifies an idle Project Manager", async () => {
+  it("exposes workflow state without user-approval callback routes", async () => {
     const app = Fastify({ logger: false });
-    const writes: string[] = [];
-    const approvals: Array<{ overrideId: string; authorizationText: string }> = [];
-    const runningMarks: string[] = [];
     const state = {
       version: 1 as const,
       taskSlug: "task-1",
       pendingDispatch: null,
       activeDispatch: null,
       flowRun: null,
-      overrideRequests: [],
+      userAuthorizations: [],
       warnings: [],
       updatedAt: "2026-08-06T00:00:00.000Z"
     };
@@ -37,46 +34,26 @@ describe("workflow control routes", () => {
           };
         }
       } as never,
-      sessionService: {
-        async getRoleSession() {
-          return {
-            id: "pm-session",
-            role: "project-manager",
-            status: "running",
-            activityStatus: "idle"
-          };
-        },
-        async markRoleActivityRunning(_repoRoot: string, _taskSlug: string, _role: string, sessionId: string) {
-          runningMarks.push(sessionId);
-        }
-      } as never,
       workflowControlService: {
-        async approveOverride(_context, overrideId, authorizationText) {
-          approvals.push({ overrideId, authorizationText });
+        async getState() {
           return state;
-        }
-      } as never,
-      runtime: {
-        write(_sessionId: string, data: string) {
-          writes.push(data);
         }
       } as never
     });
 
-    const response = await app.inject({
+    const stateResponse = await app.inject({
+      method: "GET",
+      url: "/api/tasks/task-1/workflow-control"
+    });
+    expect(stateResponse.statusCode, stateResponse.body).toBe(200);
+    expect(stateResponse.json()).toEqual(state);
+
+    const removedApprovalResponse = await app.inject({
       method: "POST",
       url: "/api/tasks/task-1/workflow-overrides/override-1/approve",
-      payload: { authorizationText: "Allow this exact Architect dispatch once." }
+      payload: { authorizationText: "Allow it." }
     });
-
-    expect(response.statusCode, response.body).toBe(200);
-    expect(approvals).toEqual([{
-      overrideId: "override-1",
-      authorizationText: "Allow this exact Architect dispatch once."
-    }]);
-    expect(writes.join("\n")).toContain("Authorization ID: override-1");
-    expect(writes.join("\n")).toContain("Authorization Text: Allow this exact Architect dispatch once.");
-    expect(runningMarks).toEqual(["pm-session"]);
+    expect(removedApprovalResponse.statusCode).toBe(404);
     await app.close();
   });
 });

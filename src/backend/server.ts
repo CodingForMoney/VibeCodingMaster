@@ -206,9 +206,7 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     registerWorkflowControlRoutes(app, {
       projectService: deps.projectService,
       taskService: deps.taskService,
-      sessionService: deps.sessionService,
-      workflowControlService: deps.workflowControlService,
-      runtime: deps.runtime
+      workflowControlService: deps.workflowControlService
     });
   }
   registerMessageRoutes(app, {

@@ -188,7 +188,7 @@ export const ARTIFACT_DEFINITIONS: readonly ArtifactDefinition[] = [
     requiredHeadings: [
       "Dispatch History",
       "Proposed Dispatch",
-      "User Override"
+      "User Authorization"
     ]
   },
   {

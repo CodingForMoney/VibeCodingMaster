@@ -69,10 +69,9 @@ describe("backend E2E with mock Claude Code", () => {
       "Target Role: architect",
       "Evidence: user accepted the complete code-change task",
       "",
-      "## User Override",
+      "## User Authorization",
       "",
-      "Authorization ID: none",
-      "Authorization Quote: none",
+      "Authorization Text: none",
       "Violated Rule: none",
       ""
     ].join("\n");
@@ -272,10 +271,9 @@ describe("backend E2E with mock Claude Code", () => {
       "Target Role: architect",
       "Evidence: user accepted the documentation-only task",
       "",
-      "## User Override",
+      "## User Authorization",
       "",
-      "Authorization ID: none",
-      "Authorization Quote: none",
+      "Authorization Text: none",
       "Violated Rule: none",
       ""
     ].join("\n");
