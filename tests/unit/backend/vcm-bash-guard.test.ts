@@ -156,6 +156,10 @@ describe("vcm-bash-guard", () => {
         bash(".ai/tools/vcm-artifact architecture-plan --file /tmp/plan.md --mode final"),
         "architect"
       )).resolves.toBeUndefined();
+      await expect(runGuard(
+        bash(".ai/tools/vcm-artifact memory-proposal --file /tmp/memory.md --path .ai/vcm/memory-review/candidates/architect/planning.md --mode final"),
+        "architect"
+      )).resolves.toBeUndefined();
     });
   });
 });

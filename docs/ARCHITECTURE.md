@@ -266,6 +266,11 @@ consumers still validate the accepted artifact before using it, so an invalid
 or stale file cannot advance a Gate, Final Acceptance, memory review, or
 retrospective flow.
 
+Memory Proposal submission paths are defined centrally with the Memory Review
+layout. A workflow role may submit only its assigned run draft; Architect may
+also submit the fixed planning-session candidate. Backend-created source
+snapshots are not role submission paths.
+
 `workflow-progress.md` has an additional backend-owned lifecycle.
 `workflow-control-service` validates its append-only history and legal target
 against the fixed flow policy plus current accepted artifacts and Gate state.

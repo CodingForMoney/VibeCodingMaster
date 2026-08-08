@@ -8,7 +8,7 @@ import type {
   ArtifactSummary,
   HandoffPaths
 } from "../../shared/types/artifact.js";
-import type { DispatchableRole, RoleName } from "../../shared/types/role.js";
+import type { DispatchableRole, RoleName, VcmRoleName } from "../../shared/types/role.js";
 import { checkMarkdownArtifact } from "../../shared/validation/artifact-check.js";
 import { getArtifactDefinition, isArtifactKind } from "../../shared/validation/artifact-registry.js";
 import { VcmError } from "../errors.js";
@@ -33,6 +33,7 @@ import {
 } from "../templates/handoff.js";
 import { renderRoleCommandTemplate } from "../templates/role-command.js";
 import { validateMemoryProposal } from "./memory-proposal-validation.js";
+import { isMemoryProposalSubmissionPath } from "./memory-review-paths.js";
 import type { WorkflowControlService } from "./workflow-control-service.js";
 
 export interface ArtifactService {
@@ -428,8 +429,8 @@ async function validateDynamicArtifact(
     if (!VCM_ROLE_NAMES.includes(input.role as typeof VCM_ROLE_NAMES[number])) {
       throw artifactRejected(input.kind, ["Only a VCM workflow role may submit a Memory Proposal."]);
     }
-    if (!/^\.ai\/vcm\/memory-review\/(?:runs\/[A-Za-z0-9._-]+\/drafts|candidates)\/[A-Za-z0-9._-]+\.md$/.test(artifactPath)) {
-      throw artifactRejected(input.kind, ["Memory proposal path is outside the VCM memory-review draft locations."]);
+    if (!isMemoryProposalSubmissionPath(artifactPath, input.role as VcmRoleName)) {
+      throw artifactRejected(input.kind, ["Memory proposal path is not assigned to the submitting role."]);
     }
     const memoryError = validateMemoryProposal(content);
     if (memoryError) {

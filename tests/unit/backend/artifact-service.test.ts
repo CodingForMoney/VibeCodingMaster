@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import { createArtifactService } from "../../../src/backend/services/artifact-service.js";
+import {
+  ARCHITECT_PLANNING_MEMORY_CANDIDATE_PATH,
+  architectPlanningCandidateSnapshotPath,
+  memoryReviewRoleDraftPath
+} from "../../../src/backend/services/memory-review-paths.js";
 
 describe("createArtifactService", () => {
   it("prefers role-commands/<role>.md for role command paths", async () => {
@@ -225,6 +230,58 @@ describe("createArtifactService", () => {
     await expect(fs.readText(`/repo/${workerPath}`)).resolves.toContain("Implementation Result: success");
   });
 
+  it("accepts only the Memory Proposal locations assigned to the submitting role", async () => {
+    const fs = createMemoryFs();
+    const service = createArtifactService(fs);
+    const content = validNoChangeMemoryProposal();
+
+    await expect(service.submitArtifact({
+      repoRoot: "/repo/task",
+      baseRepoRoot: "/repo",
+      handoffDir: ".ai/vcm/handoffs",
+      taskSlug: "demo-task",
+      kind: "memory-proposal",
+      mode: "final",
+      role: "architect",
+      artifactPath: ARCHITECT_PLANNING_MEMORY_CANDIDATE_PATH,
+      content
+    })).resolves.toMatchObject({ path: ARCHITECT_PLANNING_MEMORY_CANDIDATE_PATH });
+    await expect(fs.readText(`/repo/task/${ARCHITECT_PLANNING_MEMORY_CANDIDATE_PATH}`))
+      .resolves.toBe(content);
+
+    const coderDraftPath = memoryReviewRoleDraftPath("run-1", "coder");
+    await expect(service.submitArtifact({
+      repoRoot: "/repo/task",
+      baseRepoRoot: "/repo",
+      handoffDir: ".ai/vcm/handoffs",
+      taskSlug: "demo-task",
+      kind: "memory-proposal",
+      mode: "final",
+      role: "coder",
+      artifactPath: coderDraftPath,
+      content
+    })).resolves.toMatchObject({ path: coderDraftPath });
+
+    for (const [role, artifactPath] of [
+      ["coder", ARCHITECT_PLANNING_MEMORY_CANDIDATE_PATH],
+      ["architect", coderDraftPath],
+      ["architect", architectPlanningCandidateSnapshotPath("run-1")],
+      ["architect", ".ai/vcm/memory-review/candidates/architect/other.md"]
+    ] as const) {
+      await expect(service.submitArtifact({
+        repoRoot: "/repo/task",
+        baseRepoRoot: "/repo",
+        handoffDir: ".ai/vcm/handoffs",
+        taskSlug: "demo-task",
+        kind: "memory-proposal",
+        mode: "final",
+        role,
+        artifactPath,
+        content
+      })).rejects.toMatchObject({ code: "ARTIFACT_VALIDATION_FAILED" });
+    }
+  });
+
   it("allows Reviewer feedback and rejects tool-role workflow artifacts", async () => {
     const fs = createMemoryFs();
     const service = createArtifactService(fs);
@@ -336,6 +393,21 @@ function validHarnessFeedback(): string {
 - Suspected harness area: Reviewer template
 - Impact: Review results are inconsistent.
 - Urgency: medium
+`;
+}
+
+function validNoChangeMemoryProposal(): string {
+  return `# Memory Proposal
+Decision: no-change
+
+## Add
+none
+
+## Update
+none
+
+## Remove
+none
 `;
 }
 

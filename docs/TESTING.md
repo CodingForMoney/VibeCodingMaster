@@ -218,9 +218,10 @@ services with controlled runtime doubles:
   excluded. Unit coverage verifies strict proposal fields, direct memory-block
   ownership, committed-result recording, and rejection of uncommitted or
   out-of-scope memory edits. Architect restart coverage verifies
-  that Auto Memory assigns and preserves a planning-session candidate, blocks
-  replacement when that candidate is missing, and supplies its run snapshot to
-  the final Architect proposal and Harness Engineer review.
+  that Auto Memory assigns and preserves a planning-session candidate through
+  the real Artifact API, blocks replacement when that candidate is missing,
+  and supplies its run snapshot to the final Architect proposal and Harness
+  Engineer review.
 - PM-declared task workflow state persistence, workspace aggregation, and PM
   session restoration.
 - CCR settings redaction, authenticated model availability, native-vs-CCR

@@ -207,7 +207,7 @@ describe("backend E2E Architect post-planning restart", () => {
     const initialSchedule = await scheduleArchitectRestart(env.app, task.taskSlug);
     expect(initialSchedule.status).toBe("scheduled");
     expect(initialSchedule.memoryCandidatePath).toBeDefined();
-    await writePlanningMemoryCandidate(task.worktreePath, initialSchedule.memoryCandidatePath!);
+    await submitPlanningMemoryCandidate(env.app, task.taskSlug, architect, initialSchedule.memoryCandidatePath!);
     const candidatePath = path.join(task.worktreePath, initialSchedule.memoryCandidatePath!);
     const candidateContent = await fs.readFile(candidatePath, "utf8");
     await writeArchitectRoute(task.worktreePath);
@@ -300,19 +300,20 @@ describe("backend E2E Architect post-planning restart", () => {
       await ctx.stop();
     });
 
-    const stableCandidatePath = ".ai/vcm/memory-review/candidates/architect/planning.md";
-    await writePlanningMemoryCandidate(task.worktreePath, stableCandidatePath);
-    const candidateContent = await fs.readFile(path.join(task.worktreePath, stableCandidatePath), "utf8");
     const scheduled = await scheduleArchitectRestart(env.app, task.taskSlug);
-    expect(scheduled.memoryCandidatePath).toBe(stableCandidatePath);
-    expect(await fs.readFile(path.join(task.worktreePath, stableCandidatePath), "utf8")).toBe(candidateContent);
+    expect(scheduled.memoryCandidatePath).toBe(".ai/vcm/memory-review/candidates/architect/planning.md");
+    await submitPlanningMemoryCandidate(env.app, task.taskSlug, architect, scheduled.memoryCandidatePath!);
+    const candidateContent = await fs.readFile(
+      path.join(task.worktreePath, scheduled.memoryCandidatePath!),
+      "utf8"
+    );
     await writeArchitectRoute(task.worktreePath);
     await postRoleHook(env, task.taskSlug, "architect", "Stop", "architect-memory-session", true);
     await env.mockRuntime.waitForIdle();
 
     expect((await requestGateReview(env.app, task.taskSlug, "architecture-plan")).status).toBe("disabled");
     await waitForArchitectReplacement(env, task.taskSlug, architect.id);
-    expect(await fs.readFile(path.join(task.worktreePath, stableCandidatePath), "utf8")).toBe(candidateContent);
+    expect(await fs.readFile(path.join(task.worktreePath, scheduled.memoryCandidatePath!), "utf8")).toBe(candidateContent);
   });
 
   it("surfaces a missing Auto Memory candidate as blocked and restarts only after explicit retry", async () => {
@@ -354,7 +355,7 @@ describe("backend E2E Architect post-planning restart", () => {
     await env.mockRuntime.waitForIdle();
     expect(env.mockRuntime.getSessionByRole(task.taskSlug, "architect")?.id).toBe(architect.id);
 
-    await writePlanningMemoryCandidate(task.worktreePath, scheduled.memoryCandidatePath!);
+    await submitPlanningMemoryCandidate(env.app, task.taskSlug, architect, scheduled.memoryCandidatePath!);
     expect((await scheduleArchitectRestart(env.app, task.taskSlug)).status).toBe("scheduled");
     await waitForArchitectReplacement(env, task.taskSlug, architect.id);
     expect((await getWorkspaceState(env.app, task.taskSlug)).architectRestart).toBeNull();
@@ -397,7 +398,7 @@ describe("backend E2E Architect post-planning restart", () => {
     });
     expect(await fs.readFile(candidatePath, "utf8")).toBe("invalid proposal\n");
 
-    await writePlanningMemoryCandidate(task.worktreePath, scheduled.memoryCandidatePath!);
+    await submitPlanningMemoryCandidate(env.app, task.taskSlug, architect, scheduled.memoryCandidatePath!);
     expect((await scheduleArchitectRestart(env.app, task.taskSlug)).status).toBe("scheduled");
     await waitForArchitectReplacement(env, task.taskSlug, architect.id);
   });
@@ -414,7 +415,7 @@ describe("backend E2E Architect post-planning restart", () => {
 
     const original = await startRole(env.app, task.taskSlug, "architect");
     const scheduled = await scheduleArchitectRestart(env.app, task.taskSlug);
-    await writePlanningMemoryCandidate(task.worktreePath, scheduled.memoryCandidatePath!);
+    await submitPlanningMemoryCandidate(env.app, task.taskSlug, original, scheduled.memoryCandidatePath!);
     const candidatePath = path.join(task.worktreePath, scheduled.memoryCandidatePath!);
     const candidateContent = await fs.readFile(candidatePath, "utf8");
 
@@ -531,10 +532,13 @@ async function writeArchitectRoute(
   );
 }
 
-async function writePlanningMemoryCandidate(taskRepoRoot: string, relativePath: string): Promise<void> {
-  const candidatePath = path.join(taskRepoRoot, relativePath);
-  await fs.mkdir(path.dirname(candidatePath), { recursive: true });
-  await fs.writeFile(candidatePath, [
+async function submitPlanningMemoryCandidate(
+  app: Parameters<typeof injectOk>[0],
+  taskSlug: string,
+  session: RoleSessionRecord,
+  relativePath: string
+): Promise<void> {
+  const content = [
     "# Memory Proposal",
     "Decision: update",
     "",
@@ -554,7 +558,25 @@ async function writePlanningMemoryCandidate(taskRepoRoot: string, relativePath: 
     "## Remove",
     "none",
     ""
-  ].join("\n"), "utf8");
+  ].join("\n");
+  const response = await injectOk(app, {
+    method: "POST",
+    url: `/api/tasks/${taskSlug}/artifacts/submit`,
+    payload: {
+      kind: "memory-proposal",
+      mode: "final",
+      role: "architect",
+      runtimeSessionToken: session.runtimeSessionToken,
+      content,
+      path: relativePath
+    }
+  });
+  expect(response.json()).toMatchObject({
+    ok: true,
+    kind: "memory-proposal",
+    path: relativePath,
+    status: "accepted"
+  });
 }
 
 async function waitForArchitectReplacement(

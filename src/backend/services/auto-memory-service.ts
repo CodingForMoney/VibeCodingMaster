@@ -30,6 +30,7 @@ import type { AppSettingsService } from "./app-settings-service.js";
 import {
   ARCHITECT_PLANNING_MEMORY_CANDIDATE_PATH,
   architectPlanningCandidateSnapshotPath,
+  memoryReviewRoleDraftPath,
   MEMORY_REVIEW_RUNS_ROOT,
   MEMORY_REVIEW_STATE_PATH
 } from "./memory-review-paths.js";
@@ -368,7 +369,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     const runId = createRunId(timestamp, "auto");
     const drafts: MemoryDraftState[] = roles.map((role) => ({
       role,
-      path: `${MEMORY_REVIEW_RUNS_ROOT}/${runId}/drafts/${role}.md`,
+      path: memoryReviewRoleDraftPath(runId, role),
       status: "pending"
     }));
     const state: StoredMemoryReviewState = {
