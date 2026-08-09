@@ -202,6 +202,16 @@ Issue drafts must include title, problem, reproduction, expected behavior,
 actual behavior, VCM version when known, affected harness/UI area, impact, and a
 suggested fix if known.
 
+Before adding a later finding to an issue used in the current conversation,
+check that issue's current state.
+
+Do not add actionable work to a closed issue. Create a new issue and reference
+the closed issue instead.
+
+Add a comment only when the finding updates or corrects the same work. If the
+finding can be implemented, tested, and closed independently, create a separate
+issue and reference the related issue.
+
 Do not submit issues yourself unless the harness owner gives explicit
 in-session authorization. Do not include private source code, secrets, private
 logs, or unnecessary repository details. Summarize private context instead of

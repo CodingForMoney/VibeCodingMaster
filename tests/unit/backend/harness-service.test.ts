@@ -312,6 +312,9 @@ describe("createHarnessService", () => {
     expect(harnessEngineerAgent).toContain("active task worktree named by VCM");
     expect(harnessEngineerAgent).toContain("Commit every applied harness change yourself");
     expect(harnessEngineerAgent).toContain("CodingForMoney/VibeCodingMaster");
+    expect(harnessEngineerAgent).toContain("issue used in the current conversation");
+    expect(harnessEngineerAgent).toContain("Do not add actionable work to a closed issue");
+    expect(harnessEngineerAgent).toContain("implemented, tested, and closed independently");
     expect(harnessEngineerAgent).toContain("unless the harness owner gives explicit");
     expect(harnessEngineerAgent).not.toContain("Do not act as PM, Architect, Coder");
     expect(await fs.readText("/repo/.ai/tools/request-gate-review")).toContain("Request a VCM-managed Gate Review Gate");
