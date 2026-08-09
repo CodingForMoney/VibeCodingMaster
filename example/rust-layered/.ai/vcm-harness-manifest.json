@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "manager": "vcm",
-  "harnessVersion": "0.7.45",
+  "harnessVersion": "0.7.46",
   "installMode": "fixed",
   "installedAt": "2026-06-07T00:00:00Z",
   "updatedAt": "2026-08-09T07:47:59.973Z",
