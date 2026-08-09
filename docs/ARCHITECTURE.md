@@ -37,13 +37,13 @@ layers plus supporting tools.
   `artifact-service`, `harness-service`, `harness-feedback-service`,
   `auto-memory-service`,
   `gate-review-service`, `translation-service`/`translation-worker-service`,
-  `ccr-integration-service`, `usage-analytics-service`, `job-guard-service`, and
+  `codex-bridge-integration-service`, `usage-analytics-service`, `job-guard-service`, and
   `command-dispatcher`.
 - `runtime/`: PTY-backed terminal runtime (`node-pty-runtime`,
   `terminal-runtime`, `session-registry`, `terminal-submit`) that supervises one
   Claude Code process per role.
 - `adapters/`: side-effect boundaries — `claude-adapter`,
-  `ccr-gateway-adapter`, `git-adapter`, `command-runner`, `filesystem`.
+  `codex-bridge-adapter`, `git-adapter`, `command-runner`, `filesystem`.
 - `gateway/`: mobile gateway service plus channel implementations
   (Weixin iLink, Lark) and command parsing; channel connection is gated by a
   runtime, default-off switch. Detailed sub-area design lives in
@@ -93,53 +93,46 @@ frontend  --depends on-->  shared  <--depends on--  backend
   not contain business logic; services should reach the outside world only
   through adapters and the runtime.
 
-## CCR Model Integration
+## Codex Bridge Model Integration
 
-CCR is an optional global integration for running the existing VCM-managed
-Claude Code processes against one supported GPT model. The host owns the CCR
-process and account authentication. The VCM backend identifies CCR at the fixed
-local endpoint `http://127.0.0.1:3456` or DevContainer endpoint
-`http://host.docker.internal:3456`; the frontend never calls CCR.
+Codex Bridge is an optional global integration for running VCM-managed Claude
+Code processes against models from the user's Codex subscription. The host owns
+the Bridge process and Codex login. The backend probes the local and
+DevContainer host endpoints; the frontend never calls the Bridge directly.
 
-`ccr-gateway-adapter` verifies the gateway identity and performs authenticated
-model discovery, selecting the first valid runtime endpoint. `ccr-integration-service` owns the enabled state, volatile
-connection result, shared in-flight check, short cache, safe API response, and
-session-scoped child environment and settings override. The API key is
-persisted only in global app settings and is used for gateway checks, model
-discovery, and GPT child authentication through the helper; settings responses
-expose only whether it is configured. GPT-backed children clear
-inherited Anthropic credential variables and receive an isolated `apiKeyHelper`
-through `--settings`. They also use the VCM-owned Claude configuration root
-`~/.vcm/claude/ccr`, which keeps CCR model discovery, cache, and transcripts out
-of the user's global `~/.claude` state. VCM never edits global Claude settings.
-Native child processes retain normal Claude configuration and authentication;
-only inherited environment variables that identify the local CCR gateway are
-removed from that child.
+`codex-bridge-adapter` validates `/health`, reads `/auth/status`, and performs
+authenticated dynamic model discovery. `codex-bridge-integration-service` owns
+the enabled state, short-lived probe cache, safe status response, and child-only
+launch profile. The global Bridge API key is write-only through VCM APIs and is
+provided to Claude Code through an isolated `apiKeyHelper`. Bridge-backed
+children use `~/.vcm/claude/codex-bridge`; VCM never edits global Claude
+settings. Native children retain their normal Claude configuration and have
+inherited local Bridge takeover variables removed.
 
-`session-service` is the single process-launch boundary for CCR. It requests the
-model environment before every Start, Resume, or Restart path and merges it into
-the PTY child environment. This covers workflow roles, Reviewer,
-Translator, Harness Engineer, Harness Bootstrap, and one-click launch without
-separate role-specific CCR logic. `claude-adapter` omits native `--model` only
-for the namespaced CCR model. Native Claude commands remain unchanged, and the
-native child environment removes only inherited local-CCR takeover variables.
-CCR/GPT children receive `CLAUDE_CODE_MAX_CONTEXT_TOKENS=258400`,
+`session-service` is the single process-launch boundary. Every Start, Resume,
+and Restart requests the model profile before process creation, covering all
+workflow and auxiliary roles without role-specific Bridge logic. Models use the
+`codex-bridge:<model-id>` namespace and are accepted only while the exact model
+remains in the current Bridge catalog. `claude-adapter` omits native `--model`
+for these sessions because the selected model is supplied through the isolated
+environment. Bridge children retain
+`CLAUDE_CODE_MAX_CONTEXT_TOKENS=258400`,
 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=258400`, and
 `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=90`. Native Claude children receive none of
 these overrides. Context-limit StopFailure
 diagnostics are terminal because retrying the unchanged context cannot recover
 them.
-An unavailable CCR selection fails before process creation and is never
+An unavailable Bridge selection fails before process creation and is never
 normalized or silently replaced. Session records persist the Claude
 configuration root so transcript discovery and Resume use the same provider
-state. Resume cannot cross between native Claude and CCR; Restart creates the
+state. Resume cannot cross between native Claude and Codex Bridge; Restart creates the
 new provider Session.
 
 ## Task Usage Analytics
 
 `session-service` enables Claude Code OpenTelemetry log export for every native
 Claude role process and attaches only `vcm.role` plus a per-process launch ID.
-It disables the exporter for CCR/GPT processes. Prompt, response, tool-detail,
+It disables the exporter for Codex Bridge processes. Prompt, response, tool-detail,
 and raw API body logging remain disabled.
 
 Claude Code posts `api_request` events to
@@ -190,7 +183,7 @@ Regenerate both after changing module layout, public exports, or HTTP routes.
 
 VCM ships the local `vcm-lsp-bridge` Claude Code plugin. Session Service passes
 it through `--plugin-dir` and enables the LSP tool only for Architect sessions
-on both native Claude and CCR launches. Other roles do not load the plugin.
+on both native Claude and Codex Bridge launches. Other roles do not load the plugin.
 Each bundled language server may restart up to three times after a crash. The
 Rust server disables its redundant check-on-save run because VCM roles execute
 the required validation explicitly. Server restart recovers a terminated LSP

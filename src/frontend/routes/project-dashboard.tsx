@@ -2,7 +2,7 @@ import { FormEvent, type ReactNode, useEffect, useState } from "react";
 import {
   TRANSLATION_OUTPUT_MODE_OPTIONS,
   TRANSLATION_TARGET_LANGUAGE_OPTIONS,
-  type CcrIntegrationStatus,
+  type CodexBridgeIntegrationStatus,
   type LaunchTemplate,
   type PermissionRequestMode,
   type ThemeMode,
@@ -72,7 +72,7 @@ export interface ProjectDashboardProps {
   gatewayQrCheck: CheckGatewayQrLoginResult | null;
   gatewayLarkRegistration: StartGatewayLarkRegistrationResult | null;
   gatewayLarkRegistrationCheck: CheckGatewayLarkRegistrationResult | null;
-  ccrStatus: CcrIntegrationStatus | null;
+  codexBridgeStatus: CodexBridgeIntegrationStatus | null;
   modelOptions: SessionModelOption[];
   busy?: boolean;
   onConnect(repoPath: string): Promise<void>;
@@ -92,8 +92,8 @@ export interface ProjectDashboardProps {
   onRefreshGateway(): Promise<void>;
   onGatewayEnabledChange(enabled: boolean): void;
   onGatewaySettingsChange(input: UpdateGatewaySettingsRequest): Promise<void>;
-  onCcrSettingsChange(input: { enabled?: boolean; apiKey?: string; clearApiKey?: boolean }): Promise<void>;
-  onCcrCheck(): Promise<void>;
+  onCodexBridgeSettingsChange(input: { enabled?: boolean; apiKey?: string; clearApiKey?: boolean }): Promise<void>;
+  onCodexBridgeCheck(): Promise<void>;
   onGatewayTranslationChange(enabled: boolean): void;
   // Arm/disarm the runtime channel-connection switch (process-local, not persisted).
   onGatewayConnectionChange(enabled: boolean): void;
@@ -158,7 +158,7 @@ export function ProjectDashboard({
   gatewayQrCheck,
   gatewayLarkRegistration,
   gatewayLarkRegistrationCheck,
-  ccrStatus,
+  codexBridgeStatus,
   modelOptions,
   busy,
   onConnect,
@@ -178,8 +178,8 @@ export function ProjectDashboard({
   onRefreshGateway,
   onGatewayEnabledChange,
   onGatewaySettingsChange,
-  onCcrSettingsChange,
-  onCcrCheck,
+  onCodexBridgeSettingsChange,
+  onCodexBridgeCheck,
   onGatewayTranslationChange,
   onGatewayConnectionChange,
   onStartGatewayQrLogin,
@@ -336,11 +336,11 @@ export function ProjectDashboard({
               <option value="allowAll">allow all</option>
             </select>
           </label>
-          <CcrIntegrationSettings
+          <CodexBridgeIntegrationSettings
             busy={busy}
-            status={ccrStatus}
-            onCheck={onCcrCheck}
-            onSettingsChange={onCcrSettingsChange}
+            status={codexBridgeStatus}
+            onCheck={onCodexBridgeCheck}
+            onSettingsChange={onCodexBridgeSettingsChange}
           />
           <button
             className="settings-toggle"
@@ -584,14 +584,14 @@ function getLaunchTemplateSummary(template: LaunchTemplate): string {
   return `Launch template: ${getLaunchTemplateBadge(template)}; ${roles}`;
 }
 
-function CcrIntegrationSettings({
+function CodexBridgeIntegrationSettings({
   busy,
   status,
   onCheck,
   onSettingsChange
 }: {
   busy?: boolean;
-  status: CcrIntegrationStatus | null;
+  status: CodexBridgeIntegrationStatus | null;
   onCheck(): Promise<void>;
   onSettingsChange(input: { enabled?: boolean; apiKey?: string; clearApiKey?: boolean }): Promise<void>;
 }) {
@@ -609,20 +609,20 @@ function CcrIntegrationSettings({
   };
 
   return (
-    <div className="ccr-settings">
+    <div className="codex-bridge-settings">
       <SwitchControl
         checked={Boolean(status?.enabled)}
         className="sidebar-switch"
         disabled={busy || !configured}
-        label="CCR GPT models"
-        title={configured ? "Enable GPT models through Claude Code Router" : "Save the CCR API key first"}
+        label="Codex Bridge models"
+        title={configured ? "Enable Codex models through Codex Bridge" : "Save the Codex Bridge API key first"}
         onChange={(enabled) => void onSettingsChange({ enabled })}
       />
-      <form className="ccr-api-key-form" onSubmit={(event) => void saveApiKey(event)}>
-        <label htmlFor="ccr-api-key">CCR API key</label>
+      <form className="codex-bridge-api-key-form" onSubmit={(event) => void saveApiKey(event)}>
+        <label htmlFor="codex-bridge-api-key">Codex Bridge API key</label>
         <div>
           <input
-            id="ccr-api-key"
+            id="codex-bridge-api-key"
             type="password"
             autoComplete="off"
             disabled={busy}
@@ -634,10 +634,10 @@ function CcrIntegrationSettings({
         </div>
       </form>
       <div className="settings-status-row">
-        <span>CCR status</span>
+        <span>Codex Bridge status</span>
         <strong>{status?.connectionState ?? "loading"}</strong>
       </div>
-      <div className="ccr-actions">
+      <div className="codex-bridge-actions">
         <button type="button" disabled={busy || !status?.enabled} onClick={() => void onCheck()}>
           Check
         </button>

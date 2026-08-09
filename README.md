@@ -243,18 +243,18 @@ Open `Usage Analytics` in the sidebar `Task` section to inspect native Claude
 Code usage for the active task. The report shows task totals and breakdowns by
 role and model for input, output, cache-read, and cache-creation tokens plus
 estimated USD cost. It combines every restart and resumed Claude session for
-all seven roles. CCR/GPT usage is excluded.
+all seven roles. Codex Bridge usage is excluded.
 
 VCM retains only aggregate task data in
 `<task-worktree>/.ai/vcm/telemetry/usage.json`. The file is temporary runtime
 state and is removed with the task worktree when the task is closed.
 
-### GPT Through Claude Code Router
+### GPT Through Codex Bridge
 
-VCM can launch its normal Claude Code sessions with `GPT-5.6 Sol (CCR)` through
-a host-running [Claude Code Router](https://github.com/musistudio/claude-code-router).
-CCR must already be installed, authenticated, configured, and running on the
-host. VCM does not manage the CCR process.
+VCM can launch its normal Claude Code sessions with models provided by a
+host-running Codex Bridge. The Bridge must already be installed and running,
+and Codex must be logged in on the host. VCM does not manage the Bridge process
+or Codex login.
 
 VCM automatically checks the local-host and DevContainer endpoints:
 
@@ -263,36 +263,34 @@ http://127.0.0.1:3456
 http://host.docker.internal:3456
 ```
 
-Configure CCR to listen on port `3456` with an API key. When VCM runs in a
-DevContainer, make the second endpoint reachable from the container. In the VCM
-`Settings` section:
+Configure Codex Bridge to listen on port `3456`. When VCM runs in a
+DevContainer, start it with a container-reachable bind address such as
+`codex-bridge serve --host 0.0.0.0 --port 3456`. In the VCM `Settings` section:
 
-1. enter and save the CCR API key;
-2. enable `CCR GPT models`;
+1. enter and save the Codex Bridge API key;
+2. enable `Codex Bridge models`;
 3. confirm the status is `available`;
-4. select `GPT-5.6 Sol (CCR)` in any Session model control.
+4. select any discovered Codex Bridge model in a Session model control.
 
 The key is stored in global VCM state (`~/.vcm/settings.json`) with owner-only
-permissions and is never returned by the settings API. It is used for CCR
-checks, model discovery, and the GPT-only `apiKeyHelper`. GPT sessions receive a
+permissions and is never returned by the settings API. It is used for Bridge
+checks, model discovery, and the Bridge-only `apiKeyHelper`. Bridge sessions receive a
 child-only `--settings` override and use the isolated Claude configuration root
-`~/.vcm/claude/ccr`. VCM never edits `~/.claude/settings.json`. Native Claude
+`~/.vcm/claude/codex-bridge`. VCM never edits `~/.claude/settings.json`. Native Claude
 sessions keep their normal configuration and account authentication; VCM only
-removes inherited environment variables that clearly point at the local CCR
-gateway from the native child process. Configure CCR without enabling its
-global Claude Code or Claude App takeover if those clients should remain on
-Anthropic.
+removes inherited environment variables that clearly point at the local Bridge
+from the native child process.
 
-CCR/GPT child processes use a hard context limit and auto-compaction window of
+Codex Bridge child processes use a hard context limit and auto-compaction window of
 `258400` tokens. VCM sets Claude Code's proactive compaction threshold to `90%`
-(about `232560` tokens), leaving headroom before the gateway limit. Native
+(about `232560` tokens), leaving headroom before the Codex API limit. Native
 Claude sessions receive no VCM-owned context override.
 
 Resume keeps the provider recorded by the existing Session. Use Restart when
-switching between a native Claude model and `GPT-5.6 Sol (CCR)`. If CCR is
-disabled, unreachable, rejects the key, or does not expose
-`Codex API/gpt-5.6-sol`, VCM blocks the new Start, Resume, or Restart and does
-not fall back to another model.
+switching between native Claude and Codex Bridge. If the Bridge is disabled,
+unreachable, rejects the key, has unavailable Codex credentials, or no longer
+exposes the selected model, VCM blocks the new Start, Resume, or Restart and
+does not fall back to another model.
 
 ## Launch Template
 
@@ -482,7 +480,7 @@ Use it to:
   appropriate
 
 VCM bundles the Claude Code LSP bridge and loads it only for Architect sessions,
-including CCR launches. The project environment must still
+including Codex Bridge launches. The project environment must still
 provide the language server for each detected language: `rust-analyzer`,
 `typescript-language-server`, `pyright-langserver`, `gopls`, `clangd`, or
 `jdtls`. Architect preloads `vcm-code-navigation` and uses LSP for semantic

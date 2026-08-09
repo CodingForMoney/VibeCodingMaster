@@ -12,20 +12,20 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
-describe("CCR API key helper", () => {
-  it("reads the write-only CCR key from the VCM data directory", async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vcm-ccr-helper-"));
+describe("Codex Bridge API key helper", () => {
+  it("reads the write-only Bridge key from the VCM data directory", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vcm-codex-bridge-helper-"));
     tempDirs.push(dir);
     await fs.writeFile(path.join(dir, "settings.json"), JSON.stringify({
-      ccr: { apiKey: "test-ccr-key" }
+      codexBridge: { apiKey: "test-codex-bridge-key" }
     }), "utf8");
 
     const result = await execFileAsync(process.execPath, [
-      path.resolve("scripts/ccr-api-key-helper.mjs")
+      path.resolve("scripts/codex-bridge-api-key-helper.mjs")
     ], {
       env: { ...process.env, VCM_DATA_DIR: dir }
     });
 
-    expect(result.stdout).toBe("test-ccr-key\n");
+    expect(result.stdout).toBe("test-codex-bridge-key\n");
   });
 });

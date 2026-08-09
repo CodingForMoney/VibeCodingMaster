@@ -69,49 +69,62 @@ export const CLAUDE_MODEL_OPTIONS = [
 
 export type ClaudeModel = typeof CLAUDE_MODEL_OPTIONS[number]["value"];
 
-export const CCR_LOCAL_GATEWAY_BASE_URL = "http://127.0.0.1:3456" as const;
-export const CCR_CONTAINER_GATEWAY_BASE_URL = "http://host.docker.internal:3456" as const;
-export const CCR_GATEWAY_BASE_URL = CCR_CONTAINER_GATEWAY_BASE_URL;
-export const CCR_GATEWAY_BASE_URLS = [
-  CCR_LOCAL_GATEWAY_BASE_URL,
-  CCR_CONTAINER_GATEWAY_BASE_URL
+export const CODEX_BRIDGE_LOCAL_BASE_URL = "http://127.0.0.1:3456" as const;
+export const CODEX_BRIDGE_CONTAINER_BASE_URL = "http://host.docker.internal:3456" as const;
+export const CODEX_BRIDGE_BASE_URL = CODEX_BRIDGE_CONTAINER_BASE_URL;
+export const CODEX_BRIDGE_BASE_URLS = [
+  CODEX_BRIDGE_LOCAL_BASE_URL,
+  CODEX_BRIDGE_CONTAINER_BASE_URL
 ] as const;
-export const CCR_GPT_MODEL_ID = "Codex API/gpt-5.6-sol" as const;
-export const CCR_GPT_SESSION_MODEL = `ccr:${CCR_GPT_MODEL_ID}` as const;
-export const CCR_GPT_EFFECTIVE_CONTEXT_TOKENS = 258_400;
-export const CCR_GPT_AUTO_COMPACT_WINDOW_TOKENS = CCR_GPT_EFFECTIVE_CONTEXT_TOKENS;
-export const CCR_GPT_AUTO_COMPACT_PERCENT = 90;
-export type CcrSessionModel = typeof CCR_GPT_SESSION_MODEL;
+export const CODEX_BRIDGE_EFFECTIVE_CONTEXT_TOKENS = 258_400;
+export const CODEX_BRIDGE_AUTO_COMPACT_WINDOW_TOKENS = CODEX_BRIDGE_EFFECTIVE_CONTEXT_TOKENS;
+export const CODEX_BRIDGE_AUTO_COMPACT_PERCENT = 90;
+export type CodexBridgeSessionModel = `codex-bridge:${string}`;
 
-export type SessionModel = ClaudeModel | CcrSessionModel;
+export type SessionModel = ClaudeModel | CodexBridgeSessionModel;
+
+export interface CodexBridgeModelDescriptor {
+  id: string;
+  displayName?: string;
+}
 
 export interface SessionModelOption {
   value: SessionModel;
   label: string;
   description: string;
-  source: "claude" | "ccr";
+  source: "claude" | "codex-bridge";
   available: boolean;
   unavailableReason?: string;
 }
 
-export function isCcrSessionModel(model: SessionModel): model is CcrSessionModel {
-  return model === CCR_GPT_SESSION_MODEL;
+export function isCodexBridgeSessionModel(model: unknown): model is CodexBridgeSessionModel {
+  return typeof model === "string"
+    && model.startsWith("codex-bridge:")
+    && model.length > "codex-bridge:".length;
+}
+
+export function toCodexBridgeSessionModel(modelId: string): CodexBridgeSessionModel {
+  return `codex-bridge:${modelId}`;
+}
+
+export function getCodexBridgeModelId(model: CodexBridgeSessionModel): string {
+  return model.slice("codex-bridge:".length);
 }
 
 export function createSessionModelOptions(
-  ccrAvailable = false,
-  unavailableReason = "CCR GPT models are unavailable."
+  codexBridgeModels: readonly CodexBridgeModelDescriptor[] = [],
+  unavailableReason?: string
 ): SessionModelOption[] {
   return [
     ...CLAUDE_MODEL_OPTIONS,
-    {
-      value: CCR_GPT_SESSION_MODEL,
-      label: "GPT-5.6 Sol (CCR)",
-      description: "GPT-5.6 Sol through the host CCR gateway",
-      source: "ccr",
-      available: ccrAvailable,
-      ...(ccrAvailable ? {} : { unavailableReason })
-    }
+    ...codexBridgeModels.map((model) => ({
+      value: toCodexBridgeSessionModel(model.id),
+      label: `${model.displayName ?? model.id} (Codex Bridge)`,
+      description: `${model.id} through the host Codex Bridge`,
+      source: "codex-bridge" as const,
+      available: unavailableReason === undefined,
+      ...(unavailableReason === undefined ? {} : { unavailableReason })
+    }))
   ];
 }
 

@@ -8,9 +8,9 @@ import { createNodeFileSystemAdapter } from "../../../../src/backend/adapters/fi
 import { createCommandRunner } from "../../../../src/backend/adapters/command-runner.js";
 import { createGitAdapter } from "../../../../src/backend/adapters/git-adapter.js";
 import type { ClaudeAdapter } from "../../../../src/backend/adapters/claude-adapter.js";
-import type { CcrGatewayAdapter } from "../../../../src/backend/adapters/ccr-gateway-adapter.js";
+import type { CodexBridgeAdapter } from "../../../../src/backend/adapters/codex-bridge-adapter.js";
 import { createAppSettingsService } from "../../../../src/backend/services/app-settings-service.js";
-import { createCcrIntegrationService } from "../../../../src/backend/services/ccr-integration-service.js";
+import { createCodexBridgeIntegrationService } from "../../../../src/backend/services/codex-bridge-integration-service.js";
 import { createArtifactService } from "../../../../src/backend/services/artifact-service.js";
 import { createProjectService } from "../../../../src/backend/services/project-service.js";
 import { createTaskService } from "../../../../src/backend/services/task-service.js";
@@ -50,7 +50,7 @@ import { readVcmPackageVersion } from "../../../../src/backend/app-version.js";
 import type { RoleName } from "../../../../src/shared/types/role.js";
 import { roleRuntimeDisallowedTools, roleUsesLsp } from "../../../../src/backend/role-tool-policy.js";
 import {
-  isCcrSessionModel,
+  isCodexBridgeSessionModel,
   type ClaudePermissionMode,
   type SessionEffort,
   type SessionModel
@@ -69,8 +69,8 @@ export interface MockClaudeE2eApp {
 
 export interface MockClaudeE2eAppOptions {
   tempRoot?: string;
-  ccrGateway?: CcrGatewayAdapter;
-  ccrBaseEnv?: NodeJS.ProcessEnv;
+  codexBridge?: CodexBridgeAdapter;
+  codexBridgeBaseEnv?: NodeJS.ProcessEnv;
   now?: () => string;
   workflowControl?: boolean;
 }
@@ -89,13 +89,17 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
   const mockRuntime = new MockClaudeRuntime({ transcriptRoot, now: options.now });
   const claude = createMockClaudeAdapter();
   const appSettings = createAppSettingsService({ fs: fsAdapter, settingsPath });
-  const ccrIntegration = createCcrIntegrationService({
+  const codexBridgeIntegration = createCodexBridgeIntegrationService({
     settings: appSettings,
-    baseEnv: options.ccrBaseEnv ?? {},
-    configDir: path.join(tempRoot, "settings", "claude", "ccr"),
-    gateway: options.ccrGateway ?? {
+    baseEnv: options.codexBridgeBaseEnv ?? {},
+    configDir: path.join(tempRoot, "settings", "claude", "codex-bridge"),
+    bridge: options.codexBridge ?? {
       async probe() {
-        return { connectionState: "available", modelAvailable: true };
+        return {
+          connectionState: "available",
+          modelAvailable: true,
+          models: [{ id: "gpt-5.5", displayName: "GPT-5.5" }]
+        };
       }
     }
   });
@@ -116,7 +120,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     projectService,
     taskService,
     taskWorkflowService,
-    ccrIntegration,
+    codexBridgeIntegration,
     apiUrl: "http://127.0.0.1/mock-vcm",
     now: options.now,
     isProcessAlive(pid) {
@@ -361,7 +365,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
 
   const deps: ServerDeps = {
     appSettings,
-    ccrIntegration,
+    codexBridgeIntegration,
     projectService,
     taskService,
     taskCloseService,
@@ -446,7 +450,7 @@ function createMockClaudeAdapter(): ClaudeAdapter {
       if (claudeSessionId) {
         args.push(resume ? "--resume" : "--session-id", claudeSessionId);
       }
-      if (!isCcrSessionModel(model)) {
+      if (!isCodexBridgeSessionModel(model)) {
         args.push("--model", model);
       }
       if (effort === "ultracode") {

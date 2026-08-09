@@ -5,7 +5,7 @@ import {
   DEFAULT_TRANSLATION_OUTPUT_MODE,
   DEFAULT_TRANSLATION_TARGET_LANGUAGE,
   type AppPreferences,
-  type CcrIntegrationStatus,
+  type CodexBridgeIntegrationStatus,
   type LaunchTemplate,
   type PermissionRequestMode,
   type TranslationOutputMode,
@@ -81,7 +81,7 @@ export function App() {
   const [autoMemoryState, setAutoMemoryState] = useState<AutoMemoryStateReport | null>(null);
   const [autoMemoryStateTaskSlug, setAutoMemoryStateTaskSlug] = useState<string | null>(null);
   const [gatewayStatus, setGatewayStatus] = useState<GatewayStatus | null>(null);
-  const [ccrStatus, setCcrStatus] = useState<CcrIntegrationStatus | null>(null);
+  const [codexBridgeStatus, setCodexBridgeStatus] = useState<CodexBridgeIntegrationStatus | null>(null);
   const [gatewayQrLogin, setGatewayQrLogin] = useState<StartGatewayQrLoginResult | null>(null);
   const [gatewayQrCheck, setGatewayQrCheck] = useState<CheckGatewayQrLoginResult | null>(null);
   const [gatewayQrModalOpen, setGatewayQrModalOpen] = useState(false);
@@ -155,7 +155,7 @@ export function App() {
   const effectiveTranslationEnabled = Boolean(translationEnabled && translationBaseReady && translatorSessionRunning);
   const canSaveLaunchTemplate = Boolean(activeTaskLaunchState?.statusLoaded);
   const canOneClickStart = Boolean(activeTask && activeTaskLaunchState?.statusLoaded && !activeTaskLaunchState.hasAnySession);
-  const modelOptions = ccrStatus?.modelOptions ?? createSessionModelOptions();
+  const modelOptions = codexBridgeStatus?.modelOptions ?? createSessionModelOptions();
 
   const applyPreferences = useCallback((
     preferences: AppPreferences,
@@ -539,13 +539,13 @@ export function App() {
       apiClient.getRecentRepositoryPaths(),
       apiClient.getAppPreferences(),
       apiClient.getGatewayStatus(),
-      apiClient.getCcrIntegrationStatus()
+      apiClient.getCodexBridgeIntegrationStatus()
     ])
-      .then(async ([currentProject, recentPaths, preferences, nextGatewayStatus, nextCcrStatus]) => {
+      .then(async ([currentProject, recentPaths, preferences, nextGatewayStatus, nextCodexBridgeStatus]) => {
         setProject(currentProject);
         setRecentRepositoryPaths(recentPaths);
         setGatewayStatus(nextGatewayStatus);
-        setCcrStatus(nextCcrStatus);
+        setCodexBridgeStatus(nextCodexBridgeStatus);
         applyPreferences(preferences, { syncToolLaunchOptions: true });
         if (currentProject) {
           await loadTasks();
@@ -790,7 +790,7 @@ export function App() {
           gatewayQrCheck={gatewayQrCheck}
           gatewayLarkRegistration={gatewayLarkRegistration}
           gatewayLarkRegistrationCheck={gatewayLarkRegistrationCheck}
-          ccrStatus={ccrStatus}
+          codexBridgeStatus={codexBridgeStatus}
           modelOptions={modelOptions}
           busy={busy}
           onConnect={(repoPath) => withBusy(async () => {
@@ -921,12 +921,12 @@ export function App() {
             const nextStatus = await apiClient.updateGatewaySettings(input);
             setGatewayStatus(nextStatus);
           }, "Update Gateway settings")}
-          onCcrSettingsChange={(input) => withBusy(async () => {
-            setCcrStatus(await apiClient.updateCcrIntegration(input));
-          }, "Update CCR settings")}
-          onCcrCheck={() => withBusy(async () => {
-            setCcrStatus(await apiClient.checkCcrIntegration());
-          }, "Check CCR connection")}
+          onCodexBridgeSettingsChange={(input) => withBusy(async () => {
+            setCodexBridgeStatus(await apiClient.updateCodexBridgeIntegration(input));
+          }, "Update Codex Bridge settings")}
+          onCodexBridgeCheck={() => withBusy(async () => {
+            setCodexBridgeStatus(await apiClient.checkCodexBridgeIntegration());
+          }, "Check Codex Bridge connection")}
           onGatewayTranslationChange={(enabled) => {
             void withBusy(async () => {
               const nextStatus = await apiClient.updateGatewaySettings({ translationEnabled: enabled });

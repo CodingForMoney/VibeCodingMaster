@@ -33,7 +33,7 @@ describe("createServer", () => {
     await app.close();
 
     expect(calls).toEqual([
-      "ccr:initialize",
+      "codex-bridge:initialize",
       "cleanup:/repo-one",
       "cleanup:/repo-two",
       "terminal-exit:start",
@@ -53,9 +53,9 @@ function getRepoRoot(): string {
 function createServerDepsStub(calls: string[]): ServerDeps {
   return {
     appSettings: {} as never,
-    ccrIntegration: {
+    codexBridgeIntegration: {
       async initialize() {
-        calls.push("ccr:initialize");
+        calls.push("codex-bridge:initialize");
       }
     } as never,
     projectService: {

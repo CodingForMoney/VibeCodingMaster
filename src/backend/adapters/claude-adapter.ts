@@ -1,7 +1,7 @@
 import type { RoleName } from "../../shared/types/role.js";
 import { roleRuntimeDisallowedTools, roleUsesLsp } from "../role-tool-policy.js";
 import {
-  isCcrSessionModel,
+  isCodexBridgeSessionModel,
   type ClaudePermissionMode,
   type SessionEffort,
   type SessionModel
@@ -58,7 +58,7 @@ export function createClaudeAdapter(runner: CommandRunner): ClaudeAdapter {
       if (claudeSessionId) {
         args.push(resume ? "--resume" : "--session-id", claudeSessionId);
       }
-      if (!isCcrSessionModel(model)) {
+      if (!isCodexBridgeSessionModel(model)) {
         args.push("--model", model);
       }
       if (effort === "ultracode") {

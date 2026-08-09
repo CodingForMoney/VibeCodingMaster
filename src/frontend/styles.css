@@ -966,28 +966,28 @@ h2 {
   color: #202326;
 }
 
-.ccr-settings {
+.codex-bridge-settings {
   display: grid;
   gap: 8px;
   border-top: 1px solid #d4cec3;
   padding-top: 8px;
 }
 
-.ccr-api-key-form {
+.codex-bridge-api-key-form {
   display: grid;
   gap: 5px;
   color: #5f6a6c;
   font-size: 13px;
 }
 
-.ccr-api-key-form > div,
-.ccr-actions {
+.codex-bridge-api-key-form > div,
+.codex-bridge-actions {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px;
 }
 
-.ccr-api-key-form input {
+.codex-bridge-api-key-form input {
   min-width: 0;
   min-height: 30px;
   border: 1px solid #b9b0a1;
@@ -997,7 +997,7 @@ h2 {
   padding: 4px 7px;
 }
 
-.ccr-actions button {
+.codex-bridge-actions button {
   display: block;
   text-align: center;
 }
@@ -3922,7 +3922,7 @@ h2 {
 
 :root[data-theme="dark"] .session-option-field select,
 :root[data-theme="dark"] .settings-select-row select,
-:root[data-theme="dark"] .ccr-api-key-form input {
+:root[data-theme="dark"] .codex-bridge-api-key-form input {
   border-color: #3d4652;
   background: #0d1117;
   color: #e6edf3;
@@ -3932,11 +3932,11 @@ h2 {
   color: #b7c0ca;
 }
 
-:root[data-theme="dark"] .ccr-settings {
+:root[data-theme="dark"] .codex-bridge-settings {
   border-top-color: #30363d;
 }
 
-:root[data-theme="dark"] .ccr-api-key-form {
+:root[data-theme="dark"] .codex-bridge-api-key-form {
   color: #b7c0ca;
 }
 

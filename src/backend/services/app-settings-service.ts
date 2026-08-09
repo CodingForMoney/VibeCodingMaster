@@ -22,7 +22,7 @@ import type { ProjectConfig } from "../../shared/types/project.js";
 import type { ToolRoleName, VcmRoleName } from "../../shared/types/role.js";
 import {
   CLAUDE_MODEL_OPTIONS,
-  CCR_GPT_SESSION_MODEL,
+  isCodexBridgeSessionModel,
   SESSION_EFFORT_OPTIONS,
   type ClaudePermissionMode,
   type SessionEffort,
@@ -35,11 +35,11 @@ export interface AppSettingsFile {
   version: 1;
   preferences: AppPreferences;
   gateReview?: AppGateReviewSettingsState;
-  ccr?: AppCcrIntegrationSettingsState;
+  codexBridge?: AppCodexBridgeIntegrationSettingsState;
   recentRepositoryPaths: string[];
 }
 
-export interface AppCcrIntegrationSettingsState {
+export interface AppCodexBridgeIntegrationSettingsState {
   version: 1;
   enabled: boolean;
   apiKey: string;
@@ -80,8 +80,10 @@ export interface AppSettingsService {
   saveProjectConfig(config: ProjectConfig): Promise<ProjectConfig>;
   getGateReviewSettings(repoRoot: string, taskSlug: string): Promise<AppGateReviewSettings>;
   updateGateReviewSettings(repoRoot: string, taskSlug: string, requiredGates: GateReviewGate[]): Promise<AppGateReviewSettings>;
-  getCcrIntegrationSettings(): Promise<AppCcrIntegrationSettingsState>;
-  updateCcrIntegrationSettings(input: Partial<Pick<AppCcrIntegrationSettingsState, "enabled" | "apiKey">>): Promise<AppCcrIntegrationSettingsState>;
+  getCodexBridgeIntegrationSettings(): Promise<AppCodexBridgeIntegrationSettingsState>;
+  updateCodexBridgeIntegrationSettings(
+    input: Partial<Pick<AppCodexBridgeIntegrationSettingsState, "enabled" | "apiKey">>
+  ): Promise<AppCodexBridgeIntegrationSettingsState>;
   getSettingsPath(): string;
   getProjectIndexPath(): string;
   getProjectConfigPath(repoRoot: string): string;
@@ -260,20 +262,20 @@ export function createAppSettingsService(deps: AppSettingsServiceDeps): AppSetti
         requiredGates: normalizedRequiredGates
       };
     },
-    async getCcrIntegrationSettings() {
-      return normalizeCcrIntegrationSettings((await loadSettings()).ccr);
+    async getCodexBridgeIntegrationSettings() {
+      return normalizeCodexBridgeIntegrationSettings((await loadSettings()).codexBridge);
     },
-    async updateCcrIntegrationSettings(input) {
+    async updateCodexBridgeIntegrationSettings(input) {
       const current = await loadSettings();
-      const ccr = normalizeCcrIntegrationSettings({
-        ...current.ccr,
+      const codexBridge = normalizeCodexBridgeIntegrationSettings({
+        ...current.codexBridge,
         ...input
       });
       await saveSettings({
         ...current,
-        ccr
+        codexBridge
       });
-      return ccr;
+      return codexBridge;
     },
     getSettingsPath() {
       return settingsPath;
@@ -369,11 +371,11 @@ function normalizeSettingsFile(input: Partial<AppSettingsFile>): AppSettingsFile
   if (gateReview) {
     settings.gateReview = gateReview;
   }
-  settings.ccr = normalizeCcrIntegrationSettings(input.ccr);
+  settings.codexBridge = normalizeCodexBridgeIntegrationSettings(input.codexBridge);
   return settings;
 }
 
-function normalizeCcrIntegrationSettings(input: unknown): AppCcrIntegrationSettingsState {
+function normalizeCodexBridgeIntegrationSettings(input: unknown): AppCodexBridgeIntegrationSettingsState {
   const candidate = isObject(input) ? input : {};
   const apiKey = typeof candidate.apiKey === "string" ? candidate.apiKey.trim() : "";
   return {
@@ -485,7 +487,7 @@ function normalizeClaudeModel(input: unknown, fallback: SessionModel): SessionMo
   if (typeof input !== "string") {
     return fallback;
   }
-  if (input === CCR_GPT_SESSION_MODEL) {
+  if (isCodexBridgeSessionModel(input)) {
     return input;
   }
   const model = CLAUDE_MODEL_OPTIONS.find((option) => option.value === input);

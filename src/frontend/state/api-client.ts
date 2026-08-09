@@ -3,9 +3,9 @@ import type { WorkflowControlState } from "../../shared/types/workflow.js";
 import type { RoleStallActionResult } from "../../shared/types/role-stall.js";
 import type {
   AppPreferences,
-  CcrIntegrationStatus,
+  CodexBridgeIntegrationStatus,
   UpdateAppPreferencesRequest,
-  UpdateCcrIntegrationRequest
+  UpdateCodexBridgeIntegrationRequest
 } from "../../shared/types/app-settings.js";
 import type {
   BindGatewayLarkAppRequest,
@@ -99,17 +99,17 @@ export const apiClient = {
       body: JSON.stringify(input)
     });
   },
-  getCcrIntegrationStatus() {
-    return request<CcrIntegrationStatus>("/api/settings/ccr");
+  getCodexBridgeIntegrationStatus() {
+    return request<CodexBridgeIntegrationStatus>("/api/settings/codex-bridge");
   },
-  updateCcrIntegration(input: UpdateCcrIntegrationRequest) {
-    return request<CcrIntegrationStatus>("/api/settings/ccr", {
+  updateCodexBridgeIntegration(input: UpdateCodexBridgeIntegrationRequest) {
+    return request<CodexBridgeIntegrationStatus>("/api/settings/codex-bridge", {
       method: "PUT",
       body: JSON.stringify(input)
     });
   },
-  checkCcrIntegration() {
-    return request<CcrIntegrationStatus>("/api/settings/ccr/check", {
+  checkCodexBridgeIntegration() {
+    return request<CodexBridgeIntegrationStatus>("/api/settings/codex-bridge/check", {
       method: "POST"
     });
   },

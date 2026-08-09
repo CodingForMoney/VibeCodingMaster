@@ -59,20 +59,20 @@ Notes:
   and `harness-revision.e2e.test.ts`; verify all seven task-scoped roles read the
   active worktree revision even when the base repository contains a conflicting
   value, and auxiliary notifications remain in task session storage.
-- CCR model integration change: run `ccr-gateway-adapter.test.ts`,
-  `ccr-integration-service.test.ts`, `ccr-api-key-helper.test.ts`,
+- Codex Bridge integration change: run `codex-bridge-adapter.test.ts`,
+  `codex-bridge-integration-service.test.ts`, `codex-bridge-api-key-helper.test.ts`,
   `claude-adapter.test.ts`, `claude-transcript-service.test.ts`,
-  `session-registry.test.ts`, and `ccr-integration.e2e.test.ts`; verify isolated
-  CCR configuration/transcript paths, native environment cleanup, same-provider
-  Resume, provider switching through Restart, the GPT-only `258400` hard limit
+  `session-registry.test.ts`, and `codex-bridge-integration.e2e.test.ts`; verify isolated
+  Codex Bridge configuration/transcript paths, native environment cleanup, same-provider
+  Resume, provider switching through Restart, the Bridge-only `258400` hard limit
   and auto-compaction window, the `90%` proactive threshold, and unchanged
   native context behavior. Run the complete
   backend E2E suite when changing Session launch wiring.
 - Task usage analytics change: run `usage-analytics-service.test.ts`,
   `usage-analytics-modal.test.ts`, `api-client.test.ts`,
-  `usage-analytics.e2e.test.ts`, and `ccr-integration.e2e.test.ts`. Verify
+  `usage-analytics.e2e.test.ts`, and `codex-bridge-integration.e2e.test.ts`. Verify
   retried OTLP batches are deduplicated, concurrent batches do not lose data,
-  all seven roles aggregate across launches and sessions, CCR/GPT processes do
+  all seven roles aggregate across launches and sessions, Codex Bridge processes do
   not export usage, and no raw event files are retained.
 - Task workflow-state changes: run `task-workflow-service.test.ts`,
   `message-service.test.ts`, `session-service.test.ts`, and
@@ -96,8 +96,8 @@ Notes:
   `claude-adapter.test.ts`, `session-service.test.ts`,
   `role-stall-detector-service.test.ts`,
   `harness-service.test.ts`, `harness-templates-sync.test.ts`,
-  `harness-studio-layout.test.ts`, and `ccr-integration.e2e.test.ts`. Verify the
-  bundled plugin loads only for Architect on native and CCR launches; Coder and
+  `harness-studio-layout.test.ts`, and `codex-bridge-integration.e2e.test.ts`. Verify the
+  bundled plugin loads only for Architect on native and Bridge launches; Coder and
   Reviewer do not load the plugin or preload `vcm-code-navigation`; Architect
   frontmatter preloads the skill; Architect queries accessors, backing fields,
   trait items, implementations, wrappers, and aliases as separate symbols and
@@ -248,14 +248,14 @@ services with controlled runtime doubles:
   Engineer review.
 - PM-declared task workflow state persistence, workspace aggregation, and PM
   session restoration.
-- CCR settings redaction, authenticated model availability, native-vs-CCR
-  command behavior, GPT-only settings overrides, global CCR takeover cleanup,
-  blocked unavailable launches, and shared CCR child environment across
+- Codex Bridge settings redaction, authenticated model availability, native-vs-Bridge
+  command behavior, Bridge-only settings overrides, global Bridge takeover cleanup,
+  blocked unavailable launches, and shared Bridge child environment across
   workflow, Reviewer, Translator, Harness Engineer, and one-click Session paths.
   Context-limit StopFailure diagnostics are covered as non-retryable failures.
 - Native Claude OpenTelemetry ingestion into the active task worktree, including
   task, role, and model aggregation; deduplication and concurrent-write behavior
-  are covered by service tests, while CCR exclusion is covered by the CCR
+  are covered by service tests, while Codex Bridge exclusion is covered by the Bridge
   journey.
 - Workflow-role launch-template normalization remains separate from tool Session
   defaults. Route tests verify that explicit tool Start and Restart persist the

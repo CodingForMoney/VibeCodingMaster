@@ -4,8 +4,7 @@ import { ROLE_NAMES, isDispatchableRole } from "../../shared/constants.js";
 import type { ClaudeHookEventName } from "../../shared/types/claude-hook.js";
 import type { RoleName } from "../../shared/types/role.js";
 import {
-  CCR_GPT_SESSION_MODEL,
-  isCcrSessionModel,
+  isCodexBridgeSessionModel,
   type ClaudePermissionMode,
   type RoleSessionRecord,
   type SessionEffort,
@@ -26,7 +25,7 @@ import { readHarnessRevisionState } from "./harness-revision.js";
 import type { ProjectService } from "./project-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 import type { TaskWorkflowService } from "./task-workflow-service.js";
-import type { CcrIntegrationService } from "./ccr-integration-service.js";
+import type { CodexBridgeIntegrationService } from "./codex-bridge-integration-service.js";
 import { roleUsesLsp, VCM_LSP_PLUGIN_DIR } from "./lsp-plugin.js";
 
 export interface SessionService {
@@ -85,7 +84,10 @@ export interface SessionServiceDeps {
   projectService: Pick<ProjectService, "loadConfig">;
   taskService: Pick<TaskService, "loadTask">;
   taskWorkflowService?: Pick<TaskWorkflowService, "getState" | "renderPmResumeContext">;
-  ccrIntegration?: Pick<CcrIntegrationService, "getLaunchEnvironment" | "getLaunchSettingsOverride">;
+  codexBridgeIntegration?: Pick<
+    CodexBridgeIntegrationService,
+    "getLaunchEnvironment" | "getLaunchSettingsOverride"
+  >;
   apiUrl?: string;
   sandboxMode?: string;
   isProcessAlive?: (pid: number) => boolean;
@@ -870,22 +872,22 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
   }
 
   async function getModelLaunchEnvironment(model: SessionModel): Promise<NodeJS.ProcessEnv> {
-    if (!deps.ccrIntegration) {
-      if (isCcrSessionModel(model)) {
+    if (!deps.codexBridgeIntegration) {
+      if (isCodexBridgeSessionModel(model)) {
         throw new VcmError({
-          code: "CCR_UNAVAILABLE",
-          message: "CCR integration is not available in this VCM runtime.",
+          code: "CODEX_BRIDGE_UNAVAILABLE",
+          message: "Codex Bridge integration is not available in this VCM runtime.",
           statusCode: 409,
-          hint: "Enable and configure CCR GPT models before starting this session."
+          hint: "Enable and configure Codex Bridge before starting this session."
         });
       }
       return {};
     }
-    return deps.ccrIntegration.getLaunchEnvironment(model);
+    return deps.codexBridgeIntegration.getLaunchEnvironment(model);
   }
 
   async function getModelLaunchSettingsOverride(model: SessionModel): Promise<Record<string, unknown> | undefined> {
-    return deps.ccrIntegration?.getLaunchSettingsOverride(model);
+    return deps.codexBridgeIntegration?.getLaunchSettingsOverride(model);
   }
 
   function isRuntimeSessionAlive(session: ReturnType<TerminalRuntime["getSession"]>): session is TerminalSession & { pid: number } {
@@ -2185,7 +2187,7 @@ function normalizeClaudeModel(value: unknown): SessionModel {
     || value === "claude-opus-4-8"
     || value === "sonnet"
     || value === "fable"
-    || value === CCR_GPT_SESSION_MODEL
+    || isCodexBridgeSessionModel(value)
   ) {
     return value;
   }
@@ -2208,20 +2210,20 @@ function normalizeClaudeEffort(value: unknown): SessionEffort {
 
 function assertResumeProviderCompatible(session: RoleSessionRecord, requestedModel: SessionModel): void {
   const persistedModel = normalizeClaudeModel(session.model);
-  if (isCcrSessionModel(persistedModel) !== isCcrSessionModel(requestedModel)) {
+  if (isCodexBridgeSessionModel(persistedModel) !== isCodexBridgeSessionModel(requestedModel)) {
     throw new VcmError({
       code: "SESSION_PROVIDER_SWITCH_REQUIRES_RESTART",
       message: `Cannot resume ${session.role} with a different model provider.`,
       statusCode: 409,
-      hint: "Use Restart to switch between native Claude and CCR models."
+      hint: "Use Restart to switch between native Claude and Codex Bridge models."
     });
   }
-  if (isCcrSessionModel(requestedModel) && !session.claudeConfigDir) {
+  if (isCodexBridgeSessionModel(requestedModel) && !session.claudeConfigDir) {
     throw new VcmError({
-      code: "CCR_SESSION_CONFIG_MISSING",
-      message: `${session.role} was created before isolated CCR session storage was enabled.`,
+      code: "CODEX_BRIDGE_SESSION_CONFIG_MISSING",
+      message: `${session.role} was created without isolated Codex Bridge session storage.`,
       statusCode: 409,
-      hint: "Restart this role once to create an isolated CCR session."
+      hint: "Restart this role once to create an isolated Codex Bridge session."
     });
   }
 }
@@ -2274,7 +2276,7 @@ function buildUsageTelemetryEnvironment(
     OTEL_LOG_TOOL_DETAILS: "0",
     OTEL_LOG_RAW_API_BODIES: "0"
   };
-  if (!apiUrl || isCcrSessionModel(model)) {
+  if (!apiUrl || isCodexBridgeSessionModel(model)) {
     return disabled;
   }
 

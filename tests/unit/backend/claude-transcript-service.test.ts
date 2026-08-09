@@ -96,8 +96,8 @@ describe("claude-transcript-service", () => {
     expect(claudeTranscriptPath(
       "/workspace",
       "session-1",
-      "/tmp/vcm-claude/ccr"
-    )).toBe("/tmp/vcm-claude/ccr/projects/-workspace/session-1.jsonl");
+      "/tmp/vcm-claude/codex-bridge"
+    )).toBe("/tmp/vcm-claude/codex-bridge/projects/-workspace/session-1.jsonl");
   });
 
   it("replays current-run transcript events by timestamp before tailing new output", () => {

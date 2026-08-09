@@ -135,7 +135,7 @@ function extractApiRequestEvents(payload: unknown): NormalizedApiRequestEvent[] 
           continue;
         }
         const model = normalizeModel(readString(attributes.model));
-        if (isCcrModel(model)) {
+        if (isCodexBridgeModel(model)) {
           continue;
         }
         const sequence = readInteger(attributes["event.sequence"]);
@@ -426,9 +426,9 @@ function normalizeModel(input: string | undefined): string {
   return model && isSafeGroupKey(model) ? model : "unknown";
 }
 
-function isCcrModel(model: string): boolean {
+function isCodexBridgeModel(model: string): boolean {
   const normalized = model.toLowerCase();
-  return normalized.startsWith("gpt-") || normalized.startsWith("ccr:") || normalized.includes("codex api/");
+  return normalized.startsWith("gpt-") || normalized.startsWith("codex-bridge:");
 }
 
 function isSafeGroupKey(value: string): boolean {

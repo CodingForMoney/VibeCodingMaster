@@ -8,7 +8,6 @@ Edit this table when the project needs to add, remove, or clarify an allowed abb
 | --- | --- | --- |
 | AI | Artificial Intelligence | AI-assisted workflow or model behavior. |
 | API | Application Programming Interface | Public, module-to-module, or integration-facing callable contract. |
-| CCR | Claude Code Router | Host-managed model gateway used to route Claude Code requests to configured providers. |
 | CLI | Command Line Interface | Command-line tool or command surface. |
 | CSS | Cascading Style Sheets | Styling language or stylesheet behavior. |
 | CSV | Comma-Separated Values | CSV file format or data exchange. |
@@ -17,7 +16,7 @@ Edit this table when the project needs to add, remove, or clarify an allowed abb
 | HTML | HyperText Markup Language | Markup rendered by a browser or document surface. |
 | HTTP | Hypertext Transfer Protocol | HTTP request, response, route, or protocol behavior. |
 | HTTPS | Hypertext Transfer Protocol Secure | HTTPS request, response, route, or protocol behavior. |
-| GPT | Generative Pre-trained Transformer | OpenAI GPT model family exposed to VCM through CCR. |
+| GPT | Generative Pre-trained Transformer | OpenAI GPT model family exposed to VCM through Codex Bridge. |
 | ID | Identifier | Stable identity value. |
 | IO | Input/Output | File, network, or process input/output boundaries. |
 | JSON | JavaScript Object Notation | JSON data, files, or payloads. |

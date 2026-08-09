@@ -1,10 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  CCR_GPT_AUTO_COMPACT_PERCENT,
-  CCR_GPT_AUTO_COMPACT_WINDOW_TOKENS,
-  CCR_GPT_EFFECTIVE_CONTEXT_TOKENS,
-  CCR_GPT_MODEL_ID,
-  CCR_GPT_SESSION_MODEL
+  CODEX_BRIDGE_AUTO_COMPACT_PERCENT,
+  CODEX_BRIDGE_AUTO_COMPACT_WINDOW_TOKENS,
+  CODEX_BRIDGE_EFFECTIVE_CONTEXT_TOKENS,
+  toCodexBridgeSessionModel
 } from "../../../src/shared/types/session.js";
 import { CODE_ROLE_RUNTIME_DISALLOWED_TOOLS } from "../../../src/backend/role-tool-policy.js";
 import { VCM_LSP_PLUGIN_DIR } from "../../../src/backend/services/lsp-plugin.js";
@@ -17,6 +16,8 @@ import {
 import { createE2eRepo } from "./helpers/e2e-repo.js";
 
 const cleanups: Array<() => Promise<void>> = [];
+const BRIDGE_MODEL_ID = "gpt-5.5";
+const BRIDGE_SESSION_MODEL = toCodexBridgeSessionModel(BRIDGE_MODEL_ID);
 
 afterEach(async () => {
   while (cleanups.length > 0) {
@@ -24,34 +25,38 @@ afterEach(async () => {
   }
 });
 
-describe("backend E2E CCR integration", () => {
-  it("stores a write-only key and launches Claude Code with the CCR environment", async () => {
+describe("backend E2E Codex Bridge integration", () => {
+  it("stores a write-only key and launches Claude Code with the Codex Bridge environment", async () => {
     const probeKeys: string[] = [];
     const env = await createMockClaudeE2eApp({
-      ccrGateway: {
+      codexBridge: {
         async probe(apiKey) {
           probeKeys.push(apiKey);
-          return { connectionState: "available", modelAvailable: true };
+          return {
+            connectionState: "available",
+            modelAvailable: true,
+            models: [{ id: BRIDGE_MODEL_ID, displayName: "GPT-5.5" }]
+          };
         }
       }
     });
     cleanups.push(() => env.close());
     const repo = await createE2eRepo();
     cleanups.push(() => repo.cleanup());
-    const task = await connectAndCreateTask(env.app, repo, "ccr-launch");
+    const task = await connectAndCreateTask(env.app, repo, "codex-bridge-launch");
 
     const saved = await env.app.inject({
       method: "PUT",
-      url: "/api/settings/ccr",
-      payload: { apiKey: "local-ccr-secret" }
+      url: "/api/settings/codex-bridge",
+      payload: { apiKey: "local-bridge-secret" }
     });
     expect(saved.statusCode).toBe(200);
     expect(saved.json()).toMatchObject({ enabled: false, apiKeyConfigured: true });
-    expect(saved.body).not.toContain("local-ccr-secret");
+    expect(saved.body).not.toContain("local-bridge-secret");
 
     const enabled = await env.app.inject({
       method: "PUT",
-      url: "/api/settings/ccr",
+      url: "/api/settings/codex-bridge",
       payload: { enabled: true }
     });
     expect(enabled.statusCode).toBe(200);
@@ -64,62 +69,63 @@ describe("backend E2E CCR integration", () => {
     const start = await env.app.inject({
       method: "POST",
       url: `/api/tasks/${task.taskSlug}/sessions/project-manager/start`,
-      payload: roleLaunchBody({ model: CCR_GPT_SESSION_MODEL, effort: "medium" })
+      payload: roleLaunchBody({ model: BRIDGE_SESSION_MODEL, effort: "medium" })
     });
     expect(start.statusCode).toBe(200);
-    expect(start.json()).toMatchObject({ model: CCR_GPT_SESSION_MODEL });
+    expect(start.json()).toMatchObject({ model: BRIDGE_SESSION_MODEL });
 
     const runtimeSession = env.mockRuntime.getSessionByRole(task.taskSlug, "project-manager");
     expect(runtimeSession).toBeDefined();
     const input = env.mockRuntime.getCreateInput(runtimeSession!.id);
     expect(input.args).not.toContain("--model");
     expect(input.args).toEqual(expect.arrayContaining(["--effort", "medium"]));
-    const ccrSettingsIndex = input.args.indexOf("--settings");
-    expect(ccrSettingsIndex).toBeGreaterThan(-1);
-    expect(JSON.parse(input.args[ccrSettingsIndex + 1]!)).toMatchObject({
-      apiKeyHelper: expect.stringContaining("scripts/ccr-api-key-helper.mjs")
+    const bridgeSettingsIndex = input.args.indexOf("--settings");
+    expect(bridgeSettingsIndex).toBeGreaterThan(-1);
+    expect(JSON.parse(input.args[bridgeSettingsIndex + 1]!)).toMatchObject({
+      apiKeyHelper: expect.stringContaining("scripts/codex-bridge-api-key-helper.mjs")
     });
     expect(input.env).toMatchObject({
       ANTHROPIC_BASE_URL: "http://host.docker.internal:3456",
       ANTHROPIC_AUTH_TOKEN: undefined,
       ANTHROPIC_API_KEY: undefined,
-      ANTHROPIC_MODEL: CCR_GPT_MODEL_ID,
+      ANTHROPIC_MODEL: BRIDGE_MODEL_ID,
       CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
       CLAUDE_CODE_ENABLE_TELEMETRY: undefined,
-      CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(CCR_GPT_EFFECTIVE_CONTEXT_TOKENS),
-      CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(CCR_GPT_AUTO_COMPACT_WINDOW_TOKENS),
-      CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(CCR_GPT_AUTO_COMPACT_PERCENT),
-      CLAUDE_CONFIG_DIR: expect.stringContaining("/settings/claude/ccr"),
+      CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(CODEX_BRIDGE_EFFECTIVE_CONTEXT_TOKENS),
+      CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(CODEX_BRIDGE_AUTO_COMPACT_WINDOW_TOKENS),
+      CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(CODEX_BRIDGE_AUTO_COMPACT_PERCENT),
+      CLAUDE_CONFIG_DIR: expect.stringContaining("/settings/claude/codex-bridge"),
       OTEL_LOGS_EXPORTER: "none",
       VCM_TASK_SLUG: task.taskSlug
     });
-    expect(JSON.stringify(input.env)).not.toContain("local-ccr-secret");
+    expect(JSON.stringify(input.env)).not.toContain("local-bridge-secret");
     expect(input.command).toBe("claude");
-    expect(probeKeys).toEqual(["local-ccr-secret"]);
+    expect(probeKeys).toEqual(["local-bridge-secret"]);
   });
 
-  it("keeps native launches clean and blocks future CCR launches after disabling", async () => {
+  it("keeps native launches clean and blocks future Bridge launches after disabling", async () => {
     const env = await createMockClaudeE2eApp({
-      ccrBaseEnv: {
+      codexBridgeBaseEnv: {
         ANTHROPIC_BASE_URL: "http://host.docker.internal:3456",
-        ANTHROPIC_AUTH_TOKEN: "inherited-ccr-token",
-        ANTHROPIC_MODEL: CCR_GPT_MODEL_ID,
+        ANTHROPIC_AUTH_TOKEN: "inherited-bridge-token",
+        ANTHROPIC_MODEL: BRIDGE_MODEL_ID,
+        CODEX_BRIDGE_CLAUDE_MODEL: BRIDGE_MODEL_ID,
         CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1"
       }
     });
     cleanups.push(() => env.close());
     const repo = await createE2eRepo();
     cleanups.push(() => repo.cleanup());
-    const task = await connectAndCreateTask(env.app, repo, "ccr-disable");
+    const task = await connectAndCreateTask(env.app, repo, "codex-bridge-disable");
 
-    await env.app.inject({ method: "PUT", url: "/api/settings/ccr", payload: { apiKey: "saved", enabled: true } });
-    const ccrStart = await env.app.inject({
+    await env.app.inject({ method: "PUT", url: "/api/settings/codex-bridge", payload: { apiKey: "saved", enabled: true } });
+    const bridgeStart = await env.app.inject({
       method: "POST",
       url: `/api/tasks/${task.taskSlug}/sessions/project-manager/start`,
-      payload: roleLaunchBody({ model: CCR_GPT_SESSION_MODEL })
+      payload: roleLaunchBody({ model: BRIDGE_SESSION_MODEL })
     });
-    expect(ccrStart.statusCode).toBe(200);
-    const ccrSessionId = ccrStart.json<{ id: string }>().id;
+    expect(bridgeStart.statusCode).toBe(200);
+    const bridgeSessionId = bridgeStart.json<{ id: string }>().id;
     const nativeStart = await env.app.inject({
       method: "POST",
       url: `/api/tasks/${task.taskSlug}/sessions/architect/start`,
@@ -153,34 +159,34 @@ describe("backend E2E CCR integration", () => {
       /^vcm\.role=architect,vcm\.launch_id=[0-9a-f-]+$/
     );
 
-    await env.app.inject({ method: "PUT", url: "/api/settings/ccr", payload: { enabled: false } });
+    await env.app.inject({ method: "PUT", url: "/api/settings/codex-bridge", payload: { enabled: false } });
     const blockedRestart = await env.app.inject({
       method: "POST",
       url: `/api/tasks/${task.taskSlug}/sessions/project-manager/restart`,
-      payload: roleLaunchBody({ model: CCR_GPT_SESSION_MODEL })
+      payload: roleLaunchBody({ model: BRIDGE_SESSION_MODEL })
     });
     expect(blockedRestart.statusCode).toBe(409);
-    expect(env.mockRuntime.getSession(ccrSessionId)?.status).toBe("running");
+    expect(env.mockRuntime.getSession(bridgeSessionId)?.status).toBe("running");
 
     const blocked = await env.app.inject({
       method: "POST",
       url: `/api/tasks/${task.taskSlug}/sessions/coder/start`,
-      payload: roleLaunchBody({ model: CCR_GPT_SESSION_MODEL })
+      payload: roleLaunchBody({ model: BRIDGE_SESSION_MODEL })
     });
     expect(blocked.statusCode).toBe(409);
-    expect(blocked.body).toContain("CCR GPT models are disabled");
+    expect(blocked.body).toContain("Codex Bridge models are disabled");
     expect(env.mockRuntime.getSessionByRole(task.taskSlug, "coder")).toBeUndefined();
   });
 
-  it("uses the CCR launch path without LSP for Reviewer and auxiliary sessions", async () => {
+  it("uses the Bridge launch path without LSP for Reviewer and auxiliary sessions", async () => {
     const env = await createMockClaudeE2eApp();
     cleanups.push(() => env.close());
     const repo = await createE2eRepo();
     cleanups.push(() => repo.cleanup());
-    const task = await connectAndCreateTask(env.app, repo, "ccr-role-paths");
+    const task = await connectAndCreateTask(env.app, repo, "codex-bridge-role-paths");
     await env.app.inject({
       method: "PUT",
-      url: "/api/settings/ccr",
+      url: "/api/settings/codex-bridge",
       payload: { apiKey: "saved", enabled: true }
     });
 
@@ -188,39 +194,39 @@ describe("backend E2E CCR integration", () => {
       await env.app.inject({
         method: "POST",
         url: `/api/tasks/${task.taskSlug}/sessions/reviewer/start`,
-        payload: roleLaunchBody({ model: CCR_GPT_SESSION_MODEL })
+        payload: roleLaunchBody({ model: BRIDGE_SESSION_MODEL })
       }),
       await env.app.inject({
         method: "POST",
         url: "/api/translation/session/start",
-        payload: { ...roleLaunchBody({ model: CCR_GPT_SESSION_MODEL }), taskSlug: task.taskSlug }
+        payload: { ...roleLaunchBody({ model: BRIDGE_SESSION_MODEL }), taskSlug: task.taskSlug }
       }),
       await env.app.inject({
         method: "POST",
         url: "/api/projects/harness/engineer/session/start",
-        payload: { ...roleLaunchBody({ model: CCR_GPT_SESSION_MODEL }), taskSlug: task.taskSlug }
+        payload: { ...roleLaunchBody({ model: BRIDGE_SESSION_MODEL }), taskSlug: task.taskSlug }
       })
     ];
 
     for (const response of launches) {
       expect(response.statusCode).toBe(200);
       const session = response.json<{ id: string; model: string }>();
-      expect(session.model).toBe(CCR_GPT_SESSION_MODEL);
+      expect(session.model).toBe(BRIDGE_SESSION_MODEL);
       const input = env.mockRuntime.getCreateInput(session.id);
       expect(input.args).not.toContain("--model");
       const settingsIndex = input.args.indexOf("--settings");
       expect(settingsIndex).toBeGreaterThan(-1);
       expect(JSON.parse(input.args[settingsIndex + 1]!)).toMatchObject({
-        apiKeyHelper: expect.stringContaining("scripts/ccr-api-key-helper.mjs")
+        apiKeyHelper: expect.stringContaining("scripts/codex-bridge-api-key-helper.mjs")
       });
       expect(input.env).toMatchObject({
         ANTHROPIC_AUTH_TOKEN: undefined,
         ANTHROPIC_API_KEY: undefined,
-        ANTHROPIC_MODEL: CCR_GPT_MODEL_ID,
-        CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(CCR_GPT_EFFECTIVE_CONTEXT_TOKENS),
-        CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(CCR_GPT_AUTO_COMPACT_WINDOW_TOKENS),
-        CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(CCR_GPT_AUTO_COMPACT_PERCENT),
-        CLAUDE_CONFIG_DIR: expect.stringContaining("/settings/claude/ccr")
+        ANTHROPIC_MODEL: BRIDGE_MODEL_ID,
+        CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(CODEX_BRIDGE_EFFECTIVE_CONTEXT_TOKENS),
+        CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(CODEX_BRIDGE_AUTO_COMPACT_WINDOW_TOKENS),
+        CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(CODEX_BRIDGE_AUTO_COMPACT_PERCENT),
+        CLAUDE_CONFIG_DIR: expect.stringContaining("/settings/claude/codex-bridge")
       });
     }
 
@@ -244,27 +250,27 @@ describe("backend E2E CCR integration", () => {
     cleanups.push(() => env.close());
     const repo = await createE2eRepo();
     cleanups.push(() => repo.cleanup());
-    const task = await connectAndCreateTask(env.app, repo, "ccr-provider-switch");
+    const task = await connectAndCreateTask(env.app, repo, "codex-bridge-provider-switch");
     await env.app.inject({
       method: "PUT",
-      url: "/api/settings/ccr",
+      url: "/api/settings/codex-bridge",
       payload: { apiKey: "saved", enabled: true }
     });
 
-    env.mockRuntime.onPrompt("project-manager", "Persist this CCR session", async (ctx) => {
+    env.mockRuntime.onPrompt("project-manager", "Persist this Bridge session", async (ctx) => {
       await ctx.userPromptSubmit();
-      await ctx.appendTranscriptText("CCR session persisted.");
+      await ctx.appendTranscriptText("Bridge session persisted.");
       await ctx.stop();
     });
 
     const started = await env.app.inject({
       method: "POST",
       url: `/api/tasks/${task.taskSlug}/sessions/project-manager/start`,
-      payload: roleLaunchBody({ model: CCR_GPT_SESSION_MODEL })
+      payload: roleLaunchBody({ model: BRIDGE_SESSION_MODEL })
     });
     expect(started.statusCode).toBe(200);
     const startedSession = started.json<{ id: string }>();
-    env.mockRuntime.write(startedSession.id, "Persist this CCR session");
+    env.mockRuntime.write(startedSession.id, "Persist this Bridge session");
     await env.mockRuntime.waitForIdle();
 
     const stopped = await env.app.inject({
@@ -274,7 +280,7 @@ describe("backend E2E CCR integration", () => {
     expect(stopped.statusCode).toBe(200);
     const persisted = stopped.json<{ claudeSessionId: string; claudeConfigDir: string }>();
     expect(persisted.claudeSessionId).toMatch(/^mock-claude-project-manager-/);
-    expect(persisted.claudeConfigDir).toContain("/settings/claude/ccr");
+    expect(persisted.claudeConfigDir).toContain("/settings/claude/codex-bridge");
 
     const blockedNativeResume = await env.app.inject({
       method: "POST",
@@ -287,7 +293,7 @@ describe("backend E2E CCR integration", () => {
     const resumed = await env.app.inject({
       method: "POST",
       url: `/api/tasks/${task.taskSlug}/sessions/project-manager/resume`,
-      payload: roleLaunchBody({ model: CCR_GPT_SESSION_MODEL })
+      payload: roleLaunchBody({ model: BRIDGE_SESSION_MODEL })
     });
     expect(resumed.statusCode).toBe(200);
     const resumedSession = resumed.json<{ id: string; claudeConfigDir: string }>();
@@ -299,11 +305,11 @@ describe("backend E2E CCR integration", () => {
     ]));
     expect(resumedInput.env.CLAUDE_CONFIG_DIR).toBe(persisted.claudeConfigDir);
     expect(resumedInput.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS)
-      .toBe(String(CCR_GPT_EFFECTIVE_CONTEXT_TOKENS));
+      .toBe(String(CODEX_BRIDGE_EFFECTIVE_CONTEXT_TOKENS));
     expect(resumedInput.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW)
-      .toBe(String(CCR_GPT_AUTO_COMPACT_WINDOW_TOKENS));
+      .toBe(String(CODEX_BRIDGE_AUTO_COMPACT_WINDOW_TOKENS));
     expect(resumedInput.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE)
-      .toBe(String(CCR_GPT_AUTO_COMPACT_PERCENT));
+      .toBe(String(CODEX_BRIDGE_AUTO_COMPACT_PERCENT));
 
     const restarted = await env.app.inject({
       method: "POST",
@@ -324,36 +330,36 @@ describe("backend E2E CCR integration", () => {
     expect(restartedInput.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
     expect(restartedInput.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE).toBeUndefined();
 
-    const restartedWithCcr = await env.app.inject({
+    const restartedWithBridge = await env.app.inject({
       method: "POST",
       url: `/api/tasks/${task.taskSlug}/sessions/project-manager/restart`,
-      payload: roleLaunchBody({ model: CCR_GPT_SESSION_MODEL })
+      payload: roleLaunchBody({ model: BRIDGE_SESSION_MODEL })
     });
-    expect(restartedWithCcr.statusCode).toBe(200);
-    const ccrRestartInput = env.mockRuntime.getCreateInput(restartedWithCcr.json<{ id: string }>().id);
-    expect(ccrRestartInput.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS)
-      .toBe(String(CCR_GPT_EFFECTIVE_CONTEXT_TOKENS));
-    expect(ccrRestartInput.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW)
-      .toBe(String(CCR_GPT_AUTO_COMPACT_WINDOW_TOKENS));
-    expect(ccrRestartInput.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE)
-      .toBe(String(CCR_GPT_AUTO_COMPACT_PERCENT));
+    expect(restartedWithBridge.statusCode).toBe(200);
+    const bridgeRestartInput = env.mockRuntime.getCreateInput(restartedWithBridge.json<{ id: string }>().id);
+    expect(bridgeRestartInput.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS)
+      .toBe(String(CODEX_BRIDGE_EFFECTIVE_CONTEXT_TOKENS));
+    expect(bridgeRestartInput.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW)
+      .toBe(String(CODEX_BRIDGE_AUTO_COMPACT_WINDOW_TOKENS));
+    expect(bridgeRestartInput.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE)
+      .toBe(String(CODEX_BRIDGE_AUTO_COMPACT_PERCENT));
   });
 
-  it("applies the CCR context limit through one-click launch", async () => {
+  it("applies the Codex Bridge context limit through one-click launch", async () => {
     const env = await createMockClaudeE2eApp();
     cleanups.push(() => env.close());
     const repo = await createE2eRepo();
     cleanups.push(() => repo.cleanup());
-    const task = await connectAndCreateTask(env.app, repo, "ccr-one-click");
+    const task = await connectAndCreateTask(env.app, repo, "codex-bridge-one-click");
     await env.app.inject({
       method: "PUT",
-      url: "/api/settings/ccr",
+      url: "/api/settings/codex-bridge",
       payload: { apiKey: "saved", enabled: true }
     });
 
     const preferences = await getPreferences(env.app);
     for (const role of ["project-manager", "architect", "coder", "tester"] as const) {
-      preferences.launchTemplate.roles[role].model = CCR_GPT_SESSION_MODEL;
+      preferences.launchTemplate.roles[role].model = BRIDGE_SESSION_MODEL;
     }
     await updatePreferences(env.app, { launchTemplate: preferences.launchTemplate });
 
@@ -368,11 +374,11 @@ describe("backend E2E CCR integration", () => {
       expect(session).toBeDefined();
       const input = env.mockRuntime.getCreateInput(session!.id);
       expect(input.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS)
-        .toBe(String(CCR_GPT_EFFECTIVE_CONTEXT_TOKENS));
+        .toBe(String(CODEX_BRIDGE_EFFECTIVE_CONTEXT_TOKENS));
       expect(input.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW)
-        .toBe(String(CCR_GPT_AUTO_COMPACT_WINDOW_TOKENS));
+        .toBe(String(CODEX_BRIDGE_AUTO_COMPACT_WINDOW_TOKENS));
       expect(input.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE)
-        .toBe(String(CCR_GPT_AUTO_COMPACT_PERCENT));
+        .toBe(String(CODEX_BRIDGE_AUTO_COMPACT_PERCENT));
     }
   });
 });

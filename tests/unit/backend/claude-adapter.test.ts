@@ -88,14 +88,14 @@ describe("createClaudeAdapter", () => {
     });
   });
 
-  it("uses the child environment instead of --model for CCR models", () => {
+  it("uses the child environment instead of --model for Codex Bridge models", () => {
     expect(adapter.buildRoleStartCommand(
       "coder",
       "claude",
       "default",
       undefined,
       false,
-      "ccr:Codex API/gpt-5.6-sol",
+      "codex-bridge:gpt-5.5",
       "medium"
     )).toEqual({
       command: "claude",

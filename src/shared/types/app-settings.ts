@@ -28,26 +28,27 @@ export interface RoleLaunchTemplateEntry {
   effort: SessionEffort;
 }
 
-export type CcrConnectionState =
+export type CodexBridgeConnectionState =
   | "disabled"
   | "checking"
   | "available"
   | "unreachable"
   | "unauthorized"
-  | "not-ccr"
+  | "codex-auth-unavailable"
+  | "not-codex-bridge"
   | "invalid-response";
 
-export interface CcrIntegrationStatus {
+export interface CodexBridgeIntegrationStatus {
   enabled: boolean;
   apiKeyConfigured: boolean;
-  connectionState: CcrConnectionState;
+  connectionState: CodexBridgeConnectionState;
   modelAvailable: boolean;
   checkedAt?: string;
   error?: string;
   modelOptions: SessionModelOption[];
 }
 
-export interface UpdateCcrIntegrationRequest {
+export interface UpdateCodexBridgeIntegrationRequest {
   enabled?: boolean;
   apiKey?: string;
   clearApiKey?: boolean;

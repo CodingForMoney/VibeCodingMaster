@@ -1,20 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { createCcrIntegrationService, mergeNoProxy } from "../../../src/backend/services/ccr-integration-service.js";
-import type { AppCcrIntegrationSettingsState } from "../../../src/backend/services/app-settings-service.js";
 import {
-  CCR_GPT_AUTO_COMPACT_PERCENT,
-  CCR_GPT_AUTO_COMPACT_WINDOW_TOKENS,
-  CCR_GPT_EFFECTIVE_CONTEXT_TOKENS,
-  CCR_GPT_MODEL_ID,
-  CCR_GPT_SESSION_MODEL
+  createCodexBridgeIntegrationService,
+  mergeNoProxy
+} from "../../../src/backend/services/codex-bridge-integration-service.js";
+import type { AppCodexBridgeIntegrationSettingsState } from "../../../src/backend/services/app-settings-service.js";
+import {
+  CODEX_BRIDGE_AUTO_COMPACT_PERCENT,
+  CODEX_BRIDGE_AUTO_COMPACT_WINDOW_TOKENS,
+  CODEX_BRIDGE_EFFECTIVE_CONTEXT_TOKENS,
+  toCodexBridgeSessionModel
 } from "../../../src/shared/types/session.js";
 
-describe("createCcrIntegrationService", () => {
-  it("requires a saved API key before enabling CCR", async () => {
+const MODEL_ID = "gpt-5.5";
+const SESSION_MODEL = toCodexBridgeSessionModel(MODEL_ID);
+
+describe("createCodexBridgeIntegrationService", () => {
+  it("requires a saved API key before enabling Codex Bridge", async () => {
     const service = createService();
 
     await expect(service.updateSettings({ enabled: true })).rejects.toMatchObject({
-      code: "CCR_API_KEY_MISSING"
+      code: "CODEX_BRIDGE_API_KEY_MISSING"
     });
     await expect(service.getStatus()).resolves.toMatchObject({
       enabled: false,
@@ -23,7 +28,7 @@ describe("createCcrIntegrationService", () => {
     });
   });
 
-  it("builds the CCR environment around the CCR-managed apiKeyHelper", async () => {
+  it("discovers model options and builds an isolated Bridge launch environment", async () => {
     const service = createService({ baseEnv: { NO_PROXY: "localhost" } });
     const saved = await service.updateSettings({ apiKey: "local-secret" });
     expect(saved).toMatchObject({ enabled: false, apiKeyConfigured: true });
@@ -33,31 +38,33 @@ describe("createCcrIntegrationService", () => {
     expect(enabled).toMatchObject({
       enabled: true,
       connectionState: "available",
-      modelAvailable: true
+      modelAvailable: true,
+      modelOptions: expect.arrayContaining([
+        expect.objectContaining({ value: SESSION_MODEL, source: "codex-bridge", available: true })
+      ])
     });
-    const environment = await service.getLaunchEnvironment(CCR_GPT_SESSION_MODEL);
+    const environment = await service.getLaunchEnvironment(SESSION_MODEL);
     expect(environment).toMatchObject({
       ANTHROPIC_BASE_URL: "http://host.docker.internal:3456",
       ANTHROPIC_API_BASE_URL: "http://host.docker.internal:3456",
       CLAUDE_AGENT_API_BASE_URL: "http://host.docker.internal:3456",
       ANTHROPIC_AUTH_TOKEN: undefined,
       ANTHROPIC_API_KEY: undefined,
-      ANTHROPIC_MODEL: CCR_GPT_MODEL_ID,
-      CCR_CLAUDE_CODE_MODEL: CCR_GPT_MODEL_ID,
-      CODEXL_CLAUDE_CODE_MODEL: CCR_GPT_MODEL_ID,
-      ANTHROPIC_SMALL_FAST_MODEL: CCR_GPT_MODEL_ID,
+      ANTHROPIC_MODEL: MODEL_ID,
+      CODEX_BRIDGE_CLAUDE_MODEL: MODEL_ID,
+      ANTHROPIC_SMALL_FAST_MODEL: MODEL_ID,
       CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1",
-      CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(CCR_GPT_EFFECTIVE_CONTEXT_TOKENS),
-      CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(CCR_GPT_AUTO_COMPACT_WINDOW_TOKENS),
-      CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(CCR_GPT_AUTO_COMPACT_PERCENT),
-      CLAUDE_CONFIG_DIR: "/mock/.vcm/claude/ccr",
+      CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(CODEX_BRIDGE_EFFECTIVE_CONTEXT_TOKENS),
+      CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(CODEX_BRIDGE_AUTO_COMPACT_WINDOW_TOKENS),
+      CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(CODEX_BRIDGE_AUTO_COMPACT_PERCENT),
+      CLAUDE_CONFIG_DIR: "/mock/.vcm/claude/codex-bridge",
       NO_PROXY: "localhost,host.docker.internal",
       no_proxy: "localhost,host.docker.internal"
     });
     expect(JSON.stringify(environment)).not.toContain("local-secret");
   });
 
-  it("does not inject CCR environment for native Claude models", async () => {
+  it("does not inject Bridge environment for native Claude models", async () => {
     const service = createService({
       baseEnv: { CLAUDE_CODE_MAX_CONTEXT_TOKENS: "123456" }
     });
@@ -65,14 +72,14 @@ describe("createCcrIntegrationService", () => {
     await expect(service.getLaunchSettingsOverride("opus")).resolves.toBeUndefined();
   });
 
-  it("removes inherited CCR takeover variables from native Claude launches", async () => {
+  it("removes inherited Bridge takeover variables from native Claude launches", async () => {
     const service = createService({
       baseEnv: {
         ANTHROPIC_BASE_URL: "http://127.0.0.1:3456",
-        ANTHROPIC_AUTH_TOKEN: "ccr-token",
-        ANTHROPIC_API_KEY: "ccr-key",
-        ANTHROPIC_MODEL: CCR_GPT_MODEL_ID,
-        CCR_CLAUDE_CODE_MODEL: CCR_GPT_MODEL_ID,
+        ANTHROPIC_AUTH_TOKEN: "bridge-token",
+        ANTHROPIC_API_KEY: "bridge-key",
+        ANTHROPIC_MODEL: MODEL_ID,
+        CODEX_BRIDGE_CLAUDE_MODEL: MODEL_ID,
         CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1",
         CLAUDE_CONFIG_DIR: "/custom/native-claude"
       }
@@ -83,64 +90,46 @@ describe("createCcrIntegrationService", () => {
       ANTHROPIC_AUTH_TOKEN: undefined,
       ANTHROPIC_API_KEY: undefined,
       ANTHROPIC_MODEL: undefined,
-      CCR_CLAUDE_CODE_MODEL: undefined,
+      CODEX_BRIDGE_CLAUDE_MODEL: undefined,
       CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: undefined,
       CLAUDE_CONFIG_DIR: "/custom/native-claude"
     });
   });
 
-  it("removes inherited CCR credentials when only CCR model markers remain", async () => {
-    const service = createService({
-      baseEnv: {
-        ANTHROPIC_AUTH_TOKEN: "ccr-token",
-        ANTHROPIC_API_KEY: "ccr-key",
-        ANTHROPIC_MODEL: CCR_GPT_MODEL_ID
-      }
-    });
-
-    await expect(service.getLaunchEnvironment("opus")).resolves.toEqual({
-      ANTHROPIC_AUTH_TOKEN: undefined,
-      ANTHROPIC_API_KEY: undefined,
-      ANTHROPIC_MODEL: undefined
-    });
-  });
-
-  it("applies apiKeyHelper only to GPT sessions", async () => {
+  it("applies apiKeyHelper only to Bridge sessions", async () => {
     const service = createService({
       initial: { version: 1, enabled: false, apiKey: "saved" },
-      apiKeyHelperPath: "/mock/ccr-api-key-helper.mjs"
+      apiKeyHelperPath: "/mock/codex-bridge-api-key-helper.mjs"
     });
 
     await expect(service.getLaunchSettingsOverride("sonnet")).resolves.toBeUndefined();
-    await expect(service.getLaunchSettingsOverride(CCR_GPT_SESSION_MODEL)).resolves.toMatchObject({
-      apiKeyHelper: expect.stringContaining("/mock/ccr-api-key-helper.mjs")
+    await expect(service.getLaunchSettingsOverride(SESSION_MODEL)).resolves.toMatchObject({
+      apiKeyHelper: expect.stringContaining("/mock/codex-bridge-api-key-helper.mjs")
     });
   });
 
-  it("launches GPT sessions through the endpoint identified by the probe", async () => {
+  it("launches through the endpoint identified by the probe", async () => {
     const service = createService({
       initial: { version: 1, enabled: true, apiKey: "saved" },
       baseEnv: { NO_PROXY: "localhost" },
       probeResult: {
         connectionState: "available",
         modelAvailable: true,
+        models: [{ id: MODEL_ID }],
         baseUrl: "http://127.0.0.1:3456"
       }
     });
 
-    await expect(service.getLaunchEnvironment(CCR_GPT_SESSION_MODEL)).resolves.toMatchObject({
+    await expect(service.getLaunchEnvironment(SESSION_MODEL)).resolves.toMatchObject({
       ANTHROPIC_BASE_URL: "http://127.0.0.1:3456",
-      ANTHROPIC_API_BASE_URL: "http://127.0.0.1:3456",
-      CLAUDE_AGENT_API_BASE_URL: "http://127.0.0.1:3456",
-      NO_PROXY: "localhost,127.0.0.1",
-      no_proxy: "localhost,127.0.0.1"
+      NO_PROXY: "localhost,127.0.0.1"
     });
   });
 
-  it("blocks CCR-backed launches while disabled or unavailable", async () => {
+  it("blocks Bridge launches while disabled, unavailable, or missing the selected model", async () => {
     const disabled = createService();
-    await expect(disabled.getLaunchEnvironment(CCR_GPT_SESSION_MODEL)).rejects.toMatchObject({
-      code: "CCR_DISABLED"
+    await expect(disabled.getLaunchEnvironment(SESSION_MODEL)).rejects.toMatchObject({
+      code: "CODEX_BRIDGE_DISABLED"
     });
 
     const unavailable = createService({
@@ -148,16 +137,30 @@ describe("createCcrIntegrationService", () => {
       probeResult: {
         connectionState: "unreachable",
         modelAvailable: false,
-        error: "CCR is offline."
+        models: [],
+        error: "Codex Bridge is offline."
       }
     });
-    await expect(unavailable.getLaunchEnvironment(CCR_GPT_SESSION_MODEL)).rejects.toMatchObject({
-      code: "CCR_MODEL_UNAVAILABLE",
-      message: "CCR is offline."
+    await expect(unavailable.getLaunchEnvironment(SESSION_MODEL)).rejects.toMatchObject({
+      code: "CODEX_BRIDGE_MODEL_UNAVAILABLE",
+      message: "Codex Bridge is offline."
+    });
+
+    const missingModel = createService({
+      initial: { version: 1, enabled: true, apiKey: "saved" },
+      probeResult: {
+        connectionState: "available",
+        modelAvailable: true,
+        models: [{ id: "gpt-other" }]
+      }
+    });
+    await expect(missingModel.getLaunchEnvironment(SESSION_MODEL)).rejects.toMatchObject({
+      code: "CODEX_BRIDGE_MODEL_UNAVAILABLE",
+      message: expect.stringContaining(MODEL_ID)
     });
   });
 
-  it("shares a fresh connection check across launches", async () => {
+  it("shares a fresh connection check across concurrent launches", async () => {
     let probes = 0;
     const service = createService({
       initial: { version: 1, enabled: true, apiKey: "saved" },
@@ -167,9 +170,9 @@ describe("createCcrIntegrationService", () => {
     });
 
     await Promise.all([
-      service.getLaunchEnvironment(CCR_GPT_SESSION_MODEL),
-      service.getLaunchEnvironment(CCR_GPT_SESSION_MODEL),
-      service.getLaunchEnvironment(CCR_GPT_SESSION_MODEL)
+      service.getLaunchEnvironment(SESSION_MODEL),
+      service.getLaunchEnvironment(SESSION_MODEL),
+      service.getLaunchEnvironment(SESSION_MODEL)
     ]);
     expect(probes).toBe(1);
   });
@@ -183,10 +186,11 @@ describe("mergeNoProxy", () => {
 });
 
 function createService(options: {
-  initial?: AppCcrIntegrationSettingsState;
+  initial?: AppCodexBridgeIntegrationSettingsState;
   probeResult?: {
     connectionState: "available" | "unreachable";
     modelAvailable: boolean;
+    models: Array<{ id: string; displayName?: string }>;
     baseUrl?: string;
     error?: string;
   };
@@ -196,24 +200,28 @@ function createService(options: {
   configDir?: string;
 } = {}) {
   let settings = options.initial ?? { version: 1, enabled: false, apiKey: "" };
-  return createCcrIntegrationService({
+  return createCodexBridgeIntegrationService({
     settings: {
-      async getCcrIntegrationSettings() {
+      async getCodexBridgeIntegrationSettings() {
         return settings;
       },
-      async updateCcrIntegrationSettings(input) {
+      async updateCodexBridgeIntegrationSettings(input) {
         settings = { ...settings, ...input };
         return settings;
       }
     },
-    gateway: {
+    bridge: {
       async probe() {
         options.onProbe?.();
-        return options.probeResult ?? { connectionState: "available", modelAvailable: true };
+        return options.probeResult ?? {
+          connectionState: "available",
+          modelAvailable: true,
+          models: [{ id: MODEL_ID, displayName: "GPT-5.5" }]
+        };
       }
     },
     baseEnv: options.baseEnv ?? {},
-    configDir: options.configDir ?? "/mock/.vcm/claude/ccr",
-    apiKeyHelperPath: options.apiKeyHelperPath,
+    configDir: options.configDir ?? "/mock/.vcm/claude/codex-bridge",
+    apiKeyHelperPath: options.apiKeyHelperPath
   });
 }

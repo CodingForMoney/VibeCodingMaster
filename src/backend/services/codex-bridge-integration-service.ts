@@ -1,37 +1,43 @@
-import type {
-  CcrIntegrationStatus,
-  UpdateCcrIntegrationRequest
-} from "../../shared/types/app-settings.js";
-import {
-  CCR_GATEWAY_BASE_URL,
-  CCR_GPT_AUTO_COMPACT_PERCENT,
-  CCR_GPT_AUTO_COMPACT_WINDOW_TOKENS,
-  CCR_GPT_EFFECTIVE_CONTEXT_TOKENS,
-  CCR_GPT_MODEL_ID,
-  CCR_GPT_SESSION_MODEL,
-  createSessionModelOptions,
-  isCcrSessionModel,
-  type SessionModel
-} from "../../shared/types/session.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { CcrGatewayAdapter, CcrGatewayProbeResult } from "../adapters/ccr-gateway-adapter.js";
+import type {
+  CodexBridgeIntegrationStatus,
+  UpdateCodexBridgeIntegrationRequest
+} from "../../shared/types/app-settings.js";
+import {
+  CODEX_BRIDGE_AUTO_COMPACT_PERCENT,
+  CODEX_BRIDGE_AUTO_COMPACT_WINDOW_TOKENS,
+  CODEX_BRIDGE_BASE_URL,
+  CODEX_BRIDGE_EFFECTIVE_CONTEXT_TOKENS,
+  createSessionModelOptions,
+  getCodexBridgeModelId,
+  isCodexBridgeSessionModel,
+  type CodexBridgeModelDescriptor,
+  type SessionModel
+} from "../../shared/types/session.js";
+import type {
+  CodexBridgeAdapter,
+  CodexBridgeProbeResult
+} from "../adapters/codex-bridge-adapter.js";
 import { VcmError } from "../errors.js";
 import { resolveVcmDataDir } from "../vcm-data-dir.js";
 import type { AppSettingsService } from "./app-settings-service.js";
 
-export interface CcrIntegrationService {
+export interface CodexBridgeIntegrationService {
   initialize(): Promise<void>;
-  getStatus(): Promise<CcrIntegrationStatus>;
-  updateSettings(input: UpdateCcrIntegrationRequest): Promise<CcrIntegrationStatus>;
-  checkConnection(): Promise<CcrIntegrationStatus>;
+  getStatus(): Promise<CodexBridgeIntegrationStatus>;
+  updateSettings(input: UpdateCodexBridgeIntegrationRequest): Promise<CodexBridgeIntegrationStatus>;
+  checkConnection(): Promise<CodexBridgeIntegrationStatus>;
   getLaunchEnvironment(model: SessionModel): Promise<NodeJS.ProcessEnv>;
   getLaunchSettingsOverride(model: SessionModel): Promise<Record<string, unknown> | undefined>;
 }
 
-export interface CcrIntegrationServiceDeps {
-  settings: Pick<AppSettingsService, "getCcrIntegrationSettings" | "updateCcrIntegrationSettings">;
-  gateway: CcrGatewayAdapter;
+export interface CodexBridgeIntegrationServiceDeps {
+  settings: Pick<
+    AppSettingsService,
+    "getCodexBridgeIntegrationSettings" | "updateCodexBridgeIntegrationSettings"
+  >;
+  bridge: CodexBridgeAdapter;
   now?: () => Date;
   cacheTtlMs?: number;
   baseEnv?: NodeJS.ProcessEnv;
@@ -41,25 +47,27 @@ export interface CcrIntegrationServiceDeps {
 
 const DEFAULT_CACHE_TTL_MS = 10_000;
 const DEFAULT_API_KEY_HELPER_PATH = fileURLToPath(
-  new URL("../../../scripts/ccr-api-key-helper.mjs", import.meta.url)
+  new URL("../../../scripts/codex-bridge-api-key-helper.mjs", import.meta.url)
 );
 
 interface CachedProbe {
-  result: CcrGatewayProbeResult;
+  result: CodexBridgeProbeResult;
   checkedAt: string;
   checkedAtMs: number;
 }
 
-export function createCcrIntegrationService(deps: CcrIntegrationServiceDeps): CcrIntegrationService {
+export function createCodexBridgeIntegrationService(
+  deps: CodexBridgeIntegrationServiceDeps
+): CodexBridgeIntegrationService {
   const now = deps.now ?? (() => new Date());
   const cacheTtlMs = deps.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
   const baseEnv = deps.baseEnv ?? process.env;
-  const configDir = deps.configDir ?? path.join(resolveVcmDataDir(baseEnv), "claude", "ccr");
+  const configDir = deps.configDir ?? path.join(resolveVcmDataDir(baseEnv), "claude", "codex-bridge");
   let cachedProbe: CachedProbe | undefined;
   let inFlight: Promise<CachedProbe> | undefined;
 
   async function probe(force = false): Promise<CachedProbe> {
-    const settings = await deps.settings.getCcrIntegrationSettings();
+    const settings = await deps.settings.getCodexBridgeIntegrationSettings();
     if (!settings.apiKey) {
       throw missingApiKeyError();
     }
@@ -70,7 +78,7 @@ export function createCcrIntegrationService(deps: CcrIntegrationServiceDeps): Cc
     if (inFlight) {
       return inFlight;
     }
-    inFlight = deps.gateway.probe(settings.apiKey).then((result) => {
+    inFlight = deps.bridge.probe(settings.apiKey).then((result) => {
       const checkedAtDate = now();
       cachedProbe = {
         result,
@@ -84,15 +92,18 @@ export function createCcrIntegrationService(deps: CcrIntegrationServiceDeps): Cc
     return inFlight;
   }
 
-  async function buildStatus(options: { refreshIfMissing?: boolean } = {}): Promise<CcrIntegrationStatus> {
-    const settings = await deps.settings.getCcrIntegrationSettings();
+  async function buildStatus(
+    options: { refreshIfMissing?: boolean } = {}
+  ): Promise<CodexBridgeIntegrationStatus> {
+    const settings = await deps.settings.getCodexBridgeIntegrationSettings();
     if (!settings.enabled) {
       return createStatus({
         enabled: false,
         apiKeyConfigured: Boolean(settings.apiKey),
         connectionState: "disabled",
         modelAvailable: false,
-        error: settings.apiKey ? undefined : "Save a CCR API key before enabling CCR GPT models."
+        models: [],
+        error: settings.apiKey ? undefined : "Save a Codex Bridge API key before enabling Codex models."
       });
     }
     if (!cachedProbe && options.refreshIfMissing) {
@@ -103,7 +114,8 @@ export function createCcrIntegrationService(deps: CcrIntegrationServiceDeps): Cc
         enabled: true,
         apiKeyConfigured: true,
         connectionState: "checking",
-        modelAvailable: false
+        modelAvailable: false,
+        models: []
       });
     }
     return createStatus({
@@ -111,6 +123,7 @@ export function createCcrIntegrationService(deps: CcrIntegrationServiceDeps): Cc
       apiKeyConfigured: true,
       connectionState: cachedProbe.result.connectionState,
       modelAvailable: cachedProbe.result.modelAvailable,
+      models: cachedProbe.result.models,
       checkedAt: cachedProbe.checkedAt,
       error: cachedProbe.result.error
     });
@@ -118,7 +131,7 @@ export function createCcrIntegrationService(deps: CcrIntegrationServiceDeps): Cc
 
   return {
     async initialize() {
-      const settings = await deps.settings.getCcrIntegrationSettings();
+      const settings = await deps.settings.getCodexBridgeIntegrationSettings();
       if (settings.enabled) {
         await probe(true);
       }
@@ -128,15 +141,15 @@ export function createCcrIntegrationService(deps: CcrIntegrationServiceDeps): Cc
     },
     async updateSettings(input) {
       if (input.apiKey !== undefined && typeof input.apiKey !== "string") {
-        throw invalidSettingsError("CCR API key must be a string.");
+        throw invalidSettingsError("Codex Bridge API key must be a string.");
       }
       if (input.enabled !== undefined && typeof input.enabled !== "boolean") {
-        throw invalidSettingsError("CCR enabled state must be a boolean.");
+        throw invalidSettingsError("Codex Bridge enabled state must be a boolean.");
       }
       if (input.clearApiKey !== undefined && typeof input.clearApiKey !== "boolean") {
-        throw invalidSettingsError("CCR clear-key state must be a boolean.");
+        throw invalidSettingsError("Codex Bridge clear-key state must be a boolean.");
       }
-      const current = await deps.settings.getCcrIntegrationSettings();
+      const current = await deps.settings.getCodexBridgeIntegrationSettings();
       const clearApiKey = input.clearApiKey === true;
       const nextApiKey = clearApiKey
         ? ""
@@ -147,7 +160,7 @@ export function createCcrIntegrationService(deps: CcrIntegrationServiceDeps): Cc
       if (nextEnabled && !nextApiKey) {
         throw missingApiKeyError();
       }
-      await deps.settings.updateCcrIntegrationSettings({
+      await deps.settings.updateCodexBridgeIntegrationSettings({
         enabled: nextEnabled,
         apiKey: nextApiKey
       });
@@ -162,68 +175,69 @@ export function createCcrIntegrationService(deps: CcrIntegrationServiceDeps): Cc
       return buildStatus();
     },
     async checkConnection() {
-      const settings = await deps.settings.getCcrIntegrationSettings();
+      const settings = await deps.settings.getCodexBridgeIntegrationSettings();
       if (!settings.enabled) {
         throw new VcmError({
-          code: "CCR_DISABLED",
-          message: "CCR GPT models are disabled.",
+          code: "CODEX_BRIDGE_DISABLED",
+          message: "Codex Bridge models are disabled.",
           statusCode: 409,
-          hint: "Save the CCR API key and enable CCR GPT models before checking the connection."
+          hint: "Save the Codex Bridge API key and enable Codex models before checking the connection."
         });
       }
       await probe(true);
       return buildStatus();
     },
     async getLaunchEnvironment(model) {
-      if (!isCcrSessionModel(model)) {
+      if (!isCodexBridgeSessionModel(model)) {
         return buildNativeLaunchEnvironment(baseEnv);
       }
-      const settings = await deps.settings.getCcrIntegrationSettings();
+      const settings = await deps.settings.getCodexBridgeIntegrationSettings();
       if (!settings.enabled) {
         throw new VcmError({
-          code: "CCR_DISABLED",
-          message: "CCR GPT models are disabled.",
+          code: "CODEX_BRIDGE_DISABLED",
+          message: "Codex Bridge models are disabled.",
           statusCode: 409,
-          hint: "Enable CCR GPT models in VCM Settings before starting this session."
+          hint: "Enable Codex Bridge in VCM Settings before starting this session."
         });
       }
       const checked = await probe();
-      if (checked.result.connectionState !== "available" || !checked.result.modelAvailable) {
+      const modelId = getCodexBridgeModelId(model);
+      const modelAvailable = checked.result.models.some((available) => available.id === modelId);
+      if (checked.result.connectionState !== "available" || !modelAvailable) {
         throw new VcmError({
-          code: "CCR_MODEL_UNAVAILABLE",
-          message: checked.result.error ?? `CCR model ${CCR_GPT_MODEL_ID} is unavailable.`,
+          code: "CODEX_BRIDGE_MODEL_UNAVAILABLE",
+          message: checked.result.error ?? `Codex Bridge model ${modelId} is unavailable.`,
           statusCode: 409,
-          hint: "Check that host CCR is running on port 3456 and exposes GPT-5.6 Sol."
+          hint: "Check Codex Bridge on port 3456, refresh its Codex login, and verify the selected model."
         });
       }
 
-      const gatewayBaseUrl = checked.result.baseUrl ?? CCR_GATEWAY_BASE_URL;
-      const gatewayHost = new URL(gatewayBaseUrl).hostname;
+      const bridgeBaseUrl = checked.result.baseUrl ?? CODEX_BRIDGE_BASE_URL;
+      const bridgeHost = new URL(bridgeBaseUrl).hostname;
       const noProxy = mergeNoProxy(
         deps.baseEnv?.NO_PROXY ?? deps.baseEnv?.no_proxy ?? process.env.NO_PROXY ?? process.env.no_proxy,
-        gatewayHost
+        bridgeHost
       );
       return {
-        ANTHROPIC_BASE_URL: gatewayBaseUrl,
-        ANTHROPIC_API_BASE_URL: gatewayBaseUrl,
-        CLAUDE_AGENT_API_BASE_URL: gatewayBaseUrl,
+        ANTHROPIC_BASE_URL: bridgeBaseUrl,
+        ANTHROPIC_API_BASE_URL: bridgeBaseUrl,
+        CLAUDE_AGENT_API_BASE_URL: bridgeBaseUrl,
         ANTHROPIC_AUTH_TOKEN: undefined,
         ANTHROPIC_API_KEY: undefined,
-        ANTHROPIC_MODEL: CCR_GPT_MODEL_ID,
-        CCR_CLAUDE_CODE_MODEL: CCR_GPT_MODEL_ID,
-        CODEXL_CLAUDE_CODE_MODEL: CCR_GPT_MODEL_ID,
-        ANTHROPIC_SMALL_FAST_MODEL: CCR_GPT_MODEL_ID,
+        ANTHROPIC_MODEL: modelId,
+        CODEX_BRIDGE_CLAUDE_MODEL: modelId,
+        ANTHROPIC_SMALL_FAST_MODEL: modelId,
         CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1",
-        CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(CCR_GPT_EFFECTIVE_CONTEXT_TOKENS),
-        CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(CCR_GPT_AUTO_COMPACT_WINDOW_TOKENS),
-        CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(CCR_GPT_AUTO_COMPACT_PERCENT),
+        CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(CODEX_BRIDGE_EFFECTIVE_CONTEXT_TOKENS),
+        CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(CODEX_BRIDGE_AUTO_COMPACT_WINDOW_TOKENS),
+        CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(CODEX_BRIDGE_AUTO_COMPACT_PERCENT),
         CLAUDE_CONFIG_DIR: configDir,
         NO_PROXY: noProxy,
         no_proxy: noProxy
       };
     },
     async getLaunchSettingsOverride(model) {
-      if (!isCcrSessionModel(model)) {
+      if (!isCodexBridgeSessionModel(model)) {
         return undefined;
       }
       return {
@@ -233,57 +247,56 @@ export function createCcrIntegrationService(deps: CcrIntegrationServiceDeps): Cc
   };
 }
 
-const CCR_BASE_URL_KEYS = [
+const BRIDGE_BASE_URL_KEYS = [
   "ANTHROPIC_BASE_URL",
   "ANTHROPIC_API_BASE_URL",
   "CLAUDE_AGENT_API_BASE_URL"
 ] as const;
 
-const CCR_MODEL_KEYS = [
+const BRIDGE_MODEL_KEYS = [
   "ANTHROPIC_MODEL",
   "ANTHROPIC_SMALL_FAST_MODEL"
 ] as const;
 
-const CCR_ONLY_ENV_KEYS = [
-  "CCR_CLAUDE_CODE_MODEL",
-  "CODEXL_CLAUDE_CODE_MODEL",
+const BRIDGE_ONLY_ENV_KEYS = [
+  "CODEX_BRIDGE_CLAUDE_MODEL",
   "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"
 ] as const;
 
 export function buildNativeLaunchEnvironment(baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = {};
-  let inheritedCcrTakeover = false;
+  let inheritedBridgeTakeover = false;
 
   if (baseEnv.CLAUDE_CONFIG_DIR?.trim()) {
     environment.CLAUDE_CONFIG_DIR = baseEnv.CLAUDE_CONFIG_DIR.trim();
   }
 
-  for (const key of CCR_BASE_URL_KEYS) {
-    if (isCcrGatewayUrl(baseEnv[key])) {
+  for (const key of BRIDGE_BASE_URL_KEYS) {
+    if (isCodexBridgeUrl(baseEnv[key])) {
       environment[key] = undefined;
-      inheritedCcrTakeover = true;
+      inheritedBridgeTakeover = true;
     }
   }
-  for (const key of CCR_MODEL_KEYS) {
-    if (isCcrModelName(baseEnv[key])) {
+  for (const key of BRIDGE_MODEL_KEYS) {
+    if (isCodexBridgeModelName(baseEnv[key], baseEnv.CODEX_BRIDGE_CLAUDE_MODEL)) {
       environment[key] = undefined;
-      inheritedCcrTakeover = true;
+      inheritedBridgeTakeover = true;
     }
   }
-  for (const key of CCR_ONLY_ENV_KEYS) {
+  for (const key of BRIDGE_ONLY_ENV_KEYS) {
     if (baseEnv[key] !== undefined) {
       environment[key] = undefined;
-      inheritedCcrTakeover = true;
+      inheritedBridgeTakeover = true;
     }
   }
-  if (inheritedCcrTakeover) {
+  if (inheritedBridgeTakeover) {
     environment.ANTHROPIC_AUTH_TOKEN = undefined;
     environment.ANTHROPIC_API_KEY = undefined;
   }
   return environment;
 }
 
-function isCcrGatewayUrl(value: string | undefined): boolean {
+function isCodexBridgeUrl(value: string | undefined): boolean {
   if (!value) {
     return false;
   }
@@ -296,35 +309,37 @@ function isCcrGatewayUrl(value: string | undefined): boolean {
   }
 }
 
-function isCcrModelName(value: string | undefined): boolean {
-  if (!value) {
-    return false;
-  }
-  return value === CCR_GPT_MODEL_ID
-    || value.startsWith("anthropic/claude-ccr-h");
+function isCodexBridgeModelName(value: string | undefined, bridgeModel: string | undefined): boolean {
+  return Boolean(value && bridgeModel && value === bridgeModel);
 }
 
-function createStatus(input: Omit<CcrIntegrationStatus, "modelOptions">): CcrIntegrationStatus {
+function createStatus(input: Omit<CodexBridgeIntegrationStatus, "modelOptions"> & {
+  models: readonly CodexBridgeModelDescriptor[];
+}): CodexBridgeIntegrationStatus {
+  const { models, ...status } = input;
   const reason = input.error
-    ?? (input.enabled ? "CCR GPT-5.6 Sol is unavailable." : "Enable CCR GPT models in Settings.");
+    ?? (input.enabled ? "Codex Bridge models are unavailable." : "Enable Codex Bridge in Settings.");
   return {
-    ...input,
-    modelOptions: createSessionModelOptions(input.enabled && input.modelAvailable, reason)
+    ...status,
+    modelOptions: createSessionModelOptions(
+      models,
+      input.enabled && input.modelAvailable ? undefined : reason
+    )
   };
 }
 
 function missingApiKeyError(): VcmError {
   return new VcmError({
-    code: "CCR_API_KEY_MISSING",
-    message: "CCR API key is not configured.",
+    code: "CODEX_BRIDGE_API_KEY_MISSING",
+    message: "Codex Bridge API key is not configured.",
     statusCode: 400,
-    hint: "Save the CCR API key before enabling CCR GPT models."
+    hint: "Save the Codex Bridge API key before enabling Codex models."
   });
 }
 
 function invalidSettingsError(message: string): VcmError {
   return new VcmError({
-    code: "CCR_SETTINGS_INVALID",
+    code: "CODEX_BRIDGE_SETTINGS_INVALID",
     message,
     statusCode: 400
   });

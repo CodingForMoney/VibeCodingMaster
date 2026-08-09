@@ -327,7 +327,7 @@ describe("apiClient", () => {
     expect(preferences.autoTaskHarnessReviewEnabled).toBe(true);
   });
 
-  it("updates and checks global CCR integration settings", async () => {
+  it("updates and checks global Codex Bridge integration settings", async () => {
     const fetchMock = mockFetch({
       enabled: true,
       apiKeyConfigured: true,
@@ -336,15 +336,15 @@ describe("apiClient", () => {
       modelOptions: []
     });
 
-    await apiClient.updateCcrIntegration({ apiKey: "local-secret", enabled: true });
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/settings/ccr");
+    await apiClient.updateCodexBridgeIntegration({ apiKey: "local-secret", enabled: true });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/settings/codex-bridge");
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
       apiKey: "local-secret",
       enabled: true
     });
 
-    await apiClient.checkCcrIntegration();
-    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/settings/ccr/check");
+    await apiClient.checkCodexBridgeIntegration();
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/settings/codex-bridge/check");
     expect(fetchMock.mock.calls[1]?.[1]?.body).toBeUndefined();
   });
 

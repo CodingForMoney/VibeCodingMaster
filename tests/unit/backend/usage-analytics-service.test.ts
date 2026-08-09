@@ -42,7 +42,7 @@ describe("usage-analytics-service", () => {
         cacheCreation: 60,
         costMicros: 3_750
       }),
-      event("coder", "launch-ccr", 1, "gpt-5.6-sol", "session-ccr", {
+      event("coder", "launch-codex-bridge", 1, "gpt-5.5", "session-codex-bridge", {
         input: 9_999,
         output: 9_999,
         cacheRead: 9_999,

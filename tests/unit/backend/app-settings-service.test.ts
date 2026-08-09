@@ -44,7 +44,7 @@ describe("app-settings-service", () => {
 
     expect(settings).toEqual({
       version: 1,
-      ccr: {
+      codexBridge: {
         version: 1,
         enabled: false,
         apiKey: ""
@@ -177,19 +177,19 @@ describe("app-settings-service", () => {
     });
   });
 
-  it("stores CCR credentials globally and preserves namespaced launch models", async () => {
+  it("stores Codex Bridge credentials globally and preserves namespaced launch models", async () => {
     const fs = createMemoryFs();
     const service = createAppSettingsService({ fs, settingsPath: "/settings.json" });
     const launchTemplate = createDefaultLaunchTemplate();
-    launchTemplate.roles.architect.model = "ccr:Codex API/gpt-5.6-sol";
+    launchTemplate.roles.architect.model = "codex-bridge:gpt-5.5";
 
-    await expect(service.updateCcrIntegrationSettings({ apiKey: "local-secret", enabled: true }))
+    await expect(service.updateCodexBridgeIntegrationSettings({ apiKey: "local-secret", enabled: true }))
       .resolves.toEqual({ version: 1, apiKey: "local-secret", enabled: true });
     await service.updatePreferences({ launchTemplate });
 
     const stored = await fs.readJson<AppSettingsFile>("/settings.json");
-    expect(stored.ccr).toEqual({ version: 1, apiKey: "local-secret", enabled: true });
-    expect(stored.preferences.launchTemplate.roles.architect.model).toBe("ccr:Codex API/gpt-5.6-sol");
+    expect(stored.codexBridge).toEqual({ version: 1, apiKey: "local-secret", enabled: true });
+    expect(stored.preferences.launchTemplate.roles.architect.model).toBe("codex-bridge:gpt-5.5");
   });
 
   it("protects the global settings file with owner-only permissions", async () => {
@@ -200,7 +200,7 @@ describe("app-settings-service", () => {
         fs: createNodeFileSystemAdapter(),
         settingsPath
       });
-      await service.updateCcrIntegrationSettings({ apiKey: "local-secret" });
+      await service.updateCodexBridgeIntegrationSettings({ apiKey: "local-secret" });
 
       const stat = await fsPromises.stat(settingsPath);
       expect(stat.mode & 0o777).toBe(0o600);

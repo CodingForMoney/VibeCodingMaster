@@ -10,7 +10,7 @@ const dataDir = process.env.VCM_DATA_DIR?.trim()
 
 try {
   const settings = JSON.parse(await readFile(path.join(dataDir, "settings.json"), "utf8"));
-  const apiKey = settings?.ccr?.apiKey;
+  const apiKey = settings?.codexBridge?.apiKey;
   if (typeof apiKey !== "string" || !apiKey.trim()) {
     process.exitCode = 1;
   } else {
