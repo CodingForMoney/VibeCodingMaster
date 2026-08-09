@@ -98,8 +98,12 @@ Notes:
   `harness-studio-layout.test.ts`, and `ccr-integration.e2e.test.ts`. Verify the
   bundled plugin loads only for Architect on native and CCR launches; Coder and
   Reviewer do not load the plugin or preload `vcm-code-navigation`; Architect
-  frontmatter preloads the skill; the shared PreToolUse guard permits text search
-  while continuing to reject background and unsupervised Bash execution;
+  frontmatter preloads the skill; Architect queries accessors, backing fields,
+  trait items, implementations, wrappers, and aliases as separate symbols and
+  may use bounded source search only after recording a demonstrably partial LSP
+  query; Reviewer rejects a complete-class claim based on one symbol alone; the
+  shared PreToolUse guard permits text search while continuing to reject
+  background and unsupervised Bash execution;
   Architect semantic-navigation rules stay in all installed copies;
   language detection uses task-worktree indexes and manifests; bounded probes
   distinguish missing, broken, and runnable servers without claiming workspace

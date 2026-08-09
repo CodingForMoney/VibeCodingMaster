@@ -486,7 +486,10 @@ including CCR launches. The project environment must still
 provide the language server for each detected language: `rust-analyzer`,
 `typescript-language-server`, `pyright-langserver`, `gopls`, `clangd`, or
 `jdtls`. Architect preloads `vcm-code-navigation` and uses LSP for semantic
-relationships; other roles use generated context and ordinary source reads.
+relationships. Accessors, backing fields, trait items, implementations, wrappers,
+and aliases are queried as separate symbols; a bounded source-text fallback may
+only locate candidates after the correct LSP query is demonstrably partial.
+Other roles use generated context and ordinary source reads.
 Harness Studio reports
 whether the server executable and plugin can run; the role Session performs the
 real workspace indexing and semantic query retries. VCM uses Claude Code progress

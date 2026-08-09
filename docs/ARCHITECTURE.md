@@ -194,11 +194,17 @@ on both native Claude and CCR launches. Other roles do not load the plugin.
 Architect preloads the `vcm-code-navigation` skill through Agent frontmatter.
 
 Architect uses LSP semantic navigation for definitions, references,
-implementations, and call relationships, then Read the resolved code. Unresolved
-project-owned relationships remain unresolved. Coder and Reviewer use generated
-context, Glob, Grep, and complete source reads without starting separate language
-servers. The shared PreToolUse guard supervises Bash execution but does not
-prohibit text search.
+implementations, and call relationships, then Read the resolved code. Reference
+results are symbol-specific, so accessors, backing fields, trait declarations,
+implementation methods, wrappers, and aliases are queried separately before a
+semantic class is treated as complete. When the correct LSP operation is
+demonstrably partial for a relationship it cannot model or expose, Architect may
+use exact source-text search only inside the already identified owning file or
+module to locate candidates; every candidate is read and semantically verified,
+and the text match is not relationship evidence. Unresolved project-owned
+relationships remain unresolved. Coder and Reviewer use generated context, Glob,
+Grep, and complete source reads without starting separate language servers. The
+shared PreToolUse guard supervises Bash execution but does not prohibit text search.
 
 `code-intelligence-service` derives project languages from the active task
 worktree's root manifests and `module-index.json`. It validates the bundled

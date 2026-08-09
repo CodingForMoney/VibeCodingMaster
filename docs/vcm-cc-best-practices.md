@@ -724,15 +724,21 @@ bridge only for Architect, and the project runtime must provide the matching
 language-server executable. The Architect definition preloads
 `vcm-code-navigation`. The skill uses definitions, implementations, references,
 and call hierarchy when those semantic relationships are required, then requires
-every resolved callable unit to be read in full. It does not run an unconditional
-file-symbol warm-up. A successful executable probe alone is not workspace
-readiness. Startup or indexing time does not permit replacing a required semantic
-query with text matching. Use generated context, architecture documents, and
-runtime evidence for boundaries LSP does not model. If LSP cannot resolve a
-required project-owned relationship after the bounded retry, keep it unresolved.
-Expand one dependency hop at a time instead of injecting an unrestricted
-repository graph. Coder and Reviewer use generated context, Glob, Grep, and full
-source reads without loading separate language servers.
+every resolved callable unit to be read in full. LSP references are
+symbol-specific: query accessors, backing fields, trait declarations,
+implementation methods, wrappers, and aliases separately rather than treating
+one reference result as a complete semantic class. It does not run an
+unconditional file-symbol warm-up. A successful executable probe alone is not
+workspace readiness. Startup or indexing time does not permit replacing a
+required semantic query with text matching. When the correct symbol query is
+demonstrably partial for a relationship LSP cannot model or expose, exact source
+search may locate candidates only inside the already identified owning file or
+module; record the LSP gap, read every candidate, and verify its semantics.
+Otherwise use generated context, architecture documents, and runtime evidence
+for boundaries LSP does not model. If the relationship still cannot be resolved,
+keep it unresolved. Expand one dependency hop at a time instead of injecting an
+unrestricted repository graph. Coder and Reviewer use generated context, Glob,
+Grep, and full source reads without loading separate language servers.
 
 ## 15. Harness Bootstrap and Feedback
 

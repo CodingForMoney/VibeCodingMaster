@@ -100,6 +100,10 @@ describe("createHarnessService", () => {
     expect(codeNavigationSkill).not.toContain("ToolSearch");
     expect(codeNavigationSkill).not.toContain("documentSymbol");
     expect(codeNavigationSkill).toContain("Retry the same bounded workspace query at most two more times");
+    expect(codeNavigationSkill).toContain("Treat LSP results as symbol-specific");
+    expect(codeNavigationSkill).toContain("Never use one symbol's references as proof of a complete semantic class");
+    expect(codeNavigationSkill).toContain("only within the already identified owning file or module");
+    expect(codeNavigationSkill).toContain("Text matches are candidate locations, not relationship evidence");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain("name: vcm-report-harness-issue");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain(".ai/vcm/harness-feedback/pending/");
     const proposeMemorySkill = await fs.readText("/repo/.claude/skills/vcm-propose-memory/SKILL.md");
@@ -163,6 +167,9 @@ describe("createHarnessService", () => {
     expect(architectAgent).toContain("Do not use the built-in `Grep` tool or shell text-search commands");
     expect(architectAgent).toContain("LSP is mandatory and directly available");
     expect(architectAgent).toContain("report a VCM LSP configuration failure");
+    expect(architectAgent).toContain("An accessor, its backing field, a trait declaration, its implementation method, a wrapper, and an alias are separate symbols");
+    expect(architectAgent).toContain("except for the bounded fallback below");
+    expect(architectAgent).toContain("Text matches identify candidates only and are not relationship evidence");
     expect(frontmatterOf(architectAgent)).toContain("skills:\n  - vcm-code-navigation");
     expect(architectAgent).toContain("Resolution Evidence");
     expect(architectAgent).toContain("verifiable behavior, implementation boundaries within the accepted scope, behavior/contract proof points");
@@ -212,6 +219,9 @@ describe("createHarnessService", () => {
     expect(diagnosisReviewerAgent).toContain("Finding Scope: test-only|implementation");
     expect(diagnosisReviewerAgent).toContain("L3 Trigger Assessment");
     expect(diagnosisReviewerAgent).toContain("`Test Result: incomplete` is Tester continuation state");
+    expect(diagnosisReviewerAgent).toContain("One symbol's reference result cannot");
+    expect(diagnosisReviewerAgent).toContain("prove the class complete");
+    expect(diagnosisReviewerAgent).toContain("text matches alone are not evidence");
     const finalAcceptanceSkill = await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md");
     expect(finalAcceptanceSkill).toContain("`incomplete` is not acceptance evidence");
     expect(finalAcceptanceSkill).toContain("do not accept `Test Result: incomplete`");

@@ -145,6 +145,14 @@ of verifying only the cited instances. A claimed-complete enumeration with
 neither a recorded command nor a judgment-derived basis, or one that fails
 reconstruction, is unsupported by code evidence and is `request_changes`.
 
+When a claimed semantic class spans an accessor, backing field, trait
+declaration, implementation method, wrapper, or alias, verify that Architect
+queried every relevant symbol separately. One symbol's reference result cannot
+prove the class complete. If Architect used bounded source fallback, verify the
+evidence records the correct prior LSP operation and its missing relationship,
+limits candidate search to the identified owning file or module, and
+semantically verifies every candidate; text matches alone are not evidence.
+
 Run a backward-impact pass over the plan:
 
 - For every existing code site named by the Module/File Plan or Scaffold
