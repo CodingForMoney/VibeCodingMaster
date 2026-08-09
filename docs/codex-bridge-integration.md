@@ -84,13 +84,17 @@ ANTHROPIC_MODEL=<selected model id>
 ANTHROPIC_SMALL_FAST_MODEL=<selected model id>
 CODEX_BRIDGE_CLAUDE_MODEL=<selected model id>
 CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
+CLAUDE_CODE_SUBAGENT_MODEL=<selected model id>
 CLAUDE_CONFIG_DIR=~/.vcm/claude/codex-bridge
 ```
 
 The child receives a session-only `apiKeyHelper` through `--settings`. The key
 is not placed in the command, terminal output, or child environment. The Claude
 adapter omits native `--model` for Bridge sessions because the selected model is
-provided by the isolated environment.
+provided by the isolated environment. `CLAUDE_CODE_SUBAGENT_MODEL` makes Bridge
+subagents inherit the selected GPT model. Native sessions do not receive this
+override, so `vcm-architect-scaffold-worker` continues to use its configured
+`opus` model.
 
 VCM retains the Codex API context contract of `258400` tokens and proactive
 compaction at `90%`. These values are independent of the transport process.

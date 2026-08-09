@@ -118,8 +118,10 @@ for these sessions because the selected model is supplied through the isolated
 environment. Bridge children retain
 `CLAUDE_CODE_MAX_CONTEXT_TOKENS=258400`,
 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=258400`, and
-`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=90`. Native Claude children receive none of
-these overrides. Context-limit StopFailure
+`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=90`. They also set
+`CLAUDE_CODE_SUBAGENT_MODEL` to the selected Bridge model so subagents inherit
+GPT, while native Architect sessions retain the scaffold worker's configured
+`opus` model. Native Claude children receive none of these overrides. Context-limit StopFailure
 diagnostics are terminal because retrying the unchanged context cannot recover
 them.
 An unavailable Bridge selection fails before process creation and is never

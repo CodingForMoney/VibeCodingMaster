@@ -54,6 +54,7 @@ describe("createCodexBridgeIntegrationService", () => {
       CODEX_BRIDGE_CLAUDE_MODEL: MODEL_ID,
       ANTHROPIC_SMALL_FAST_MODEL: MODEL_ID,
       CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1",
+      CLAUDE_CODE_SUBAGENT_MODEL: MODEL_ID,
       CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(CODEX_BRIDGE_EFFECTIVE_CONTEXT_TOKENS),
       CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(CODEX_BRIDGE_AUTO_COMPACT_WINDOW_TOKENS),
       CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(CODEX_BRIDGE_AUTO_COMPACT_PERCENT),
@@ -66,7 +67,10 @@ describe("createCodexBridgeIntegrationService", () => {
 
   it("does not inject Bridge environment for native Claude models", async () => {
     const service = createService({
-      baseEnv: { CLAUDE_CODE_MAX_CONTEXT_TOKENS: "123456" }
+      baseEnv: {
+        CLAUDE_CODE_MAX_CONTEXT_TOKENS: "123456",
+        CLAUDE_CODE_SUBAGENT_MODEL: "sonnet"
+      }
     });
     await expect(service.getLaunchEnvironment("opus")).resolves.toEqual({});
     await expect(service.getLaunchSettingsOverride("opus")).resolves.toBeUndefined();
@@ -80,6 +84,7 @@ describe("createCodexBridgeIntegrationService", () => {
         ANTHROPIC_API_KEY: "bridge-key",
         ANTHROPIC_MODEL: MODEL_ID,
         CODEX_BRIDGE_CLAUDE_MODEL: MODEL_ID,
+        CLAUDE_CODE_SUBAGENT_MODEL: MODEL_ID,
         CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1",
         CLAUDE_CONFIG_DIR: "/custom/native-claude"
       }
@@ -91,6 +96,7 @@ describe("createCodexBridgeIntegrationService", () => {
       ANTHROPIC_API_KEY: undefined,
       ANTHROPIC_MODEL: undefined,
       CODEX_BRIDGE_CLAUDE_MODEL: undefined,
+      CLAUDE_CODE_SUBAGENT_MODEL: undefined,
       CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: undefined,
       CLAUDE_CONFIG_DIR: "/custom/native-claude"
     });

@@ -89,6 +89,7 @@ describe("backend E2E Codex Bridge integration", () => {
       ANTHROPIC_AUTH_TOKEN: undefined,
       ANTHROPIC_API_KEY: undefined,
       ANTHROPIC_MODEL: BRIDGE_MODEL_ID,
+      CLAUDE_CODE_SUBAGENT_MODEL: BRIDGE_MODEL_ID,
       CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
       CLAUDE_CODE_ENABLE_TELEMETRY: undefined,
       CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(CODEX_BRIDGE_EFFECTIVE_CONTEXT_TOKENS),
@@ -110,6 +111,7 @@ describe("backend E2E Codex Bridge integration", () => {
         ANTHROPIC_AUTH_TOKEN: "inherited-bridge-token",
         ANTHROPIC_MODEL: BRIDGE_MODEL_ID,
         CODEX_BRIDGE_CLAUDE_MODEL: BRIDGE_MODEL_ID,
+        CLAUDE_CODE_SUBAGENT_MODEL: BRIDGE_MODEL_ID,
         CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1"
       }
     });
@@ -147,6 +149,7 @@ describe("backend E2E Codex Bridge integration", () => {
     expect(nativeInput.env.ANTHROPIC_BASE_URL).toBeUndefined();
     expect(nativeInput.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
     expect(nativeInput.env.ANTHROPIC_MODEL).toBeUndefined();
+    expect(nativeInput.env.CLAUDE_CODE_SUBAGENT_MODEL).toBeUndefined();
     expect(nativeInput.env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY).toBeUndefined();
     expect(nativeInput.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS).toBeUndefined();
     expect(nativeInput.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
@@ -223,6 +226,7 @@ describe("backend E2E Codex Bridge integration", () => {
         ANTHROPIC_AUTH_TOKEN: undefined,
         ANTHROPIC_API_KEY: undefined,
         ANTHROPIC_MODEL: BRIDGE_MODEL_ID,
+        CLAUDE_CODE_SUBAGENT_MODEL: BRIDGE_MODEL_ID,
         CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(CODEX_BRIDGE_EFFECTIVE_CONTEXT_TOKENS),
         CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(CODEX_BRIDGE_AUTO_COMPACT_WINDOW_TOKENS),
         CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(CODEX_BRIDGE_AUTO_COMPACT_PERCENT),
@@ -304,6 +308,7 @@ describe("backend E2E Codex Bridge integration", () => {
       persisted.claudeSessionId
     ]));
     expect(resumedInput.env.CLAUDE_CONFIG_DIR).toBe(persisted.claudeConfigDir);
+    expect(resumedInput.env.CLAUDE_CODE_SUBAGENT_MODEL).toBe(BRIDGE_MODEL_ID);
     expect(resumedInput.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS)
       .toBe(String(CODEX_BRIDGE_EFFECTIVE_CONTEXT_TOKENS));
     expect(resumedInput.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW)
@@ -326,6 +331,7 @@ describe("backend E2E Codex Bridge integration", () => {
     expect(restartedInput.args).not.toContain("--settings");
     expect(restartedInput.env.CLAUDE_CONFIG_DIR).toBeUndefined();
     expect(restartedInput.env.ANTHROPIC_BASE_URL).toBeUndefined();
+    expect(restartedInput.env.CLAUDE_CODE_SUBAGENT_MODEL).toBeUndefined();
     expect(restartedInput.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS).toBeUndefined();
     expect(restartedInput.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
     expect(restartedInput.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE).toBeUndefined();
@@ -337,6 +343,7 @@ describe("backend E2E Codex Bridge integration", () => {
     });
     expect(restartedWithBridge.statusCode).toBe(200);
     const bridgeRestartInput = env.mockRuntime.getCreateInput(restartedWithBridge.json<{ id: string }>().id);
+    expect(bridgeRestartInput.env.CLAUDE_CODE_SUBAGENT_MODEL).toBe(BRIDGE_MODEL_ID);
     expect(bridgeRestartInput.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS)
       .toBe(String(CODEX_BRIDGE_EFFECTIVE_CONTEXT_TOKENS));
     expect(bridgeRestartInput.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW)
@@ -373,6 +380,7 @@ describe("backend E2E Codex Bridge integration", () => {
       const session = env.mockRuntime.getSessionByRole(task.taskSlug, role);
       expect(session).toBeDefined();
       const input = env.mockRuntime.getCreateInput(session!.id);
+      expect(input.env.CLAUDE_CODE_SUBAGENT_MODEL).toBe(BRIDGE_MODEL_ID);
       expect(input.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS)
         .toBe(String(CODEX_BRIDGE_EFFECTIVE_CONTEXT_TOKENS));
       expect(input.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW)
