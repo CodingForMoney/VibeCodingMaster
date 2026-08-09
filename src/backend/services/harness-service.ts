@@ -38,7 +38,9 @@ import {
 } from "../role-tool-policy.js";
 import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
 import { renderCoderWorkerHarnessRules } from "../templates/harness/coder-worker-agent.js";
+import { renderArchitectEvidenceWorkerHarnessRules } from "../templates/harness/architect-evidence-worker-agent.js";
 import { renderArchitectScaffoldWorkerHarnessRules } from "../templates/harness/architect-scaffold-worker-agent.js";
+import { renderArchitectValidationWorkerHarnessRules } from "../templates/harness/architect-validation-worker-agent.js";
 import {
   renderReviewerAgentRules,
   renderRequestGateReviewTool,
@@ -452,6 +454,17 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     renderRules: renderCoderWorkerHarnessRules
   },
   {
+    kind: "agent-architect-evidence-worker",
+    path: ".claude/agents/vcm-architect-evidence-worker.md",
+    title: "VCM Architect Evidence Worker Agent",
+    frontmatter: renderAgentFrontmatter(
+      "vcm-architect-evidence-worker",
+      "Foreground Architect worker for bounded project evidence collection.",
+      { tools: "Read, Grep, Glob, Write", model: "opus", effort: "xhigh" }
+    ),
+    renderRules: renderArchitectEvidenceWorkerHarnessRules
+  },
+  {
     kind: "agent-architect-scaffold-worker",
     path: ".claude/agents/vcm-architect-scaffold-worker.md",
     title: "VCM Architect Scaffold Worker Agent",
@@ -461,6 +474,17 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
       { model: "opus", effort: "xhigh" }
     ),
     renderRules: renderArchitectScaffoldWorkerHarnessRules
+  },
+  {
+    kind: "agent-architect-validation-worker",
+    path: ".claude/agents/vcm-architect-validation-worker.md",
+    title: "VCM Architect Validation Worker Agent",
+    frontmatter: renderAgentFrontmatter(
+      "vcm-architect-validation-worker",
+      "Foreground Architect worker for exact assigned command execution and evidence capture.",
+      { tools: "Read, Grep, Glob, Bash, Write", model: "opus", effort: "xhigh" }
+    ),
+    renderRules: renderArchitectValidationWorkerHarnessRules
   },
   {
     kind: "tool-request-gate-review",

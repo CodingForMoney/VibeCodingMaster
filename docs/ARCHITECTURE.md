@@ -120,8 +120,9 @@ environment. Bridge children retain
 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=258400`, and
 `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=90`. They also set
 `CLAUDE_CODE_SUBAGENT_MODEL` to the selected Bridge model so subagents inherit
-GPT, while native Architect sessions retain the scaffold worker's configured
-`opus` model. Native Claude children receive none of these overrides. Context-limit StopFailure
+GPT, while native Architect evidence, scaffold, and validation workers retain
+their configured `opus` model with `xhigh` effort. Native Claude children receive
+none of these overrides. Context-limit StopFailure
 diagnostics are terminal because retrying the unchanged context cannot recover
 them.
 An unavailable Bridge selection fails before process creation and is never
@@ -206,8 +207,10 @@ relationships remain unresolved. Coder and Reviewer use generated context, Glob,
 Grep, and complete source reads without starting separate language servers. The
 shared Bash PreToolUse guard supervises Bash execution but does not prohibit text
 search. A separate Agent PreToolUse guard permits Architect to invoke only
-`vcm-architect-scaffold-worker`, permits Coder to invoke only `vcm-coder-worker`,
-denies subagents for every other VCM role, and denies nested worker delegation.
+`vcm-architect-evidence-worker`, `vcm-architect-scaffold-worker`, and
+`vcm-architect-validation-worker`; permits Coder to invoke only
+`vcm-coder-worker`; denies subagents for every other VCM role; and denies nested
+worker delegation.
 
 Code-diff source chains come from the current Workflow Control run rather than
 PM wording. VCM reads the confirmed dispatch history for that run and includes
@@ -463,13 +466,20 @@ Architect Interview produces two separate task artifacts: the user-confirmed
 and writes the executable `architecture-plan.md`; the architecture-plan Gate
 hashes all three so changed evidence invalidates an earlier approval.
 
-Architect delegates exact scaffold execution to one foreground
-`vcm-architect-scaffold-worker` subagent configured with `model: opus` and
-`effort: xhigh`. The worker has an independent context and returns before the
-Architect turn continues. Architect remains responsible for reviewing the
-scaffold commit, ledger reconciliation, and build evidence. Coder may delegate
-parallel marker implementation only to `vcm-coder-worker`. The fixed Agent hook
-enforces both role-specific worker allowlists independently of permission mode.
+Architect uses three foreground support workers, each configured with
+`model: opus` and `effort: xhigh` for native Claude launches. Evidence workers
+perform bounded supporting reads and write factual reports; Architect personally
+reads and LSP-verifies decision-bearing code before accepting those facts.
+Scaffold workers execute the complete plan's exact scaffold and mechanical
+text/configuration changes. Validation workers execute only commands already
+selected by Architect and preserve their raw results. Architect owns every
+architecture decision, worker review, validation interpretation, and final
+claim, and removes temporary worker reports after consolidating accepted
+evidence. All workers return before the current Architect turn continues and
+cannot invoke nested subagents. Bridge launches override the worker model so it
+inherits the selected GPT model. Coder may delegate parallel marker
+implementation only to `vcm-coder-worker`. The fixed Agent hook enforces both
+role-specific worker allowlists independently of permission mode.
 
 Scaffold-ledger reconciliation is lifecycle-explicit. Architect Scaffold Worker
 and the architecture-plan Gate run `check-scaffold-ledger --mode scaffold`,

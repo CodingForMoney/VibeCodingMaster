@@ -48,7 +48,9 @@ docs/CODING_STANDARDS.md
 .claude/agents/translator.md
 .claude/agents/harness-engineer.md
 .claude/agents/vcm-coder-worker.md
+.claude/agents/vcm-architect-evidence-worker.md
 .claude/agents/vcm-architect-scaffold-worker.md
+.claude/agents/vcm-architect-validation-worker.md
 .claude/skills/vcm-route-message/SKILL.md
 .claude/skills/vcm-ask-user/SKILL.md
 .claude/skills/vcm-task-state/SKILL.md
@@ -467,11 +469,19 @@ Manifest-to-Marker bijection. Before final handoff,
 each reported `done/removed` or `failed/present` disposition against the final
 tree. Marker count alone never determines the lifecycle.
 
-After the plan and Scaffold Manifest are complete, Architect invokes one
-foreground `vcm-architect-scaffold-worker`. The worker uses Opus with xhigh
-effort in an independent context, creates and validates the exact scaffold, and
-commits it. Architect waits for the worker, reviews its actual commit and
-evidence, and owns any correction.
+Architect may use foreground evidence workers for bounded supporting reads that
+would otherwise add substantial raw context. The worker writes a factual report;
+Architect personally reads and LSP-verifies decision-bearing code, reviews the
+report, and consolidates accepted facts into architecture evidence.
+
+After the plan and Scaffold Manifest are complete, Architect invokes the
+foreground scaffold worker for the exact scaffold and plan-fixed mechanical
+text or configuration changes. Exact non-interactive validation commands may be
+delegated to the validation worker. Architect selects the commands, interprets
+their raw results, reviews every worker output, and owns any correction. Native
+Architect evidence, scaffold, and validation workers use Opus with xhigh effort;
+Bridge sessions make them inherit the selected GPT model. Every worker returns
+before the Architect turn continues and cannot invoke another subagent.
 
 After completed planning and scaffold commits, Architect runs the
 `restart-architect` skill before writing its first completed route to PM. The

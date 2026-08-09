@@ -21,7 +21,7 @@ describe("createHarnessService", () => {
   it("plans and applies recommended harness files when they are missing", async () => {
     const fs = createMemoryFs();
     const service = createHarnessService({ fs });
-    const expectedHarnessFileCount = 35;
+    const expectedHarnessFileCount = 37;
 
     const status = await service.getHarnessStatus("/repo");
     expect(status.needsApply).toBe(true);
@@ -118,7 +118,15 @@ describe("createHarnessService", () => {
     expect(restartArchitectSkill).toContain("memoryCandidatePath");
     expect(restartArchitectSkill).toContain("already_scheduled");
     expect(await fs.readText("/repo/.ai/tools/request-architect-restart")).toContain("/sessions/architect/restart-after-planning");
+    const evidenceWorker = await fs.readText("/repo/.claude/agents/vcm-architect-evidence-worker.md");
+    expect(evidenceWorker).toContain("tools: Read, Grep, Glob, Write");
+    expect(evidenceWorker).toContain("model: opus\neffort: xhigh");
+    expect(evidenceWorker).toContain("Do not design architecture");
     expect(await fs.readText("/repo/.claude/agents/vcm-architect-scaffold-worker.md")).toContain("model: opus\neffort: xhigh");
+    const validationWorker = await fs.readText("/repo/.claude/agents/vcm-architect-validation-worker.md");
+    expect(validationWorker).toContain("tools: Read, Grep, Glob, Bash, Write");
+    expect(validationWorker).toContain("model: opus\neffort: xhigh");
+    expect(validationWorker).toContain("Run only the exact commands");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("<VCM-memory>\nNo accumulated project memory yet.\n</VCM-memory>");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("name: project-manager");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("<!-- VCM:BEGIN version=1 -->");
@@ -278,6 +286,10 @@ describe("createHarnessService", () => {
     expect(coderWorkerAgent).not.toContain("Stop before editing if the assigned module");
     const scaffoldWorkerAgent = await fs.readText("/repo/.claude/agents/vcm-architect-scaffold-worker.md");
     expect(scaffoldWorkerAgent).toContain("check-scaffold-ledger --mode scaffold");
+    expect(scaffoldWorkerAgent).toContain("mechanical text or configuration changes");
+    expect(architectAgent).toContain("vcm-architect-evidence-worker");
+    expect(architectAgent).toContain("vcm-architect-validation-worker");
+    expect(architectAgent).toContain("personally read every decision-bearing callable unit");
     const reviewerAgent = await fs.readText("/repo/.claude/agents/reviewer.md");
     expect(reviewerAgent).toContain("name: reviewer");
     expect(frontmatterOf(reviewerAgent)).toContain(`disallowedTools: ${REVIEWER_DISALLOWED_TOOLS.join(", ")}`);

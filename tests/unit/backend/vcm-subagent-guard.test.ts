@@ -55,13 +55,23 @@ function agent(subagentType?: string, extra: Record<string, unknown> = {}): Reco
 }
 
 describe("vcm-subagent-guard", () => {
-  it("allows only each code role's assigned worker", async () => {
-    await expect(runGuard("architect", agent("vcm-architect-scaffold-worker"))).resolves.toEqual({});
+  it("allows only each code role's assigned workers", async () => {
+    for (const worker of [
+      "vcm-architect-evidence-worker",
+      "vcm-architect-scaffold-worker",
+      "vcm-architect-validation-worker"
+    ]) {
+      await expect(runGuard("architect", agent(worker))).resolves.toEqual({});
+    }
     await expect(runGuard("coder", agent("vcm-coder-worker"))).resolves.toEqual({});
 
     await expect(runGuard("architect", agent("vcm-coder-worker"))).resolves.toMatchObject({
       decision: "deny",
       reason: expect.stringContaining("vcm-architect-scaffold-worker")
+    });
+    await expect(runGuard("architect", agent("Explore"))).resolves.toMatchObject({
+      decision: "deny",
+      reason: expect.stringContaining("vcm-architect-evidence-worker")
     });
     await expect(runGuard("coder", agent("Explore"))).resolves.toMatchObject({
       decision: "deny",

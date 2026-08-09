@@ -7,8 +7,12 @@ import sys
 
 
 ALLOWED_SUBAGENTS = {
-    "architect": "vcm-architect-scaffold-worker",
-    "coder": "vcm-coder-worker",
+    "architect": frozenset({
+        "vcm-architect-evidence-worker",
+        "vcm-architect-scaffold-worker",
+        "vcm-architect-validation-worker",
+    }),
+    "coder": frozenset({"vcm-coder-worker"}),
 }
 
 
@@ -52,9 +56,10 @@ def main() -> None:
         deny(f"VCM role `{role}` may not invoke subagents.")
         return
 
-    if subagent_type != allowed:
+    if subagent_type not in allowed:
         requested = subagent_type if isinstance(subagent_type, str) and subagent_type else "<missing>"
-        deny(f"VCM role `{role}` may invoke only `{allowed}`, not `{requested}`.")
+        allowed_names = ", ".join(f"`{name}`" for name in sorted(allowed))
+        deny(f"VCM role `{role}` may invoke only {allowed_names}, not `{requested}`.")
 
 
 if __name__ == "__main__":

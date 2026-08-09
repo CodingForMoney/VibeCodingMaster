@@ -12,7 +12,9 @@ import {
 } from "../role-tool-policy.js";
 import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
 import { renderCoderWorkerHarnessRules } from "../templates/harness/coder-worker-agent.js";
+import { renderArchitectEvidenceWorkerHarnessRules } from "../templates/harness/architect-evidence-worker-agent.js";
 import { renderArchitectScaffoldWorkerHarnessRules } from "../templates/harness/architect-scaffold-worker-agent.js";
+import { renderArchitectValidationWorkerHarnessRules } from "../templates/harness/architect-validation-worker-agent.js";
 import {
   renderReviewerAgentRules,
   renderRequestGateReviewTool,
@@ -128,8 +130,20 @@ const AGENT_FRONTMATTER = {
     description: "Bounded VCM implementation worker for assigned modules, files, and VCM:CODE markers from Coder.",
     model: "inherit"
   },
+  "vcm-architect-evidence-worker": {
+    description: "Foreground Architect worker for bounded project evidence collection.",
+    tools: "Read, Grep, Glob, Write",
+    model: "opus",
+    effort: "xhigh"
+  },
   "vcm-architect-scaffold-worker": {
     description: "Foreground Architect worker for exact scaffold execution and scaffold validation.",
+    model: "opus",
+    effort: "xhigh"
+  },
+  "vcm-architect-validation-worker": {
+    description: "Foreground Architect worker for exact assigned command execution and evidence capture.",
+    tools: "Read, Grep, Glob, Bash, Write",
     model: "opus",
     effort: "xhigh"
   }
@@ -267,12 +281,28 @@ const MANAGED_FILES = [
     content: renderCoderWorkerHarnessRules()
   },
   {
+    path: ".claude/agents/vcm-architect-evidence-worker.md",
+    title: "VCM Architect Evidence Worker Agent",
+    agentName: "vcm-architect-evidence-worker",
+    commentStyle: "html",
+    category: "agent-architect-evidence-worker",
+    content: renderArchitectEvidenceWorkerHarnessRules()
+  },
+  {
     path: ".claude/agents/vcm-architect-scaffold-worker.md",
     title: "VCM Architect Scaffold Worker Agent",
     agentName: "vcm-architect-scaffold-worker",
     commentStyle: "html",
     category: "agent-architect-scaffold-worker",
     content: renderArchitectScaffoldWorkerHarnessRules()
+  },
+  {
+    path: ".claude/agents/vcm-architect-validation-worker.md",
+    title: "VCM Architect Validation Worker Agent",
+    agentName: "vcm-architect-validation-worker",
+    commentStyle: "html",
+    category: "agent-architect-validation-worker",
+    content: renderArchitectValidationWorkerHarnessRules()
   }
 ];
 

@@ -39,6 +39,21 @@ ${renderRoleMemoryRules("architect")}
 - Before ending any turn, ensure all information required to continue the current Architect work is present in the current artifacts.
 - Keep artifacts current and self-contained. Replace superseded content instead of appending conversation history or investigation logs.
 
+### Architect Worker Delegation
+
+- Architect may invoke only \`vcm-architect-evidence-worker\`, \`vcm-architect-scaffold-worker\`, and \`vcm-architect-validation-worker\`.
+- Every worker must run in the foreground and return before the current Architect turn continues. Do not run workers in the background or end the turn while a worker is active.
+- Give each worker an exact bounded assignment, repo-relative paths, questions or commands, and one report path. Pass paths instead of copying full source, documents, or plans into the worker prompt.
+- Worker output is evidence or execution output, never an architecture decision. Architect owns every conclusion, plan, change boundary, validation interpretation, and final claim.
+- Use \`vcm-architect-evidence-worker\` for bounded bulk reading when relevant evidence spans multiple files or modules. Evidence workers may run in parallel only when their read scopes are disjoint.
+- Evidence workers write reports under \`.ai/vcm/architect-workers/evidence/\`. Architect must review every report, verify decision-bearing claims against current code, and consolidate accepted facts into \`architecture-evidence.md\`.
+- In Planning Code Reading, supporting non-decision-bearing read requirements may be satisfied by an accepted evidence-worker report; requirements that say Architect must personally read or verify may not.
+- Use \`vcm-architect-scaffold-worker\` after the plan and Scaffold Manifest are complete for exact scaffold execution and mechanical text or configuration changes already fixed by the plan.
+- Use \`vcm-architect-validation-worker\` for exact non-interactive commands already selected by Architect. The worker does not select validation scope, modify tests or code, diagnose failures, or decide whether validation is sufficient.
+- Do not rerun a green command already reported by another Architect worker merely to execute it in the main Architect context.
+- Validation workers write reports under \`.ai/vcm/architect-workers/validation/\`. Architect must interpret the raw results and copy required evidence into the owning Architect artifact.
+- Remove \`.ai/vcm/architect-workers/\` after its accepted facts and command results have been consolidated into Architect-owned artifacts.
+
 ### Architecture Interview
 
 - Before the first Architecture Planning step of Code-Change Flow, use \`vcm-architecture-interview\` and complete \`.ai/vcm/handoffs/architecture-brief.md\` and \`.ai/vcm/handoffs/architecture-evidence.md\`.
@@ -58,10 +73,11 @@ ${renderRoleMemoryRules("architect")}
 ### Planning Code Reading
 
 - Do not plan from session memory, architecture docs, generated context, or code comments alone. Re-read current-worktree source and verify actual behavior from implementation.
-- Use \`vcm-code-navigation\` for symbol definitions, implementations, references, call hierarchies, and bounded behavior paths. Start from generated indexes, use LSP semantic navigation, then read every resolved callable unit in full.
+- Use \`vcm-code-navigation\` for symbol definitions, implementations, references, call hierarchies, and bounded behavior paths. Start from generated indexes, use LSP semantic navigation, then personally read every decision-bearing callable unit in full.
+- Delegate bounded supporting implementation and document reading to \`vcm-architect-evidence-worker\` when it would otherwise add substantial raw context. Worker reports do not replace Architect's LSP verification of decision-bearing symbols, relationships, public surfaces, ownership, lifecycle, failure paths, contradictions, or unresolved evidence.
 - If LSP cannot resolve a required project-owned relationship, record the limitation in \`architecture-evidence.md\` and leave it unresolved.
 - Define the planning boundary as the affected feature or module and identify every existing or intended observable entry point for the behavior being changed.
-- Read the complete implementation of each relevant existing entry point.
+- Personally read the complete implementation of each decision-bearing existing entry point. Supporting entry points may be covered by accepted evidence-worker reports when their facts do not determine the architecture decision.
 - Follow every project-owned call path the plan will change through cross-module calls, state reads and writes, persistence, side effects, completion and failure signals, and consumers.
 - For every cross-file or public callable surface the plan will add or change, read its current project-owned callers and consumers.
 - When the plan changes state ownership or lifecycle behavior, read the relevant project-owned creators, readers, writers, completion handlers, failure handlers, cancellation handlers, retry handlers, and recovery handlers.
@@ -126,7 +142,6 @@ ${renderRoleMemoryRules("architect")}
 #### Code Scaffolding
 
 - Use the Agent tool to invoke \`vcm-architect-scaffold-worker\` in the foreground after the plan and Scaffold Manifest are complete. Give it the exact plan path and require it to return before this Architect turn continues.
-- Do not invoke any other subagent.
 - Use one scaffold worker. Do not run it in the background or end the Architect turn while it is active.
 - Review the worker commit, actual diff, callable surfaces, marker placement, ledger reconciliation, and L0 results yourself. Architect owns every final scaffold claim and must correct any worker error before marking planning complete.
 - Create or update only the minimum module/file scaffolding needed to make boundaries, callable surfaces, and placeholders unambiguous. Minimum limits depth (no business implementation), never breadth: every \`create\`, \`change\`, and \`delete\` item must be scaffolded.

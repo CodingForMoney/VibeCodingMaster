@@ -118,9 +118,10 @@ Notes:
   Round.
 - `.ai/tools/**` or `scripts/harness-tools/**` change: run
   `tests/unit/backend/harness-tools.test.ts`, `vcm-bash-guard.test.ts`, and
-  `vcm-subagent-guard.test.ts`. Subagent guard coverage must prove both assigned
-  workers are allowed, all other role/type combinations are denied, nested
-  workers are denied, and the installed hook fails closed when its guard is missing.
+  `vcm-subagent-guard.test.ts`. Subagent guard coverage must prove all three
+  Architect workers and the Coder worker are allowed, all other role/type
+  combinations are denied, nested workers are denied, and the installed hook
+  fails closed when its guard is missing.
 - Durable-doc template or audit change: run
   `tests/unit/backend/harness-tools.test.ts`,
   `tests/unit/backend/harness-templates-sync.test.ts`, and

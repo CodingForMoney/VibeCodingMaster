@@ -4,7 +4,7 @@
   "harnessVersion": "0.7.46",
   "installMode": "fixed",
   "installedAt": "2026-06-07T00:00:00Z",
-  "updatedAt": "2026-08-09T07:47:59.973Z",
+  "updatedAt": "2026-08-09T22:50:17.471Z",
   "runtimeRoots": [
     ".ai/vcm/",
     ".claude/worktrees/"
@@ -240,9 +240,43 @@
       }
     },
     {
+      "path": ".claude/agents/vcm-architect-evidence-worker.md",
+      "entryType": "file",
+      "category": "agent-architect-evidence-worker",
+      "ownership": "managed-block",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "marker": {
+        "type": "html",
+        "begin": "<!-- VCM:BEGIN version=1 -->",
+        "end": "<!-- VCM:END -->"
+      },
+      "uninstall": {
+        "action": "remove-managed-block",
+        "requiresConfirmation": false
+      }
+    },
+    {
       "path": ".claude/agents/vcm-architect-scaffold-worker.md",
       "entryType": "file",
       "category": "agent-architect-scaffold-worker",
+      "ownership": "managed-block",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "marker": {
+        "type": "html",
+        "begin": "<!-- VCM:BEGIN version=1 -->",
+        "end": "<!-- VCM:END -->"
+      },
+      "uninstall": {
+        "action": "remove-managed-block",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".claude/agents/vcm-architect-validation-worker.md",
+      "entryType": "file",
+      "category": "agent-architect-validation-worker",
       "ownership": "managed-block",
       "source": "vcm-template",
       "lifecycle": "long-term",

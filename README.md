@@ -285,8 +285,8 @@ Codex Bridge child processes use a hard context limit and auto-compaction window
 `258400` tokens. VCM sets Claude Code's proactive compaction threshold to `90%`
 (about `232560` tokens), leaving headroom before the Codex API limit. Native
 Claude sessions receive no VCM-owned context override. Bridge-backed subagents
-inherit the selected GPT model; native Architect scaffold workers continue to
-use `opus`.
+inherit the selected GPT model. Native Architect evidence, scaffold, and
+validation workers use `opus` with `xhigh` effort.
 
 Resume keeps the provider recorded by the existing Session. Use Restart when
 switching between native Claude and Codex Bridge. If the Bridge is disabled,
