@@ -24,7 +24,7 @@ You are `vcm-architect-scaffold-worker`, a foreground subagent invoked by Archit
 
 ### Validation And Commit
 
-- Run `.ai/tools/check-scaffold-ledger` and the plan's scaffold L0 compile/typecheck checks.
+- Run `.ai/tools/check-scaffold-ledger --mode scaffold` and the plan's scaffold L0 compile/typecheck checks.
 - Commit only the scaffold changes after the ledger reconciles and required checks pass.
 - Return the commit hash, changed files, ledger result, and exact check results to Architect.
 - If the assigned scaffold cannot be completed, return the concrete failure evidence without changing the plan.

@@ -138,6 +138,7 @@ describe("createHarnessService", () => {
     expect(projectManagerAgent).toContain("Include the confirmed task repo root and branch in each role message");
     expect(projectManagerAgent).toContain("### Gate Review Gates");
     expect(projectManagerAgent).toContain("Before acting on any Coder decision");
+    expect(projectManagerAgent).toContain("check-scaffold-ledger --mode completion");
     expect(projectManagerAgent).toContain("regardless of the reported Decision");
     expect(projectManagerAgent).toContain("code-diff --source coder");
     expect(projectManagerAgent).toContain("code-diff --source architect-debug");
@@ -182,6 +183,7 @@ describe("createHarnessService", () => {
     expect(architectAgent).toContain("use the `restart-architect` skill");
     expect(architectAgent).toContain("planning-session memory candidate");
     expect(architectAgent).toContain("complete and commit it directly as Architect-owned scaffold work");
+    expect(architectAgent).toContain("check-scaffold-ledger --mode scaffold");
     expect(architectAgent).not.toContain("`asset`");
     expect(architectAgent).not.toContain("before deep analysis, write the planning work plan");
     expect(architectAgent).toContain("Do not diagnose from session memory");
@@ -224,6 +226,7 @@ describe("createHarnessService", () => {
     expect(diagnosisReviewerAgent).toContain("text matches alone are not evidence");
     expect(diagnosisReviewerAgent).toContain("as fresh code requiring independent review");
     expect(diagnosisReviewerAgent).toContain("apply the complete code-diff checks to every repair");
+    expect(diagnosisReviewerAgent).toContain("check-scaffold-ledger --mode scaffold");
     const finalAcceptanceSkill = await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md");
     expect(finalAcceptanceSkill).toContain("`incomplete` is not acceptance evidence");
     expect(finalAcceptanceSkill).toContain("do not accept `Test Result: incomplete`");
@@ -243,6 +246,7 @@ describe("createHarnessService", () => {
     expect(coderAgent).toContain("### Parallel Worker Implementation");
     expect(coderAgent).toContain("vcm-coder-worker");
     expect(coderAgent).toContain("| ID | Action | Result | Marker State | Proof Evidence |");
+    expect(coderAgent).toContain("check-scaffold-ledger --mode completion --completion <candidate>");
     expect(coderAgent).not.toContain("## Remaining Markers");
     expect(frontmatterOf(await fs.readText("/repo/.claude/agents/project-manager.md"))).not.toContain("Agent");
     expect(frontmatterOf(await fs.readText("/repo/.claude/agents/architect.md"))).not.toMatch(/^disallowedTools:.*(?:^|, )Agent(?:,|$)/m);
@@ -263,6 +267,8 @@ describe("createHarnessService", () => {
     expect(coderWorkerAgent).not.toContain("from `planned` to `running`");
     expect(coderWorkerAgent).not.toContain("Use `failed` only");
     expect(coderWorkerAgent).not.toContain("Stop before editing if the assigned module");
+    const scaffoldWorkerAgent = await fs.readText("/repo/.claude/agents/vcm-architect-scaffold-worker.md");
+    expect(scaffoldWorkerAgent).toContain("check-scaffold-ledger --mode scaffold");
     const reviewerAgent = await fs.readText("/repo/.claude/agents/reviewer.md");
     expect(reviewerAgent).toContain("name: reviewer");
     expect(frontmatterOf(reviewerAgent)).toContain(`disallowedTools: ${REVIEWER_DISALLOWED_TOOLS.join(", ")}`);
@@ -278,6 +284,9 @@ describe("createHarnessService", () => {
     expect(projectManagerAgent).not.toContain("only unverified remaining verification items");
     expect(await fs.readText("/repo/.ai/tools/check-scaffold-ledger")).toContain(
       'ACTIONS = frozenset({"create", "change", "delete"})'
+    );
+    expect(await fs.readText("/repo/.ai/tools/check-scaffold-ledger")).toContain(
+      'parser.add_argument("--mode", required=True, choices=("scaffold", "completion"))'
     );
     const translatorAgents = await fs.readText("/repo/.claude/agents/translator.md");
     expect(translatorAgents).toContain("name: translator");

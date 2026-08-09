@@ -1,10 +1,17 @@
 export function renderCheckScaffoldLedgerTool(): string {
   return `#!/usr/bin/env python3
-"""Scaffold-ledger reconciliation — machine enforcement of the Scaffold Manifest bijection.
+"""Lifecycle-aware Scaffold Manifest and VCM:CODE reconciliation.
 
 The architecture plan's Scaffold Manifest is an item ledger: one entry per implementation
 item, one unique ID per entry, and exactly one \`VCM:CODE <ID>\` marker in the tree per
-\`create\`/\`change\`/\`delete\` entry. This tool checks:
+\`create\`/\`change\`/\`delete\` entry during scaffolding. Coder then removes successful
+markers and preserves failed markers. The required \`--mode\` selects that lifecycle:
+
+  - \`scaffold\`: require the ledger and tree markers to form an exact bijection;
+  - \`completion\`: reconcile the ledger, Coder's Scaffold Completion table, and the
+    final tree marker state.
+
+The tool checks:
 
   1. the ledger header follows the mandated column order (\`ID | Action | File | ...\`),
      every data-row ID matches the documented grammar as a complete cell and is unique,
@@ -17,8 +24,9 @@ item, one unique ID per entry, and exactly one \`VCM:CODE <ID>\` marker in the t
 
 Markers are scanned in git-tracked source files only (\`.md\` files and \`.ai/\` are excluded:
 prose may quote markers legitimately). Pure read; findings go to stderr; exit 0 clean,
-1 on findings. \`--plan <path>\` overrides the default plan location. No plan file at all
-means there is nothing to check (exit 0) — a docs-only or planning-free task.
+1 on findings. \`--plan <path>\` and \`--completion <path>\` override the default artifact
+locations. No plan file at all means there is nothing to check (exit 0) — a docs-only or
+planning-free task.
 """
 import argparse
 import re
@@ -27,7 +35,9 @@ import sys
 from pathlib import Path
 
 PLAN = ".ai/vcm/handoffs/architecture-plan.md"
+COMPLETION = ".ai/vcm/handoffs/coder-completion.md"
 MANIFEST_HEADING = re.compile(r"^##\\s+Scaffold Manifest\\s*$")
+COMPLETION_HEADING = re.compile(r"^##\\s+Scaffold Completion\\s*$")
 SECTION_HEADING = re.compile(r"^##\\s+\\S")
 ID_PATTERN = re.compile(r"[A-Z]{2,6}-\\d{1,4}")
 EMPTY_MANIFEST = "No scaffold items."
@@ -36,6 +46,8 @@ TABLE_SEPARATOR_CELL = re.compile(r":?-{3,}:?")
 # The action is read from its own cell as a whole-cell verb — never sniffed from the
 # row text, so paths or prose containing action words cannot flip an item's class.
 ACTIONS = frozenset({"create", "change", "delete"})
+RESULTS = frozenset({"done", "failed"})
+MARKER_STATES = frozenset({"removed", "present"})
 PATH_TOKEN = re.compile(r"\`([^\`\\s]+/[^\`\\s]+|[^\`\\s]+\\.[A-Za-z0-9]{1,8})\`")
 MARKER_ANY = re.compile(r"VCM:CODE(?![A-Za-z0-9_])")
 FORBIDDEN = [
@@ -53,6 +65,19 @@ def manifest_section(plan_text: str) -> tuple[int, list[str]] | None:
     for index, line in enumerate(lines):
         if start is None:
             if MANIFEST_HEADING.match(line):
+                start = index + 1
+        elif SECTION_HEADING.match(line):
+            return (start, lines[start : index])
+    return None if start is None else (start, lines[start:])
+
+
+def completion_section(completion_text: str) -> tuple[int, list[str]] | None:
+    """(start line number, section lines) of the Scaffold Completion section, or None."""
+    lines = completion_text.splitlines()
+    start = None
+    for index, line in enumerate(lines):
+        if start is None:
+            if COMPLETION_HEADING.match(line):
                 start = index + 1
         elif SECTION_HEADING.match(line):
             return (start, lines[start : index])
@@ -168,6 +193,111 @@ def parse_ledger(section_start: int, section: list[str], plan: str) -> tuple[dic
     return entries, findings, False
 
 
+def parse_completion(
+    section_start: int,
+    section: list[str],
+    completion: str,
+) -> tuple[dict, list[str]]:
+    """{id: {action, result, marker_state, line}} and completion-table findings."""
+    entries: dict[str, dict] = {}
+    findings: list[str] = []
+    header_line = None
+    separator_seen = False
+    for offset, line in enumerate(section):
+        line_no = section_start + offset + 1
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+
+        if header_line is None:
+            header_line = line_no
+            head = [cell.lower() for cell in cells]
+            if head != ["id", "action", "result", "marker state", "proof evidence"]:
+                findings.append(
+                    f"{completion}:{line_no}  [completion] header columns must be exactly "
+                    f"\`ID | Action | Result | Marker State | Proof Evidence\`"
+                )
+            continue
+
+        if not separator_seen:
+            if is_separator_row(cells):
+                separator_seen = True
+                continue
+            findings.append(
+                f"{completion}:{line_no}  [completion] missing Markdown separator row after "
+                f"the Scaffold Completion header"
+            )
+            separator_seen = True
+        elif is_separator_row(cells):
+            findings.append(
+                f"{completion}:{line_no}  [completion] unexpected separator row inside "
+                f"Scaffold Completion data"
+            )
+            continue
+
+        entry_id = cells[0] if cells else ""
+        if not ID_PATTERN.fullmatch(entry_id):
+            findings.append(
+                f"{completion}:{line_no}  [completion] ID cell \`{entry_id}\` must match "
+                f"\`[A-Z]{{2,6}}-[0-9]{{1,4}}\` exactly"
+            )
+            continue
+        if entry_id in entries:
+            findings.append(
+                f"{completion}:{line_no}  [completion] duplicate ID {entry_id} "
+                f"(first at line {entries[entry_id]['line']})"
+            )
+            continue
+
+        action = cells[1].lower() if len(cells) > 1 else ""
+        result = cells[2].lower() if len(cells) > 2 else ""
+        marker_state = cells[3].lower() if len(cells) > 3 else ""
+        if action not in ACTIONS:
+            findings.append(
+                f"{completion}:{line_no}  [completion] {entry_id} action must be exactly "
+                f"create/change/delete"
+            )
+        if result not in RESULTS:
+            findings.append(
+                f"{completion}:{line_no}  [completion] {entry_id} result must be exactly "
+                f"done/failed"
+            )
+        if marker_state not in MARKER_STATES:
+            findings.append(
+                f"{completion}:{line_no}  [completion] {entry_id} Marker State must be "
+                f"exactly removed/present"
+            )
+        entries[entry_id] = {
+            "action": action,
+            "result": result,
+            "marker_state": marker_state,
+            "line": line_no,
+        }
+
+    if header_line is None:
+        findings.append(
+            f"{completion}:{section_start + 1}  [completion] Scaffold Completion must "
+            f"contain the required table"
+        )
+    elif not separator_seen:
+        findings.append(
+            f"{completion}:{header_line}  [completion] Scaffold Completion table is "
+            f"missing its separator row"
+        )
+    if not entries:
+        findings.append(
+            f"{completion}:{header_line or section_start + 1}  [completion] Scaffold "
+            f"Completion contains no valid entries"
+        )
+    return entries, findings
+
+
+def completion_decision(completion_text: str) -> str | None:
+    match = re.search(r"^Decision:\\s*(\\S+)\\s*$", completion_text, re.MULTILINE)
+    return match.group(1) if match else None
+
+
 def forbidden_language(section_start: int, section: list[str], plan: str) -> list[str]:
     findings = []
     for offset, line in enumerate(section):
@@ -216,9 +346,15 @@ def tree_markers(root: Path) -> tuple[dict[str, list[tuple[str, int]]], list[str
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Scaffold Manifest ledger <-> VCM:CODE marker bijection check."
+        description="Lifecycle-aware Scaffold Manifest and VCM:CODE reconciliation."
     )
+    parser.add_argument("--mode", required=True, choices=("scaffold", "completion"))
     parser.add_argument("--plan", default=None, help=f"plan path (default {PLAN})")
+    parser.add_argument(
+        "--completion",
+        default=None,
+        help=f"Coder completion path for completion mode (default {COMPLETION})",
+    )
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[2]
@@ -249,11 +385,6 @@ def main() -> int:
 
     ledger_ids = set(entries)
     tree_ids = set(markers)
-    for entry_id in sorted(ledger_ids - tree_ids):
-        findings.append(
-            f"{plan}:{entries[entry_id]['line']}  [ledger] {entry_id} has no marker "
-            f"in the tree -> pre-place \`VCM:CODE {entry_id}\` in its declared file"
-        )
     for entry_id in sorted(tree_ids - ledger_ids):
         path, line_no = markers[entry_id][0]
         findings.append(
@@ -271,6 +402,94 @@ def main() -> int:
                         f"declared file \`{declared}\`"
                     )
 
+    completed = 0
+    failed = 0
+    if args.mode == "scaffold":
+        for entry_id in sorted(ledger_ids - tree_ids):
+            findings.append(
+                f"{plan}:{entries[entry_id]['line']}  [ledger] {entry_id} has no marker "
+                f"in the tree -> pre-place \`VCM:CODE {entry_id}\` in its declared file"
+            )
+    elif not explicit_empty:
+        completion_path = Path(args.completion) if args.completion else root / COMPLETION
+        if not completion_path.is_file():
+            findings.append(
+                f"{completion_path}:1  [completion] completion mode requires coder-completion.md"
+            )
+        else:
+            completion_text = completion_path.read_text(errors="replace")
+            completion = str(completion_path)
+            completed_section = completion_section(completion_text)
+            if completed_section is None:
+                findings.append(
+                    f"{completion_path}:1  [completion] no \`## Scaffold Completion\` section"
+                )
+                completion_entries = {}
+            else:
+                completion_entries, completion_findings = parse_completion(
+                    *completed_section,
+                    completion,
+                )
+                findings += completion_findings
+
+            completion_ids = set(completion_entries)
+            for entry_id in sorted(ledger_ids - completion_ids):
+                findings.append(
+                    f"{plan}:{entries[entry_id]['line']}  [completion] {entry_id} is missing "
+                    f"from Scaffold Completion"
+                )
+            for entry_id in sorted(completion_ids - ledger_ids):
+                findings.append(
+                    f"{completion}:{completion_entries[entry_id]['line']}  [completion] "
+                    f"{entry_id} has no Scaffold Manifest entry"
+                )
+
+            for entry_id in sorted(ledger_ids & completion_ids):
+                ledger_entry = entries[entry_id]
+                completion_entry = completion_entries[entry_id]
+                result = completion_entry["result"]
+                marker_state = completion_entry["marker_state"]
+                marker_count = len(markers.get(entry_id, []))
+                if completion_entry["action"] != ledger_entry["action"]:
+                    findings.append(
+                        f"{completion}:{completion_entry['line']}  [completion] {entry_id} "
+                        f"action \`{completion_entry['action']}\` does not match Scaffold "
+                        f"Manifest action \`{ledger_entry['action']}\`"
+                    )
+                if result == "done":
+                    completed += 1
+                    if marker_state != "removed":
+                        findings.append(
+                            f"{completion}:{completion_entry['line']}  [completion] {entry_id} "
+                            f"done requires Marker State \`removed\`"
+                        )
+                    if marker_count != 0:
+                        findings.append(
+                            f"{completion}:{completion_entry['line']}  [completion] {entry_id} "
+                            f"is done but {marker_count} marker(s) remain -> remove the completed marker"
+                        )
+                elif result == "failed":
+                    failed += 1
+                    if marker_state != "present":
+                        findings.append(
+                            f"{completion}:{completion_entry['line']}  [completion] {entry_id} "
+                            f"failed requires Marker State \`present\`"
+                        )
+                    if marker_count != 1:
+                        findings.append(
+                            f"{completion}:{completion_entry['line']}  [completion] {entry_id} "
+                            f"failed requires exactly one preserved marker; found {marker_count}"
+                        )
+
+            decision = completion_decision(completion_text)
+            expected_decision = "failed" if failed else "ready_for_review"
+            if decision != expected_decision:
+                findings.append(
+                    f"{completion_path}:1  [completion] Decision must be "
+                    f"\`{expected_decision}\` for the recorded item results; found "
+                    f"\`{decision or 'missing'}\`"
+                )
+
     for finding in findings:
         sys.stderr.write(finding + "\\n")
     if findings:
@@ -278,6 +497,11 @@ def main() -> int:
         return 1
     if explicit_empty:
         print("ledger explicitly empty: 0 ledger item(s), 0 marker(s)")
+    elif args.mode == "completion":
+        print(
+            f"ledger completion clean: {len(ledger_ids)} ledger item(s), "
+            f"{completed} done, {failed} failed, {len(tree_ids)} marker(s) remain"
+        )
     else:
         print(
             f"ledger reconciliation clean: {len(ledger_ids)} ledger item(s), "

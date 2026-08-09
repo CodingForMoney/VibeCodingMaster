@@ -329,7 +329,7 @@ PM may lightly rewrite the user's words to:
 - Do not allow requested work to be deferred, converted into follow-up scope, reduced, or returned to the user because of workload, session length, context size, task size, predicted difficulty, or role preference.
 - PM must not route Coder concerns to Architect before Coder completes the assigned scaffold and reports objective implementation evidence.
 - Coder feedback that stops before the full sweep of assigned items is incomplete work, not a valid failure or architecture signal.
-- Before acting on any Coder decision, verify that every Scaffold Manifest item appears exactly once in Scaffold Completion, each disposition is consistent with its marker state in the tree, and the reported Decision matches the dispositions.
+- Before acting on any Coder decision, run \`.ai/tools/check-scaffold-ledger --mode completion --completion .ai/vcm/handoffs/coder-completion.md\`. It must pass; this verifies that every Scaffold Manifest item appears exactly once in Scaffold Completion, each disposition matches the tree marker state, and the Decision matches the dispositions.
 - Return any missing, duplicate, unswept, marker-inconsistent, or decision-inconsistent result to Coder as incomplete work regardless of the reported Decision.
 - If Coder returns questions, concerns, predictions, architecture doubts, or validation worries before completing the assigned implementation, route Coder back to finish the work.
 - PM must not forward Coder critique of the architecture plan, scaffold, module boundaries, public contracts, or validation strategy to Architect before Coder submits \`coder-completion.md\` with compile/typecheck/L0/L1 evidence.

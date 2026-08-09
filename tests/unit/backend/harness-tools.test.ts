@@ -539,9 +539,32 @@ describe("scaffold ledger audit", () => {
     `, source);
   }
 
-  async function runLedgerAuditFailure() {
+  async function writeCoderCompletion(
+    decision: "ready_for_review" | "failed",
+    rows: string,
+    completionPath = path.join(tmpRepo!, ".ai/vcm/handoffs/coder-completion.md")
+  ) {
+    await writeSource(completionPath, `
+      # Coder Completion
+
+      Decision: ${decision}
+
+      ## Scaffold Completion
+
+      | ID | Action | Result | Marker State | Proof Evidence |
+      | --- | --- | --- | --- | --- |
+      ${rows}
+    `);
+    return completionPath;
+  }
+
+  async function runLedgerAuditFailure(mode: "scaffold" | "completion" = "scaffold") {
     try {
-      await execFileAsync("python3", [path.join(tmpRepo!, ".ai/tools/check-scaffold-ledger")], { cwd: tmpRepo });
+      await execFileAsync(
+        "python3",
+        [path.join(tmpRepo!, ".ai/tools/check-scaffold-ledger"), "--mode", mode],
+        { cwd: tmpRepo }
+      );
       throw new Error("expected scaffold ledger audit to fail");
     } catch (error) {
       return (error as Error & { stderr?: string }).stderr ?? "";
@@ -555,8 +578,109 @@ describe("scaffold ledger audit", () => {
     );
 
     await expect(
-      execFileAsync("python3", [path.join(tmpRepo!, ".ai/tools/check-scaffold-ledger")], { cwd: tmpRepo })
+      execFileAsync(
+        "python3",
+        [path.join(tmpRepo!, ".ai/tools/check-scaffold-ledger"), "--mode", "scaffold"],
+        { cwd: tmpRepo }
+      )
     ).resolves.toMatchObject({ stdout: expect.stringContaining("ledger reconciliation clean") });
+  });
+
+  it("rejects zero markers in scaffold mode instead of inferring completion", async () => {
+    await createLedgerRepo(
+      "| SCF-001 | change | `src/lib.ts` | `run` | implement | local | compile |",
+      "export const ready = true;"
+    );
+
+    const stderr = await runLedgerAuditFailure("scaffold");
+    expect(stderr).toContain("SCF-001 has no marker");
+    expect(stderr).toContain("pre-place `VCM:CODE SCF-001`");
+  });
+
+  it("accepts an all-done completion after every marker is removed", async () => {
+    await createManifestRepo(`
+      | ID | Action | File | Symbol | Work | Freedom | Proof |
+      | --- | --- | --- | --- | --- | --- | --- |
+      | SCF-001 | change | \`src/lib.ts\` | \`run\` | implement | local | compile |
+      | SCF-002 | create | \`src/lib.ts\` | \`ready\` | implement | local | compile |
+    `, "export const ready = true;");
+    const candidatePath = await writeCoderCompletion("ready_for_review", `
+      | SCF-001 | change | done | removed | compile passed |
+      | SCF-002 | create | done | removed | compile passed |
+    `, path.join(tmpRepo!, "coder-completion-candidate.md"));
+
+    await expect(
+      execFileAsync(
+        "python3",
+        [
+          path.join(tmpRepo!, ".ai/tools/check-scaffold-ledger"),
+          "--mode",
+          "completion",
+          "--completion",
+          candidatePath
+        ],
+        { cwd: tmpRepo }
+      )
+    ).resolves.toMatchObject({
+      stdout: expect.stringContaining(
+        "ledger completion clean: 2 ledger item(s), 2 done, 0 failed, 0 marker(s) remain"
+      )
+    });
+  });
+
+  it("accepts a completed sweep with only failed-item markers preserved", async () => {
+    await createManifestRepo(`
+      | ID | Action | File | Symbol | Work | Freedom | Proof |
+      | --- | --- | --- | --- | --- | --- | --- |
+      | SCF-001 | change | \`src/lib.ts\` | \`run\` | implement | local | compile |
+      | SCF-002 | change | \`src/lib.ts\` | \`ready\` | implement | local | compile |
+    `, "// VCM:CODE SCF-002\nexport const ready = false;");
+    await writeCoderCompletion("failed", `
+      | SCF-001 | change | done | removed | unit check passed |
+      | SCF-002 | change | failed | present | typecheck failed |
+    `);
+
+    await expect(
+      execFileAsync(
+        "python3",
+        [path.join(tmpRepo!, ".ai/tools/check-scaffold-ledger"), "--mode", "completion"],
+        { cwd: tmpRepo }
+      )
+    ).resolves.toMatchObject({
+      stdout: expect.stringContaining(
+        "ledger completion clean: 2 ledger item(s), 1 done, 1 failed, 1 marker(s) remain"
+      )
+    });
+  });
+
+  it("rejects completion evidence that contradicts the final marker state", async () => {
+    await createLedgerRepo(
+      "| SCF-001 | change | `src/lib.ts` | `run` | implement | local | compile |",
+      "// VCM:CODE SCF-001\nexport const ready = true;"
+    );
+    await writeCoderCompletion(
+      "ready_for_review",
+      "| SCF-001 | change | done | removed | compile passed |"
+    );
+
+    const stderr = await runLedgerAuditFailure("completion");
+    expect(stderr).toContain("SCF-001 is done but 1 marker(s) remain");
+    expect(stderr).toContain("remove the completed marker");
+    expect(stderr).not.toContain("pre-place `VCM:CODE SCF-001`");
+  });
+
+  it("rejects a completion Decision that contradicts item results", async () => {
+    await createLedgerRepo(
+      "| SCF-001 | change | `src/lib.ts` | `run` | implement | local | compile |",
+      "// VCM:CODE SCF-001\nexport const ready = false;"
+    );
+    await writeCoderCompletion(
+      "ready_for_review",
+      "| SCF-001 | change | failed | present | typecheck failed |"
+    );
+
+    const stderr = await runLedgerAuditFailure("completion");
+    expect(stderr).toContain("Decision must be `failed`");
   });
 
   it("rejects asset rows and their missing markers", async () => {
@@ -615,7 +739,11 @@ describe("scaffold ledger audit", () => {
     await createManifestRepo("No scaffold items.", "export const ready = true;");
 
     await expect(
-      execFileAsync("python3", [path.join(tmpRepo!, ".ai/tools/check-scaffold-ledger")], { cwd: tmpRepo })
+      execFileAsync(
+        "python3",
+        [path.join(tmpRepo!, ".ai/tools/check-scaffold-ledger"), "--mode", "scaffold"],
+        { cwd: tmpRepo }
+      )
     ).resolves.toMatchObject({
       stdout: expect.stringContaining("ledger explicitly empty: 0 ledger item(s), 0 marker(s)")
     });
@@ -627,7 +755,11 @@ describe("scaffold ledger audit", () => {
     await execFileAsync("git", ["init"], { cwd: tmpRepo });
 
     await expect(
-      execFileAsync("python3", [path.join(tmpRepo, ".ai/tools/check-scaffold-ledger")], { cwd: tmpRepo })
+      execFileAsync(
+        "python3",
+        [path.join(tmpRepo, ".ai/tools/check-scaffold-ledger"), "--mode", "scaffold"],
+        { cwd: tmpRepo }
+      )
     ).resolves.toMatchObject({ stdout: expect.stringContaining("nothing to check") });
   });
 });

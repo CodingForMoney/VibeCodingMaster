@@ -42,7 +42,7 @@ superseded decisions, obsolete ledger items, resolved findings, prior-round
 notes, stale risks, or outdated implementation guidance.
 
 Before any other architecture-plan analysis, reconcile the Scaffold Manifest
-ledger against the committed scaffold (\`.ai/tools/check-scaffold-ledger\`
+ledger against the committed scaffold (\`.ai/tools/check-scaffold-ledger --mode scaffold\`
 automates it). Run this on every review round, including revision rounds:
 
 - Extract the ledger ID set from \`architecture-plan.md\` and the \`VCM:CODE\` ID

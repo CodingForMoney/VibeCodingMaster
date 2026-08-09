@@ -434,6 +434,15 @@ Architect delegates exact scaffold execution to one foreground
 Architect turn continues. Architect remains responsible for reviewing the
 scaffold commit, ledger reconciliation, and build evidence.
 
+Scaffold-ledger reconciliation is lifecycle-explicit. Architect Scaffold Worker
+and the architecture-plan Gate run `check-scaffold-ledger --mode scaffold`,
+which requires an exact Manifest-to-Marker bijection. Before final Coder handoff,
+Coder runs `--mode completion` against the candidate `coder-completion.md`; PM
+repeats that check against the accepted artifact. Completion mode requires every
+Manifest item exactly once and reconciles `done/removed` items with absent
+markers and `failed/present` items with one preserved marker in the declared
+file. The tool never infers lifecycle from marker count.
+
 Architecture planning also owns repeated-workaround disposition. When a
 proposed file-local override of a shared default, constant, or documented
 contract would be the third file carrying the same mechanism, the plan must fix

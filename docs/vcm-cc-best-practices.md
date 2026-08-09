@@ -456,6 +456,11 @@ disposition for each member.
 Code scaffolding may create files and define non-private callable surfaces, but
 incomplete implementation must use `VCM:CODE <Scaffold Manifest ID>` markers.
 Coder removes/completes those markers and reports Scaffold Completion by ID.
+`check-scaffold-ledger --mode scaffold` validates the pre-implementation
+Manifest-to-Marker bijection. Before final handoff,
+`check-scaffold-ledger --mode completion --completion <candidate>` validates
+each reported `done/removed` or `failed/present` disposition against the final
+tree. Marker count alone never determines the lifecycle.
 
 After the plan and Scaffold Manifest are complete, Architect invokes one
 foreground `vcm-architect-scaffold-worker`. The worker uses Opus with xhigh
