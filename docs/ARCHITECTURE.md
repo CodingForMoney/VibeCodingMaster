@@ -191,6 +191,11 @@ Regenerate both after changing module layout, public exports, or HTTP routes.
 VCM ships the local `vcm-lsp-bridge` Claude Code plugin. Session Service passes
 it through `--plugin-dir` and enables the LSP tool only for Architect sessions
 on both native Claude and CCR launches. Other roles do not load the plugin.
+Each bundled language server may restart up to three times after a crash. The
+Rust server disables its redundant check-on-save run because VCM roles execute
+the required validation explicitly. Server restart recovers a terminated LSP
+process; it does not resolve an already stalled in-flight tool request, which is
+handled by the separate role-stall warning and user-triggered recovery path.
 Architect preloads the `vcm-code-navigation` skill through Agent frontmatter.
 
 Architect uses LSP semantic navigation for definitions, references,

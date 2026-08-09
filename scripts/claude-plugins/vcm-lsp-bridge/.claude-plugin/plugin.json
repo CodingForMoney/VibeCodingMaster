@@ -11,7 +11,12 @@
       "extensionToLanguage": {
         ".rs": "rust"
       },
-      "startupTimeout": 180000
+      "initializationOptions": {
+        "checkOnSave": false
+      },
+      "startupTimeout": 180000,
+      "restartOnCrash": true,
+      "maxRestarts": 3
     },
     "typescript": {
       "command": "typescript-language-server",
@@ -27,7 +32,9 @@
         ".cts": "typescript",
         ".mjs": "javascript",
         ".cjs": "javascript"
-      }
+      },
+      "restartOnCrash": true,
+      "maxRestarts": 3
     },
     "pyright": {
       "command": "pyright-langserver",
@@ -37,13 +44,17 @@
       "extensionToLanguage": {
         ".py": "python",
         ".pyi": "python"
-      }
+      },
+      "restartOnCrash": true,
+      "maxRestarts": 3
     },
     "gopls": {
       "command": "gopls",
       "extensionToLanguage": {
         ".go": "go"
-      }
+      },
+      "restartOnCrash": true,
+      "maxRestarts": 3
     },
     "clangd": {
       "command": "clangd",
@@ -60,14 +71,18 @@
         ".hxx": "cpp",
         ".C": "cpp",
         ".H": "cpp"
-      }
+      },
+      "restartOnCrash": true,
+      "maxRestarts": 3
     },
     "jdtls": {
       "command": "jdtls",
       "extensionToLanguage": {
         ".java": "java"
       },
-      "startupTimeout": 120000
+      "startupTimeout": 120000,
+      "restartOnCrash": true,
+      "maxRestarts": 3
     }
   }
 }
