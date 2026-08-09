@@ -274,6 +274,11 @@ rejected submission leaves the previous artifact unchanged and returns exact
 validation errors to the role. Draft mode permits explicitly incomplete
 lifecycle values; final mode requires a terminal, placeholder-free artifact.
 
+Most fixed artifacts have one owner. `docs-update-report.md` is shared by
+Architect, Coder, and Tester because Docs-Only Flow assigns documentation to
+the role that owns the relevant project evidence. `docs-sync-report.md` remains
+Architect-owned post-validation synchronization for code-producing flows.
+
 The shared PreToolUse guard blocks role attempts to write managed workflow
 Markdown directly through Bash, Write, or Edit. Route messages, Coder Worker
 reports, request-scoped Gate reports, memory proposals, Harness Feedback, and
@@ -300,6 +305,13 @@ first dispatch of the active flow run. Those fields isolate repeated and
 switched flows from older history. Completion requires evidence produced after
 the current role dispatch; an active branch cannot consume parent Final
 Acceptance or complete independently.
+
+Docs-Only Flow may dispatch Architect, Coder, or Tester, including multiple
+sequential documentation assignments. Each dispatch must replace
+`docs-update-report.md` with fresh evidence before another Docs-Only role can be
+dispatched or the flow can complete. A `synced` or `unchanged` result from the
+latest assigned role permits completion; code or validation work discovered
+during documentation may switch to the matching full flow.
 
 User-question waiting is owned by the same workflow-control record. The
 `vcm-ask-user` tool writes the exact question and clears `pendingDispatch` in

@@ -175,10 +175,11 @@ additional repair branch and must be reported to the user.
 
 ### Docs Only
 
-Docs-only work dispatches Architect until `docs-sync-report.md` is `synced` or
-`unchanged`, then completes without another role dispatch. Before completion,
-the explicit scope-change branches may switch to Code Change at Architect or
-Validation Only at Tester.
+Docs-only work may dispatch Architect, Coder, or Tester according to the
+documentation being updated. Each sequential assignment must produce a fresh
+`docs-update-report.md`. The latest `synced` or `unchanged` result permits
+completion. Explicit scope-change branches may switch to Code Change at
+Architect or Validation Only at Tester.
 
 ### Validation Only
 
@@ -197,7 +198,8 @@ revision with `Status: completed` and every proposal and override field set to
 - Code Change and standalone Architect Debug require accepted Final Acceptance.
 - Implemented Architecture Diagnosis requires accepted Final Acceptance;
   analysis-only diagnosis requires its completed diagnosis artifact.
-- Docs Only requires a synced or unchanged Docs Sync Report.
+- Docs Only requires a fresh synced or unchanged Docs Update Report from the
+  latest assigned documentation role.
 - Validation Only requires a terminal Test Report and resolved Validation
   Adequacy Gate.
 

@@ -67,6 +67,15 @@ const HISTORY_SEPARATOR = "| --- | --- | --- | --- | --- | --- |";
 const TARGET_ROLES = new Set<DispatchableRole>(["architect", "coder", "tester"]);
 const FINAL_GATE_STATUSES = new Set(["disabled", "not_required", "skipped", "overridden"]);
 const MISSING_EVIDENCE_HASH = "<missing>";
+const DOCS_ONLY_ROLE_TRANSITIONS = [
+  "docs-only/architect",
+  "docs-only/coder",
+  "docs-only/tester"
+] as const;
+const DOCS_ONLY_EXIT_TRANSITIONS = [
+  "code-change/architect",
+  "validation-only/tester"
+] as const;
 
 export function createWorkflowControlService(deps: WorkflowControlServiceDeps): WorkflowControlService {
   const now = deps.now ?? (() => new Date().toISOString());
@@ -551,11 +560,21 @@ async function getAllowedTransitions(
   const flow = current.flow;
   const flowRun = resolveFlowRun(state.flowRun, current);
   if (flow === "docs-only") {
-    const docs = await artifactState(fs, input, "docs-sync-report.md", "docs-sync-report");
-    return evidenceIsFresh(state, flow, "architect", "docs-sync-report.md", docs.hash)
-      && docs.complete && (docs.value === "synced" || docs.value === "unchanged")
-      ? []
-      : ["docs-only/architect", "code-change/architect", "validation-only/tester"];
+    const docs = await artifactState(fs, input, "docs-update-report.md", "docs-update-report");
+    const active = state.activeDispatch;
+    if (!active || active.flow !== "docs-only") {
+      return [...DOCS_ONLY_ROLE_TRANSITIONS, ...DOCS_ONLY_EXIT_TRANSITIONS];
+    }
+    const hasFreshResult = evidenceProducedAfterActiveDispatch(
+      state,
+      flow,
+      active.targetRole,
+      "docs-update-report.md",
+      docs.hash
+    );
+    return hasFreshResult && docs.complete
+      ? [...DOCS_ONLY_ROLE_TRANSITIONS, ...DOCS_ONLY_EXIT_TRANSITIONS]
+      : [`docs-only/${active.targetRole}`, ...DOCS_ONLY_EXIT_TRANSITIONS];
   }
   if (flow === "validation-only") {
     const test = await artifactState(fs, input, "test-report.md", "test-report");
@@ -600,7 +619,7 @@ function initialTransitions(): string[] {
     "code-change/architect",
     "architect-debug/architect",
     "architecture-diagnosis/architect",
-    "docs-only/architect",
+    ...DOCS_ONLY_ROLE_TRANSITIONS,
     "validation-only/tester"
   ];
 }
@@ -795,7 +814,9 @@ async function artifactState(
   if (kind === "architect-debug") value = inline("Status") ?? readArtifactSectionContent(content, "Final Disposition")?.trim().toLowerCase();
   if (kind === "architecture-diagnosis") value = readArtifactSectionContent(content, "Final Disposition")?.trim().toLowerCase();
   if (kind === "test-report") value = inline("Test Result");
-  if (kind === "docs-sync-report" || kind === "final-acceptance") value = readArtifactSectionContent(content, "Decision")?.trim().toLowerCase();
+  if (kind === "docs-update-report" || kind === "docs-sync-report" || kind === "final-acceptance") {
+    value = readArtifactSectionContent(content, "Decision")?.trim().toLowerCase();
+  }
   const infrastructure = kind === "test-report"
     ? /^Status:\s*(.+?)\s*$/mi.exec(readArtifactSectionContent(content, "Test Infrastructure") ?? "")?.[1]?.trim().toLowerCase()
     : undefined;
@@ -1103,10 +1124,14 @@ async function validateCompletion(
     return;
   }
   if (candidate.flow === "docs-only") {
-    const docs = await artifactState(fs, input, "docs-sync-report.md", "docs-sync-report");
-    if (!evidenceProducedAfterActiveDispatch(state, candidate.flow, "architect", "docs-sync-report.md", docs.hash)
+    const docs = await artifactState(fs, input, "docs-update-report.md", "docs-update-report");
+    const activeRole = state.activeDispatch?.flow === "docs-only"
+      ? state.activeDispatch.targetRole
+      : undefined;
+    if (!activeRole
+      || !evidenceProducedAfterActiveDispatch(state, candidate.flow, activeRole, "docs-update-report.md", docs.hash)
       || !docs.complete || (docs.value !== "synced" && docs.value !== "unchanged")) {
-      throw workflowError("WORKFLOW_COMPLETION_INVALID", "Docs-only completion requires a complete Docs Sync Report with Decision: synced or Decision: unchanged.");
+      throw workflowError("WORKFLOW_COMPLETION_INVALID", "Docs-only completion requires a fresh, complete Docs Update Report from the latest assigned role with Decision: synced or Decision: unchanged.");
     }
     return;
   }

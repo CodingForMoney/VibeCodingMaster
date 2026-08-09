@@ -302,7 +302,7 @@ Each rewritten `architecture-diagnosis.md` must be a complete, self-contained cu
 
 ### Docs Sync
 
-- In Docs-Only Flow, verify claims against current code and durable docs, update the PM-assigned project documents directly, run applicable documentation checks, and commit the changes; tester completion is not required.
+- In Docs-Only Flow, verify claims against current code and durable docs, update the PM-assigned project documents and related documentation needed for consistency, run applicable documentation checks, commit the changes, and submit `.ai/vcm/handoffs/docs-update-report.md` through `vcm-artifact` before reporting to PM.
 - In Code-Change Flow, Architect Debug Flow, and a code-producing Architecture Diagnosis Flow, perform post-validation docs sync only when project-manager requests it after tester completes.
 - Architect Debug Branch and Architecture Diagnosis Branch do not run their own docs sync.
 
@@ -357,8 +357,8 @@ Each rewritten `architecture-diagnosis.md` must be a complete, self-contained cu
 
 #### Docs Sync Report
 
-- Write `.ai/vcm/handoffs/docs-sync-report.md` as the final result of Docs-Only Flow and for post-validation docs sync in Code-Change Flow, Architect Debug Flow, or a code-producing Architecture Diagnosis Flow. Do not write it for a Debug/Diagnosis Branch.
-- In Docs-Only Flow, submit the complete report before returning to PM. The report must record the decision, changed documents, evidence reviewed, checks performed, and commit.
+- Write `.ai/vcm/handoffs/docs-sync-report.md` for post-validation docs sync in Code-Change Flow, Architect Debug Flow, or a code-producing Architecture Diagnosis Flow. Do not write it for Docs-Only Flow or a Debug/Diagnosis Branch.
+- In Docs-Only Flow, submit the complete `.ai/vcm/handoffs/docs-update-report.md` before returning to PM. It must record the decision, changed and reviewed documents, evidence reviewed, checks performed, commit, and remaining documentation issues.
 - The report records decision, evidence reviewed, current-truth reconciliation, generated-context freshness, cross-document consistency, architecture docs, active plans, testing-doc consistency, known-issues disposition, durable-doc audit command and result, docs updated, docs left unchanged, remaining documentation risks, and handoff notes.
 - Each rewritten `docs-sync-report.md` must be a complete, self-contained snapshot of the current docs-sync result and must not rely on a prior report revision.
 - `Decision` must be `synced`, `unchanged`, or `blocked`.

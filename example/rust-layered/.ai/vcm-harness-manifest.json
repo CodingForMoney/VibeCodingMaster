@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "manager": "vcm",
-  "harnessVersion": "0.7.42",
+  "harnessVersion": "0.7.43",
   "installMode": "fixed",
   "installedAt": "2026-06-07T00:00:00Z",
-  "updatedAt": "2026-08-08T08:20:07.938Z",
+  "updatedAt": "2026-08-09T01:36:38.543Z",
   "runtimeRoots": [
     ".ai/vcm/",
     ".claude/worktrees/"
@@ -329,6 +329,14 @@
       "lifecycle": "long-term"
     },
     {
+      "path": ".claude/skills/vcm-ask-user/",
+      "entryType": "directory",
+      "category": "skill-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
       "path": ".claude/skills/vcm-task-state/",
       "entryType": "directory",
       "category": "skill-directory",
@@ -525,6 +533,18 @@
       }
     },
     {
+      "path": ".claude/skills/vcm-ask-user/SKILL.md",
+      "entryType": "file",
+      "category": "skill",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
       "path": ".claude/skills/vcm-task-state/SKILL.md",
       "entryType": "file",
       "category": "skill",
@@ -598,6 +618,18 @@
     },
     {
       "path": ".ai/tools/request-gate-review",
+      "entryType": "file",
+      "category": "runtime-tool",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "conditional-long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".ai/tools/vcm-ask-user",
       "entryType": "file",
       "category": "runtime-tool",
       "ownership": "whole-file",

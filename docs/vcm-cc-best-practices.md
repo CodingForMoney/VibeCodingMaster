@@ -230,6 +230,7 @@ Current runtime paths include:
 <taskRepoRoot>/.ai/vcm/handoffs/architecture-diagnosis.md
 <taskRepoRoot>/.ai/vcm/handoffs/coder-completion.md
 <taskRepoRoot>/.ai/vcm/handoffs/test-report.md
+<taskRepoRoot>/.ai/vcm/handoffs/docs-update-report.md
 <taskRepoRoot>/.ai/vcm/handoffs/docs-sync-report.md
 <taskRepoRoot>/.ai/vcm/handoffs/workflow-progress.md
 <taskRepoRoot>/.ai/vcm/handoffs/final-acceptance.md
@@ -362,7 +363,8 @@ Additional routes:
   that resume point without branch-level final acceptance.
 - An analysis-only Architecture Diagnosis Flow completes from its diagnosis
   result without final acceptance.
-- Docs-Only Flow: `project-manager -> architect -> project-manager completion`
+- Docs-Only Flow:
+  `project-manager -> assigned Architect/Coder/Tester documentation role or roles -> project-manager completion`
 - Validation-Only Flow:
   `project-manager -> tester -> validation-adequacy Gate Review -> project-manager completion`
 - Communication-Only Flow: `project-manager response or relay -> completion`
@@ -375,8 +377,11 @@ If the repair requires production, runtime, public-contract, dependency,
 generated-context, architecture, or shared-production changes, the active
 flow's Architect failure branch applies instead.
 
-If Docs-Only Flow or Validation-Only Flow reveals that the accepted outcome
-requires production-code, runtime-behavior, public-contract, dependency, or
+Docs-Only roles submit a fresh `docs-update-report.md` after each assignment;
+the latest `synced` or `unchanged` report permits completion. If Docs-Only Flow
+reveals implementation or validation work, switch to the matching full flow.
+If Validation-Only Flow reveals that the accepted outcome requires
+production-code, runtime-behavior, public-contract, dependency, or
 system-architecture changes, route through the full Code-Change Flow.
 
 PM Managed Mode applies only when the user explicitly requests it. PM must drive
@@ -544,6 +549,10 @@ for valid in-progress state, while final mode requires a terminal artifact.
 Validation failure preserves the previous accepted file and returns the exact
 errors to the role. The PreToolUse guard blocks direct Bash, Write, or Edit
 updates to managed workflow Markdown.
+
+Docs-Only Flow uses the shared `docs-update-report.md`, which Architect, Coder,
+or Tester may submit. The code-producing-flow `docs-sync-report.md` remains
+Architect-owned and is not reused for Docs-Only completion.
 
 ## 12. Gate Review
 

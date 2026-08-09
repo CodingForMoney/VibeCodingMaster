@@ -4,7 +4,7 @@ import type { RoleName } from "../types/role.js";
 export interface ArtifactDefinition {
   kind: ArtifactKind;
   fileName: string;
-  owner: RoleName;
+  owner: RoleName | readonly RoleName[];
   requiredHeadings: readonly string[];
 }
 
@@ -164,6 +164,21 @@ export const ARTIFACT_DEFINITIONS: readonly ArtifactDefinition[] = [
       "Coverage Gaps",
       "Blocking Validation Issues",
       "User Approval Evidence"
+    ]
+  },
+  {
+    kind: "docs-update-report",
+    fileName: "docs-update-report.md",
+    owner: ["architect", "coder", "tester"],
+    requiredHeadings: [
+      "Summary",
+      "Documents Updated",
+      "Documents Reviewed And Left Unchanged",
+      "Evidence Reviewed",
+      "Checks Performed",
+      "Commit",
+      "Remaining Documentation Issues",
+      "Decision"
     ]
   },
   {

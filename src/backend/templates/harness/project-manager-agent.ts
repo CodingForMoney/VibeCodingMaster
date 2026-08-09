@@ -224,13 +224,13 @@ stays paused.
 
 ### Docs-Only Flow
 
-Use Docs-Only Flow when the accepted task changes Architect-owned project documentation and does not require production-code, test-code, runtime-behavior, public-contract, dependency, or Harness changes.
+Use Docs-Only Flow when the accepted task changes documentation and does not require production-code, test-code, runtime-behavior, public-contract, dependency, or Harness changes.
 
 The flow is:
 
-\`Architect documentation update -> PM completion\`
+\`Assigned documentation role or roles -> PM completion\`
 
-Architect must verify document claims against current code and durable docs, update the assigned documents, run applicable documentation checks, commit the changes, and submit \`.ai/vcm/handoffs/docs-sync-report.md\` with:
+Route Architect, Coder, or Tester according to the document content and the role best able to verify it. More than one role may update documentation sequentially in the same Docs-Only Flow. Each assigned role must verify the assigned claims, update the necessary related documentation, run applicable documentation checks, commit the changes, and submit \`.ai/vcm/handoffs/docs-update-report.md\` with:
 
 - \`Decision: synced\`
 - \`Decision: unchanged\`
@@ -242,20 +242,20 @@ PM may leave this path only through the allowed branches below.
 
 #### Allowed Branches
 
-- **Documentation Revision:** If the document update or evidence is incomplete, route Architect again.
+- **Documentation Revision:** If the document update or evidence is incomplete, route the same role or another appropriate documentation role.
 - **Code Change Required:** If the accepted outcome requires implementation changes, enter Code-Change Flow at Architect planning.
-- **Validation Documentation:** If the work belongs to \`docs/TESTING.md\` or validation strategy, enter Validation-Only Flow.
+- **Validation Required:** If the accepted outcome requires test or validation work rather than documentation alone, enter Validation-Only Flow at Tester.
 - **User Decision:** If conflicting durable requirements require user intent, pause and ask the user.
 
 #### Completion
 
-The flow completes when the accepted \`.ai/vcm/handoffs/docs-sync-report.md\` has \`Decision: synced\` or \`Decision: unchanged\` with complete evidence.
+The flow completes when the latest assigned role submits an accepted \`.ai/vcm/handoffs/docs-update-report.md\` with \`Decision: synced\` or \`Decision: unchanged\` and PM has no remaining documentation assignment.
 
 Docs-Only Flow does not run architecture-plan Gate Review, code-diff Gate Review, Tester validation, validation-adequacy Gate Review, separate post-validation docs sync, or Final Acceptance.
 
 ### Validation-Only Flow
 
-Use Validation-Only Flow when the accepted task requires validation, test changes, test fixtures, test-only helpers, or \`docs/TESTING.md\` changes without production-code, runtime-behavior, public-contract, dependency, or system-architecture changes.
+Use Validation-Only Flow when the accepted task requires validation, test changes, test fixtures, or test-only helpers without production-code, runtime-behavior, public-contract, dependency, or system-architecture changes. A documentation-only change to \`docs/TESTING.md\` may use Docs-Only Flow.
 
 The flow is:
 
@@ -341,7 +341,7 @@ PM may lightly rewrite the user's words to:
 - In normal code-change flow, track the confirmed architecture brief, architecture plan, test report, docs-sync report, required Gate Review results, known-issues disposition when present, and final acceptance report.
 - In an Architect Debug Branch or Architecture Diagnosis Branch, track the parent flow, resume point, Architect result, test report, and required Gate Review results. Do not require a branch-level final acceptance report.
 - In an Architect Debug Flow or Architecture Diagnosis Flow that produces code changes, track the Architect result, test report, required Gate Review results, docs-sync report, and final acceptance report.
-- In Docs-Only Flow, complete only from an accepted \`docs-sync-report.md\` with \`Decision: synced\` or \`Decision: unchanged\`. In Validation-Only Flow, complete only from a complete \`test-report.md\` after the validation-adequacy Gate finishes successfully.
+- In Docs-Only Flow, complete only from an accepted \`docs-update-report.md\` produced after the latest assigned documentation role dispatch with \`Decision: synced\` or \`Decision: unchanged\`. In Validation-Only Flow, complete only from a complete \`test-report.md\` after the validation-adequacy Gate finishes successfully.
 - A Tester \`Test Result: incomplete\` is continuation state, not failure evidence. Route Tester again and do not run validation-adequacy Gate Review or Final Acceptance from it.
 - The Architect does not begin planning until \`architecture-brief.md\` is confirmed (this happens inside the same Architect Interview-and-planning turn, not a separate PM route). Advance to the next gate only when the required role artifact/result is complete and PM routing rules allow that gate.
 - If a required artifact is missing, stale, blocked, or asks for a decision, route the issue to the responsible role or user.

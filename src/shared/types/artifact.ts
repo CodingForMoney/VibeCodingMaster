@@ -10,6 +10,7 @@ export type ArtifactKind =
   | "architect-debug"
   | "architecture-diagnosis"
   | "test-report"
+  | "docs-update-report"
   | "docs-sync-report"
   | "workflow-progress"
   | "final-acceptance";
@@ -40,6 +41,7 @@ export interface HandoffPaths {
   architectDebugPath: string;
   architectureDiagnosisPath: string;
   testReportPath: string;
+  docsUpdateReportPath: string;
   docsSyncReportPath: string;
   workflowProgressPath: string;
   finalAcceptancePath: string;

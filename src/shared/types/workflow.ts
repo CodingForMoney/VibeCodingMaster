@@ -16,6 +16,7 @@ export const WORKFLOW_EVIDENCE_ARTIFACTS = [
   "test-report.md",
   "architect-debug.md",
   "architecture-diagnosis.md",
+  "docs-update-report.md",
   "docs-sync-report.md",
   "final-acceptance.md"
 ] as const;

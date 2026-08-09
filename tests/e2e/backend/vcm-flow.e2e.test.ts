@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { parseWorkflowProgress, renderWorkflowProgress } from "../../../src/backend/services/workflow-control-service.js";
-import { renderDocsSyncReportTemplate } from "../../../src/backend/templates/handoff.js";
+import { renderDocsUpdateReportTemplate } from "../../../src/backend/templates/handoff.js";
 import { createMockClaudeE2eApp } from "./helpers/e2e-app.js";
 import { createE2eRepo, git } from "./helpers/e2e-repo.js";
 import {
@@ -291,7 +291,7 @@ describe("backend E2E with mock Claude Code", () => {
     );
   });
 
-  it("completes Docs-Only Flow on the first Architect result with an accepted Docs Sync Report", async () => {
+  it("completes Docs-Only Flow from a Tester documentation update without entering Validation-Only", async () => {
     const env = await createMockClaudeE2eApp({ workflowControl: true });
     cleanups.push(() => env.close());
     const repo = await createE2eRepo();
@@ -300,29 +300,29 @@ describe("backend E2E with mock Claude Code", () => {
 
     env.mockRuntime.onPrompt("project-manager", "Update the project guide", async (ctx) => {
       await ctx.userPromptSubmit();
-      await ctx.writeFile(".ai/vcm/handoffs/messages/project-manager-architect.md", [
+      await ctx.writeFile(".ai/vcm/handoffs/messages/project-manager-tester.md", [
         "---",
         "type: task",
         "---",
-        "Update the project guide and submit the Docs Sync Report.",
+        "Update the testing guide and submit the Docs Update Report.",
         ""
       ].join("\n"));
       await ctx.stop();
     });
 
-    env.mockRuntime.onPrompt("architect", "Update the project guide and submit the Docs Sync Report.", async (ctx) => {
+    env.mockRuntime.onPrompt("tester", "Update the testing guide and submit the Docs Update Report.", async (ctx) => {
       await ctx.userPromptSubmit();
-      await ctx.writeFile("docs/GUIDE.md", "# Project Guide\n\nUpdated documentation.\n");
+      await ctx.writeFile("docs/TESTING.md", "# Testing\n\nUpdated documentation.\n");
       await ctx.writeFile(
-        ".ai/vcm/handoffs/docs-sync-report.md",
-        completeDocsSyncReport(task.taskSlug, "synced")
+        ".ai/vcm/handoffs/docs-update-report.md",
+        completeDocsUpdateReport(task.taskSlug, "synced")
       );
-      await git(ctx.cwd, "add", "--", "docs/GUIDE.md");
-      await git(ctx.cwd, "commit", "-m", "docs: update project guide");
-      await ctx.writeFile(".ai/vcm/handoffs/messages/architect-project-manager.md", [
+      await git(ctx.cwd, "add", "--", "docs/TESTING.md");
+      await git(ctx.cwd, "commit", "-m", "docs: update testing guide");
+      await ctx.writeFile(".ai/vcm/handoffs/messages/tester-project-manager.md", [
         "---",
         "type: result",
-        "artifact_refs: .ai/vcm/handoffs/docs-sync-report.md",
+        "artifact_refs: .ai/vcm/handoffs/docs-update-report.md",
         "---",
         "Docs-only update complete.",
         ""
@@ -336,7 +336,7 @@ describe("backend E2E with mock Claude Code", () => {
     });
 
     const pm = await startRole(env.app, task.taskSlug, "project-manager");
-    await startRole(env.app, task.taskSlug, "architect");
+    await startRole(env.app, task.taskSlug, "tester");
     const initialProgress = [
       `# Workflow Progress: ${task.taskSlug}`,
       "",
@@ -351,7 +351,7 @@ describe("backend E2E with mock Claude Code", () => {
       "## Proposed Dispatch",
       "",
       "Requested Flow: docs-only",
-      "Target Role: architect",
+      "Target Role: tester",
       "Evidence: user accepted the documentation-only task",
       "",
       "## User Authorization",
@@ -379,9 +379,9 @@ describe("backend E2E with mock Claude Code", () => {
 
     const progressPath = path.join(task.worktreePath, ".ai/vcm/handoffs/workflow-progress.md");
     const current = parseWorkflowProgress(await fs.readFile(progressPath, "utf8"), task.taskSlug);
-    expect(current.history).toEqual([expect.objectContaining({ flow: "docs-only", targetRole: "architect" })]);
+    expect(current.history).toEqual([expect.objectContaining({ flow: "docs-only", targetRole: "tester" })]);
     await expect(fs.readFile(
-      path.join(task.worktreePath, ".ai/vcm/handoffs/docs-sync-report.md"),
+      path.join(task.worktreePath, ".ai/vcm/handoffs/docs-update-report.md"),
       "utf8"
     )).resolves.toContain("## Decision\n\nsynced");
 
@@ -612,8 +612,8 @@ describe("backend E2E with mock Claude Code", () => {
   });
 });
 
-function completeDocsSyncReport(taskSlug: string, decision: "synced" | "unchanged"): string {
-  return renderDocsSyncReportTemplate(taskSlug)
+function completeDocsUpdateReport(taskSlug: string, decision: "synced" | "unchanged"): string {
+  return renderDocsUpdateReportTemplate(taskSlug)
     .replaceAll("TBD", "Verified documentation-only task evidence.")
     .replace("synced|unchanged|blocked", decision);
 }

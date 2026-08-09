@@ -123,7 +123,9 @@ describe("createHarnessService", () => {
     expect(frontmatterOf(projectManagerAgent)).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Skill");
     expect(projectManagerAgent).toContain("<VCM-memory>\nNo accumulated project memory yet.\n</VCM-memory>");
     expect(projectManagerAgent).toContain("Use the PM-hub routes allowed by the `vcm-route-message` skill");
-    expect(projectManagerAgent).toContain("Use Docs-Only Flow when the accepted task changes Architect-owned project documentation");
+    expect(projectManagerAgent).toContain("Use Docs-Only Flow when the accepted task changes documentation");
+    expect(projectManagerAgent).toContain("Route Architect, Coder, or Tester according to the document content");
+    expect(projectManagerAgent).toContain(".ai/vcm/handoffs/docs-update-report.md");
     expect(projectManagerAgent).toContain("Use the `vcm-final-acceptance` skill only to close a complete code-delivery flow");
     expect(projectManagerAgent).toContain("PM confirms the worktree is clean, prepares or updates the PR");
     expect(projectManagerAgent).toContain("Do not perform technical analysis");
@@ -192,8 +194,8 @@ describe("createHarnessService", () => {
     expect(architectAgent).toContain("Maintain a `Code Reading Closure`");
     expect(architectAgent).toContain("`Previous Debug Failure`");
     expect(architectAgent).toContain("commit all Diagnosis implementation changes before reporting");
-    expect(architectAgent).toContain("Write `.ai/vcm/handoffs/docs-sync-report.md` as the final result of Docs-Only Flow");
-    expect(architectAgent).toContain("In Docs-Only Flow, submit the complete report before returning to PM");
+    expect(architectAgent).toContain("Do not write it for Docs-Only Flow or a Debug/Diagnosis Branch");
+    expect(architectAgent).toContain("In Docs-Only Flow, submit the complete `.ai/vcm/handoffs/docs-update-report.md`");
     expect(architectAgent).toContain("`Decision` must be `synced`, `unchanged`, or `blocked`");
     const testerAgent = await fs.readText("/repo/.claude/agents/tester.md");
     expect(frontmatterOf(testerAgent)).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Skill");
@@ -203,6 +205,8 @@ describe("createHarnessService", () => {
     expect(testerAgent).toContain("Required L3 coverage cannot be replaced by L2");
     expect(testerAgent).toContain("L3 Required: yes|no");
     expect(testerAgent).toContain("Apply `docs/CODING_STANDARDS.md` to changed tests");
+    expect(testerAgent).toContain("### Docs-Only Flow");
+    expect(testerAgent).toContain("Do not submit `test-report.md`, run validation-adequacy Gate Review, or implement tests merely because the documentation concerns testing");
     expect(testerAgent).toContain("### Test-Infrastructure Repair");
     expect(testerAgent).toContain("Status: none|repair-required|repaired|production-change-required");
     expect(testerAgent).toContain("In every flow, if tests, fixtures, test-only helpers");
@@ -231,6 +235,8 @@ describe("createHarnessService", () => {
     expect(finalAcceptanceSkill).toContain("`incomplete` is not acceptance evidence");
     expect(finalAcceptanceSkill).toContain("do not accept `Test Result: incomplete`");
     const coderAgent = await fs.readText("/repo/.claude/agents/coder.md");
+    expect(coderAgent).toContain("In a PM-routed Docs-Only Flow, update the assigned documentation");
+    expect(coderAgent).toContain("Do not submit `coder-completion.md` for Docs-Only work");
     expect(frontmatterOf(coderAgent)).toContain(`disallowedTools: ${CODE_ROLE_DISALLOWED_TOOLS.join(", ")}`);
     expect(frontmatterOf(coderAgent)).not.toMatch(/^tools:/m);
     expect(frontmatterOf(coderAgent)).not.toContain("vcm-code-navigation");

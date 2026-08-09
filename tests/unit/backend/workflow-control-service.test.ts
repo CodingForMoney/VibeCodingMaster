@@ -14,6 +14,7 @@ import {
   renderArchitectureDiagnosisTemplate,
   renderArchitecturePlanTemplate,
   renderCoderCompletionTemplate,
+  renderDocsUpdateReportTemplate,
   renderDocsSyncReportTemplate,
   renderFinalAcceptanceTemplate,
   renderTestReportTemplate
@@ -356,7 +357,7 @@ describe("workflow control service", () => {
     const service = createWorkflowControlService({ fs, now: sequenceClock() });
 
     await advance(service, fs, context, "architect", "docs-only", "first docs request");
-    await writeDocsSyncReport(fs, context, "synced", "first run");
+    await writeDocsUpdateReport(fs, context, "synced", "first run");
     await completeFlow(service, fs, context);
 
     await expect(propose(service, fs, context, "architect", undefined, "start another docs run"))
@@ -367,7 +368,7 @@ describe("workflow control service", () => {
       code: "WORKFLOW_COMPLETION_INVALID"
     });
 
-    await writeDocsSyncReport(fs, context, "unchanged", "second run");
+    await writeDocsUpdateReport(fs, context, "unchanged", "second run");
     await completeFlow(service, fs, context);
 
     const progress = await readProgress(fs, context);
@@ -611,7 +612,7 @@ describe("workflow control service", () => {
     });
   });
 
-  it("rejects Docs-Only completion without a complete accepted Docs Sync Report", async () => {
+  it("rejects Docs-Only completion without a fresh complete accepted Docs Update Report", async () => {
     const { context, fs } = await createContext(roots);
     const service = createWorkflowControlService({ fs, now: sequenceClock() });
     await advance(service, fs, context, "architect", "docs-only", "accepted docs task");
@@ -635,7 +636,7 @@ describe("workflow control service", () => {
       code: "WORKFLOW_COMPLETION_INVALID"
     });
 
-    await writeFinalArtifact(fs, context, "docs-sync-report.md", renderDocsSyncReportTemplate(context.taskSlug), [
+    await writeFinalArtifact(fs, context, "docs-update-report.md", renderDocsUpdateReportTemplate(context.taskSlug), [
       ["synced|unchanged|blocked", "blocked"]
     ]);
     await expect(service.submitProgress(context, completion)).rejects.toMatchObject({
@@ -644,11 +645,11 @@ describe("workflow control service", () => {
   });
 
   for (const decision of ["synced", "unchanged"] as const) {
-    it(`completes Docs-Only Flow from a complete ${decision} Docs Sync Report`, async () => {
+    it(`completes Docs-Only Flow from a complete ${decision} Docs Update Report`, async () => {
       const { context, fs } = await createContext(roots);
       const service = createWorkflowControlService({ fs, now: sequenceClock() });
-      await advance(service, fs, context, "architect", "docs-only", "accepted docs task");
-      await writeFinalArtifact(fs, context, "docs-sync-report.md", renderDocsSyncReportTemplate(context.taskSlug), [
+      await advance(service, fs, context, "tester", "docs-only", "accepted testing documentation task");
+      await writeFinalArtifact(fs, context, "docs-update-report.md", renderDocsUpdateReportTemplate(context.taskSlug), [
         ["synced|unchanged|blocked", decision]
       ]);
 
@@ -663,6 +664,35 @@ describe("workflow control service", () => {
       expect((await readProgress(fs, context)).status).toBe("completed");
     });
   }
+
+  it("requires each sequential Docs-Only role to replace the report with fresh evidence", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await advance(service, fs, context, "architect", "docs-only", "update architecture documentation");
+    await writeFinalArtifact(fs, context, "docs-update-report.md", renderDocsUpdateReportTemplate(context.taskSlug), [
+      ["synced|unchanged|blocked", "synced"],
+      ["## Evidence Reviewed\n\nTBD", "## Evidence Reviewed\n\nArchitecture evidence."]
+    ]);
+    await advance(service, fs, context, "coder", undefined, "update implementation reference documentation");
+
+    await expect(completeFlow(service, fs, context)).rejects.toMatchObject({
+      code: "WORKFLOW_COMPLETION_INVALID"
+    });
+
+    await writeFinalArtifact(fs, context, "docs-update-report.md", renderDocsUpdateReportTemplate(context.taskSlug), [
+      ["synced|unchanged|blocked", "unchanged"],
+      ["## Evidence Reviewed\n\nTBD", "## Evidence Reviewed\n\nImplementation reference evidence."]
+    ]);
+    await completeFlow(service, fs, context);
+
+    expect((await readProgress(fs, context))).toMatchObject({
+      status: "completed",
+      history: [
+        expect.objectContaining({ flow: "docs-only", targetRole: "architect" }),
+        expect.objectContaining({ flow: "docs-only", targetRole: "coder" })
+      ]
+    });
+  });
 
   it("requires a fresh Architecture Gate after Final Acceptance sends an Architect follow-up", async () => {
     const { context, fs } = await createContext(roots);
@@ -881,6 +911,18 @@ async function writeDocsSyncReport(
   evidence: string
 ): Promise<void> {
   await writeFinalArtifact(fs, context, "docs-sync-report.md", renderDocsSyncReportTemplate(context.taskSlug), [
+    ["synced|unchanged|blocked", decision],
+    ["## Evidence Reviewed\n\nTBD", `## Evidence Reviewed\n\n${evidence}`]
+  ]);
+}
+
+async function writeDocsUpdateReport(
+  fs: FileSystemAdapter,
+  context: WorkflowControlContext,
+  decision: "synced" | "unchanged",
+  evidence: string
+): Promise<void> {
+  await writeFinalArtifact(fs, context, "docs-update-report.md", renderDocsUpdateReportTemplate(context.taskSlug), [
     ["synced|unchanged|blocked", decision],
     ["## Evidence Reviewed\n\nTBD", `## Evidence Reviewed\n\n${evidence}`]
   ]);

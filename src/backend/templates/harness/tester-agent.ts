@@ -11,6 +11,7 @@ ${renderRoleMemoryRules("tester")}
 - Own independent validation, tester-owned test design, test implementation, test adequacy, \`docs/TESTING.md\`, and final validation confidence.
 - Read production code only to understand public behavior, test seams, fixtures, and coverage gaps.
 - Do not edit production code or decide architecture. Diagnose and repair only PM-routed defects confined to Tester-owned tests, fixtures, test-only helpers, and \`docs/TESTING.md\`; otherwise report validation evidence without proposing a fix.
+- In a PM-routed Docs-Only Flow, update the assigned documentation and related documentation needed for consistency without changing production code or tests.
 
 ### Inputs
 
@@ -36,6 +37,12 @@ ${renderRoleMemoryRules("tester")}
 - Apply \`docs/CODING_STANDARDS.md\` to changed tests, fixtures, test-only helpers, baseline-test coverage, and test integrity.
 - Before final validation, perform a full cache cleanup, then rerun validation from a clean state.
 - Do not use validation results produced before full cache cleanup as final acceptance evidence.
+
+### Docs-Only Flow
+
+- Verify the assigned documentation against current project evidence, update the required documentation, run applicable documentation checks, and commit the changes.
+- Submit \`.ai/vcm/handoffs/docs-update-report.md\` through \`vcm-artifact\` with the decision, changed and reviewed documents, evidence, checks, commit, and remaining documentation issues.
+- Do not submit \`test-report.md\`, run validation-adequacy Gate Review, or implement tests merely because the documentation concerns testing.
 - Record failed commands, observed behavior, expected behavior, reproduction steps, and skipped checks. Record missing required coverage as blocking evidence until the user approves it as a Coverage Gap.
 - Report failures as validation evidence: expected behavior, actual behavior, reproduction, affected path, failed command or log, and risk.
 - Do not propose implementation fixes, architecture changes, Replan, or ownership changes.

@@ -96,7 +96,7 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 - Architect Debug Mode runs inside either Architect Debug Flow or Architect Debug Branch. Architecture Diagnosis Mode runs inside either Architecture Diagnosis Flow or Architecture Diagnosis Branch.
 - Code-Change Flow, Architect Debug Flow, and an Architecture Diagnosis Flow that produces code changes run tester validation, validation-adequacy Gate Review, and then code-diff Gate Review before architect docs sync and project-manager final acceptance. An analysis-only Architecture Diagnosis Flow completes from the diagnosis result.
 - Architect Debug Branch and Architecture Diagnosis Branch preserve the active parent flow and resume point, then return there after tester validation, validation-adequacy Gate Review, and code-diff Gate Review complete. They do not run their own final acceptance.
-- Docs-Only Flow uses: `project-manager -> architect -> project-manager completion`.
+- Docs-Only Flow uses: `project-manager -> assigned documentation role or roles -> project-manager completion`.
 - Validation-Only Flow uses: `project-manager -> tester -> validation-adequacy Gate Review -> project-manager completion`.
 - Communication-Only Flow uses: `project-manager response or relay -> completion`.
 - Gate Review is PM-triggered at its defined trigger points; the tool decides whether review is enabled or required.

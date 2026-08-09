@@ -6,7 +6,7 @@ import {
   ARCHITECTURE_EVIDENCE_STATUSES,
   ARCHITECTURE_PLAN_RESULTS,
   CODER_COMPLETION_DECISIONS,
-  DOCS_SYNC_DECISIONS,
+  DOCS_REPORT_DECISIONS,
   FINAL_ACCEPTANCE_DECISIONS,
   L3_ACTIONS,
   L3_REQUIRED_VALUES,
@@ -391,8 +391,8 @@ function validateArtifactFields(
     return invalidFields;
   }
 
-  if (kind === "docs-sync-report") {
-    return validateDecision(content, DOCS_SYNC_DECISIONS);
+  if (kind === "docs-update-report" || kind === "docs-sync-report") {
+    return validateDecision(content, DOCS_REPORT_DECISIONS);
   }
 
   if (kind === "final-acceptance") {

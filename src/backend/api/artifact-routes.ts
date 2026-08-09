@@ -180,6 +180,9 @@ function artifactNameToPath(paths: ReturnType<ArtifactService["getHandoffPaths"]
   if (artifactName === "test-report.md") {
     return paths.testReportPath;
   }
+  if (artifactName === "docs-update-report.md") {
+    return paths.docsUpdateReportPath;
+  }
   if (artifactName === "docs-sync-report.md") {
     return paths.docsSyncReportPath;
   }

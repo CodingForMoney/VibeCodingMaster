@@ -23,6 +23,7 @@ import {
   renderArchitecturePlanTemplate,
   renderArchitectDebugTemplate,
   renderCoderCompletionTemplate,
+  renderDocsUpdateReportTemplate,
   renderDocsSyncReportTemplate,
   renderFinalAcceptanceTemplate,
   renderKnownIssuesTemplate,
@@ -107,6 +108,7 @@ const ARTIFACT_PATH_KEYS: Array<[ArtifactKind, keyof HandoffPaths]> = [
   ["architect-debug", "architectDebugPath"],
   ["architecture-diagnosis", "architectureDiagnosisPath"],
   ["test-report", "testReportPath"],
+  ["docs-update-report", "docsUpdateReportPath"],
   ["docs-sync-report", "docsSyncReportPath"],
   ["workflow-progress", "workflowProgressPath"],
   ["final-acceptance", "finalAcceptancePath"]
@@ -146,6 +148,7 @@ export function createArtifactService(fs: FileSystemAdapter, deps: ArtifactServi
         architectDebugPath: path.posix.join(handoffDir, "architect-debug.md"),
         architectureDiagnosisPath: path.posix.join(handoffDir, "architecture-diagnosis.md"),
         testReportPath: path.posix.join(handoffDir, "test-report.md"),
+        docsUpdateReportPath: path.posix.join(handoffDir, "docs-update-report.md"),
         docsSyncReportPath: path.posix.join(handoffDir, "docs-sync-report.md"),
         workflowProgressPath: path.posix.join(handoffDir, "workflow-progress.md"),
         finalAcceptancePath: path.posix.join(handoffDir, "final-acceptance.md")
@@ -176,6 +179,7 @@ export function createArtifactService(fs: FileSystemAdapter, deps: ArtifactServi
         [paths.architectDebugPath, renderArchitectDebugTemplate(input.taskSlug)],
         [paths.architectureDiagnosisPath, renderArchitectureDiagnosisTemplate(input.taskSlug)],
         [paths.testReportPath, renderTestReportTemplate(input.taskSlug)],
+        [paths.docsUpdateReportPath, renderDocsUpdateReportTemplate(input.taskSlug)],
         [paths.docsSyncReportPath, renderDocsSyncReportTemplate(input.taskSlug)],
         [paths.workflowProgressPath, renderWorkflowProgressTemplate(input.taskSlug)],
         [paths.finalAcceptancePath, renderFinalAcceptanceTemplate(input.taskSlug)],
@@ -293,10 +297,11 @@ export function createArtifactService(fs: FileSystemAdapter, deps: ArtifactServi
 
       if (isArtifactKind(input.kind)) {
         const definition = getArtifactDefinition(input.kind);
-        if (definition.owner !== input.role) {
+        const owners = Array.isArray(definition.owner) ? definition.owner : [definition.owner];
+        if (!owners.includes(input.role)) {
           throw new VcmError({
             code: "ARTIFACT_OWNER_MISMATCH",
-            message: `${input.kind} is owned by ${definition.owner}, not ${input.role}.`,
+            message: `${input.kind} is owned by ${owners.join("|")}, not ${input.role}.`,
             statusCode: 403
           });
         }

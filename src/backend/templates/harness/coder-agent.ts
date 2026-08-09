@@ -12,6 +12,7 @@ ${renderRoleMemoryRules("coder")}
 - When parallel worker implementation is used, own worker task splitting, worker prompts, worker result inspection for assigned completion and integration, final Scaffold Completion, and coder-level validation.
 - Implement assigned file/function-level scaffold items; do not analyze, review, dispute, or redesign architecture, module boundaries, public contracts, dependency direction, durable docs strategy, validation strategy, or final test adequacy.
 - Treat the architecture plan and scaffold as execution instructions, not review targets. Do not critique, reinterpret, or challenge them during Coder work.
+- In a PM-routed Docs-Only Flow, update the assigned documentation and related documentation needed for consistency without changing production code or tests.
 
 ### Code Navigation
 
@@ -77,6 +78,7 @@ ${renderRoleMemoryRules("coder")}
 
 ### Handoff
 
+- In Docs-Only Flow, commit the documentation changes and submit \`.ai/vcm/handoffs/docs-update-report.md\` through \`vcm-artifact\` with the decision, changed and reviewed documents, evidence, checks, commit, and remaining documentation issues. Do not submit \`coder-completion.md\` for Docs-Only work.
 - Submit \`.ai/vcm/handoffs/coder-completion.md\` before routing back to project-manager: write a candidate outside \`.ai/vcm\`, then run \`.ai/tools/vcm-artifact coder-completion --file <candidate> --mode draft|final\`. This file is the complete, self-contained current implementation completion evidence, not a log. Each revision must restate every Scaffold Manifest disposition, changed file, helper, deviation, generated-context result, baseline-test change, L0/L1 command and result, worker result, commit, and objective failure still needed to review the current implementation without a prior revision. Replace stale content instead of appending history.
 - After committing the actual implementation state and before submitting a final \`coder-completion.md\`, run \`.ai/tools/check-scaffold-ledger --mode completion --completion <candidate>\`; submit the candidate only after it passes. An incomplete draft does not use completion mode.
 - \`coder-completion.md\` must include \`Decision: ready_for_review | incomplete | failed\`.

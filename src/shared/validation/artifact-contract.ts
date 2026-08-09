@@ -24,7 +24,7 @@ export const TEST_INFRASTRUCTURE_STATUSES = [
 ] as const;
 export const L3_REQUIRED_VALUES = ["yes", "no"] as const;
 export const L3_ACTIONS = ["run-existing", "updated", "added"] as const;
-export const DOCS_SYNC_DECISIONS = ["synced", "unchanged", "blocked"] as const;
+export const DOCS_REPORT_DECISIONS = ["synced", "unchanged", "blocked"] as const;
 export const FINAL_ACCEPTANCE_DECISIONS = [
   "accepted",
   "accepted-with-known-risks",

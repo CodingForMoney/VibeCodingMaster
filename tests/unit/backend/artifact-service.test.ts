@@ -46,7 +46,7 @@ describe("createArtifactService", () => {
     });
   });
 
-  it("creates and checks docs sync and final acceptance artifacts", async () => {
+  it("creates and checks docs update, docs sync, and final acceptance artifacts", async () => {
     const fs = createMemoryFs();
     const service = createArtifactService(fs);
 
@@ -60,6 +60,7 @@ describe("createArtifactService", () => {
       handoffDir: ".ai/vcm/handoffs"
     });
 
+    expect(created).toContain(".ai/vcm/handoffs/docs-update-report.md");
     expect(created).toContain(".ai/vcm/handoffs/docs-sync-report.md");
     expect(created).toContain(".ai/vcm/handoffs/final-acceptance.md");
     expect(created).toContain(".ai/vcm/handoffs/known-issues.md");
@@ -67,6 +68,7 @@ describe("createArtifactService", () => {
     expect(created).toContain(".ai/vcm/handoffs/architect-debug.md");
     expect(created).toContain(".ai/vcm/handoffs/architecture-brief.md");
     expect(summary.paths.architectureBriefPath).toBe(".ai/vcm/handoffs/architecture-brief.md");
+    expect(summary.paths.docsUpdateReportPath).toBe(".ai/vcm/handoffs/docs-update-report.md");
     expect(summary.paths.docsSyncReportPath).toBe(".ai/vcm/handoffs/docs-sync-report.md");
     expect(summary.paths.finalAcceptancePath).toBe(".ai/vcm/handoffs/final-acceptance.md");
     expect(summary.paths.knownIssuesPath).toBe(".ai/vcm/handoffs/known-issues.md");
@@ -102,6 +104,10 @@ describe("createArtifactService", () => {
       .resolves.toContain("## L2/L3 Validation");
     await expect(fs.readText("/repo/.ai/vcm/handoffs/architect-debug.md"))
       .resolves.toContain("## Final Disposition");
+    expect(summary.checks.find((check) => check.kind === "docs-update-report")).toMatchObject({
+      status: "incomplete",
+      hasPlaceholder: true
+    });
     expect(summary.checks.find((check) => check.kind === "docs-sync-report")).toMatchObject({
       status: "incomplete",
       hasPlaceholder: true
@@ -164,6 +170,55 @@ describe("createArtifactService", () => {
       mode: "final",
       role: "coder",
       content: "# Test Report\n"
+    })).rejects.toMatchObject({ code: "ARTIFACT_OWNER_MISMATCH" });
+  });
+
+  it("accepts Docs Update Reports from every Docs-Only role and rejects unrelated roles", async () => {
+    const service = createArtifactService(createMemoryFs());
+    const content = [
+      "# Docs Update Report: demo-task",
+      "",
+      "## Summary",
+      "Updated documentation.",
+      "## Documents Updated",
+      "docs/TESTING.md",
+      "## Documents Reviewed And Left Unchanged",
+      "None.",
+      "## Evidence Reviewed",
+      "Current tests.",
+      "## Checks Performed",
+      "Documentation audit passed.",
+      "## Commit",
+      "abc123",
+      "## Remaining Documentation Issues",
+      "None.",
+      "## Decision",
+      "synced",
+      ""
+    ].join("\n");
+
+    for (const role of ["architect", "coder", "tester"] as const) {
+      await expect(service.submitArtifact({
+        repoRoot: "/repo",
+        baseRepoRoot: "/repo",
+        handoffDir: ".ai/vcm/handoffs",
+        taskSlug: "demo-task",
+        kind: "docs-update-report",
+        mode: "final",
+        role,
+        content
+      })).resolves.toMatchObject({ status: "ok" });
+    }
+
+    await expect(service.submitArtifact({
+      repoRoot: "/repo",
+      baseRepoRoot: "/repo",
+      handoffDir: ".ai/vcm/handoffs",
+      taskSlug: "demo-task",
+      kind: "docs-update-report",
+      mode: "final",
+      role: "reviewer",
+      content
     })).rejects.toMatchObject({ code: "ARTIFACT_OWNER_MISMATCH" });
   });
 

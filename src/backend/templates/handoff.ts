@@ -5,7 +5,7 @@ import {
   ARCHITECTURE_EVIDENCE_STATUSES,
   ARCHITECTURE_PLAN_RESULTS,
   CODER_COMPLETION_DECISIONS,
-  DOCS_SYNC_DECISIONS,
+  DOCS_REPORT_DECISIONS,
   FINAL_ACCEPTANCE_DECISIONS,
   L3_ACTIONS,
   L3_REQUIRED_VALUES,
@@ -545,7 +545,46 @@ TBD
 
 ## Decision
 
-${renderArtifactOptions(DOCS_SYNC_DECISIONS)}
+${renderArtifactOptions(DOCS_REPORT_DECISIONS)}
+`;
+}
+
+export function renderDocsUpdateReportTemplate(taskSlug: string): string {
+  return `# Docs Update Report: ${taskSlug}
+
+${CURRENT_HANDOFF_NOTICE}
+
+## Summary
+
+TBD
+
+## Documents Updated
+
+TBD
+
+## Documents Reviewed And Left Unchanged
+
+TBD
+
+## Evidence Reviewed
+
+TBD
+
+## Checks Performed
+
+TBD
+
+## Commit
+
+TBD
+
+## Remaining Documentation Issues
+
+TBD
+
+## Decision
+
+${renderArtifactOptions(DOCS_REPORT_DECISIONS)}
 `;
 }
 

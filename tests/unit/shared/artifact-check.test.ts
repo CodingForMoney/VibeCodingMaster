@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   renderArchitectureBriefTemplate,
   renderArchitecturePlanTemplate,
+  renderDocsUpdateReportTemplate,
   renderDocsSyncReportTemplate,
   renderFinalAcceptanceTemplate,
   renderTestReportTemplate
@@ -653,6 +654,7 @@ looks-good
       ["architecture-brief", renderArchitectureBriefTemplate("demo")],
       ["architecture-plan", renderArchitecturePlanTemplate("demo")],
       ["test-report", renderTestReportTemplate("demo")],
+      ["docs-update-report", renderDocsUpdateReportTemplate("demo")],
       ["docs-sync-report", renderDocsSyncReportTemplate("demo")],
       ["final-acceptance", renderFinalAcceptanceTemplate("demo")]
     ] as const;
@@ -685,6 +687,9 @@ looks-good
     expect(renderTestReportTemplate("demo")).toContain("L3 Required: yes|no");
     expect(renderTestReportTemplate("demo")).toContain("<run-existing|updated|added>");
     expect(renderDocsSyncReportTemplate("demo")).toContain(
+      "## Decision\n\nsynced|unchanged|blocked"
+    );
+    expect(renderDocsUpdateReportTemplate("demo")).toContain(
       "## Decision\n\nsynced|unchanged|blocked"
     );
     expect(renderFinalAcceptanceTemplate("demo")).toContain(
@@ -734,7 +739,7 @@ looks-good
 });
 
 function completeTemplate(
-  kind: "architecture-brief" | "architecture-plan" | "test-report" | "docs-sync-report" | "final-acceptance",
+  kind: "architecture-brief" | "architecture-plan" | "test-report" | "docs-update-report" | "docs-sync-report" | "final-acceptance",
   content: string
 ): string {
   const completed = content.replaceAll("TBD", "None.");
@@ -760,7 +765,7 @@ function completeTemplate(
       "Planning Result: complete"
     );
   }
-  if (kind === "docs-sync-report") {
+  if (kind === "docs-update-report" || kind === "docs-sync-report") {
     return completed.replace("synced|unchanged|blocked", "unchanged");
   }
   return completed;
