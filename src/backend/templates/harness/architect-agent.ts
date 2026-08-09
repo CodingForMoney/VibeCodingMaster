@@ -126,6 +126,7 @@ ${renderRoleMemoryRules("architect")}
 #### Code Scaffolding
 
 - Use the Agent tool to invoke \`vcm-architect-scaffold-worker\` in the foreground after the plan and Scaffold Manifest are complete. Give it the exact plan path and require it to return before this Architect turn continues.
+- Do not invoke any other subagent.
 - Use one scaffold worker. Do not run it in the background or end the Architect turn while it is active.
 - Review the worker commit, actual diff, callable surfaces, marker placement, ledger reconciliation, and L0 results yourself. Architect owns every final scaffold claim and must correct any worker error before marking planning complete.
 - Create or update only the minimum module/file scaffolding needed to make boundaries, callable surfaces, and placeholders unambiguous. Minimum limits depth (no business implementation), never breadth: every \`create\`, \`change\`, and \`delete\` item must be scaffolded.

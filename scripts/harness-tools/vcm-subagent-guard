@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+"""Restrict VCM role sessions to their assigned worker subagents."""
+
+import json
+import os
+import sys
+
+
+ALLOWED_SUBAGENTS = {
+    "architect": "vcm-architect-scaffold-worker",
+    "coder": "vcm-coder-worker",
+}
+
+
+def deny(reason: str) -> None:
+    print(json.dumps({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        }
+    }))
+
+
+def main() -> None:
+    role = os.environ.get("VCM_ROLE", "").strip()
+    if not role:
+        return
+
+    try:
+        payload = json.load(sys.stdin)
+    except (json.JSONDecodeError, OSError):
+        deny("VCM could not validate this subagent request because its hook payload is invalid.")
+        return
+
+    if not isinstance(payload, dict):
+        deny("VCM could not validate this subagent request because its hook payload is invalid.")
+        return
+
+    if payload.get("tool_name") != "Agent":
+        return
+
+    if payload.get("agent_id"):
+        deny("VCM worker subagents may not invoke nested subagents.")
+        return
+
+    tool_input = payload.get("tool_input")
+    subagent_type = tool_input.get("subagent_type") if isinstance(tool_input, dict) else None
+    allowed = ALLOWED_SUBAGENTS.get(role)
+
+    if allowed is None:
+        deny(f"VCM role `{role}` may not invoke subagents.")
+        return
+
+    if subagent_type != allowed:
+        requested = subagent_type if isinstance(subagent_type, str) and subagent_type else "<missing>"
+        deny(f"VCM role `{role}` may invoke only `{allowed}`, not `{requested}`.")
+
+
+if __name__ == "__main__":
+    main()

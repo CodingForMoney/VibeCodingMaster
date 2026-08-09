@@ -29,6 +29,7 @@ const EXACT_EXAMPLE_HARNESS_PATHS = [
   ".ai/tools/run-long-check",
   ".ai/tools/vcm-artifact",
   ".ai/tools/vcm-bash-guard",
+  ".ai/tools/vcm-subagent-guard",
   ".ai/tools/watch-job",
   ".claude/agents/architect.md",
   ".claude/agents/coder.md",
@@ -374,6 +375,58 @@ describe("harness templates stay in sync with the script installer", () => {
       encoding: "utf8"
     });
     expect(missingGuardOutput).toBe("");
+  }, 30_000);
+
+  it("installs a fail-closed Agent hook for VCM role subagents", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-agent-hook-"));
+    await execFileAsync(process.execPath, [installerPath, tmpRepo]);
+    const settings = JSON.parse(await readFile(path.join(tmpRepo, ".claude/settings.json"), "utf8")) as {
+      hooks: { PreToolUse: Array<{ matcher?: string; hooks: Array<{ command: string }> }> };
+    };
+    const command = settings.hooks.PreToolUse.find((entry) => entry.matcher === "Agent")?.hooks[0]?.command;
+    expect(command).toContain(".ai/tools/vcm-subagent-guard");
+    expect(command).toContain("VCM subagent policy is unavailable");
+
+    const env = {
+      ...process.env,
+      VCM_TASK_SLUG: "demo-task",
+      VCM_ROLE: "coder"
+    };
+    const allowedOutput = execFileSync("sh", ["-c", command], {
+      cwd: tmpRepo,
+      env,
+      input: JSON.stringify({
+        tool_name: "Agent",
+        tool_input: { subagent_type: "vcm-coder-worker" }
+      }),
+      encoding: "utf8"
+    });
+    expect(allowedOutput).toBe("");
+
+    const deniedOutput = execFileSync("sh", ["-c", command], {
+      cwd: tmpRepo,
+      env,
+      input: JSON.stringify({
+        tool_name: "Agent",
+        tool_input: { subagent_type: "general-purpose" }
+      }),
+      encoding: "utf8"
+    });
+    expect(JSON.parse(deniedOutput).hookSpecificOutput.permissionDecision).toBe("deny");
+
+    await unlink(path.join(tmpRepo, ".ai/tools/vcm-subagent-guard"));
+    const missingGuardOutput = execFileSync("sh", ["-c", command], {
+      cwd: tmpRepo,
+      env,
+      input: JSON.stringify({
+        tool_name: "Agent",
+        tool_input: { subagent_type: "vcm-coder-worker" }
+      }),
+      encoding: "utf8"
+    });
+    expect(JSON.parse(missingGuardOutput).hookSpecificOutput.permissionDecisionReason).toContain(
+      "VCM subagent policy is unavailable"
+    );
   }, 30_000);
 });
 

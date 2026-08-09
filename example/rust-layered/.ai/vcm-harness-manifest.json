@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "manager": "vcm",
-  "harnessVersion": "0.7.43",
+  "harnessVersion": "0.7.45",
   "installMode": "fixed",
   "installedAt": "2026-06-07T00:00:00Z",
-  "updatedAt": "2026-08-09T02:48:39.796Z",
+  "updatedAt": "2026-08-09T07:47:59.973Z",
   "runtimeRoots": [
     ".ai/vcm/",
     ".claude/worktrees/"
@@ -714,6 +714,18 @@
     },
     {
       "path": ".ai/tools/vcm-bash-guard",
+      "entryType": "file",
+      "category": "runtime-tool",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "conditional-long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".ai/tools/vcm-subagent-guard",
       "entryType": "file",
       "category": "runtime-tool",
       "ownership": "whole-file",

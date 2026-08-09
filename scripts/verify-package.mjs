@@ -13,6 +13,7 @@ const requiredFiles = [
   "scripts/harness-tools/run-long-check",
   "scripts/harness-tools/watch-job",
   "scripts/harness-tools/vcm-bash-guard",
+  "scripts/harness-tools/vcm-subagent-guard",
   "scripts/install-vcm-harness.mjs",
   "scripts/uninstall-vcm-harness.mjs",
   "dist/main.js",

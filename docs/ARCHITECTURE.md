@@ -204,7 +204,10 @@ module to locate candidates; every candidate is read and semantically verified,
 and the text match is not relationship evidence. Unresolved project-owned
 relationships remain unresolved. Coder and Reviewer use generated context, Glob,
 Grep, and complete source reads without starting separate language servers. The
-shared PreToolUse guard supervises Bash execution but does not prohibit text search.
+shared Bash PreToolUse guard supervises Bash execution but does not prohibit text
+search. A separate Agent PreToolUse guard permits Architect to invoke only
+`vcm-architect-scaffold-worker`, permits Coder to invoke only `vcm-coder-worker`,
+denies subagents for every other VCM role, and denies nested worker delegation.
 
 Code-diff source chains come from the current Workflow Control run rather than
 PM wording. VCM reads the confirmed dispatch history for that run and includes
@@ -464,7 +467,9 @@ Architect delegates exact scaffold execution to one foreground
 `vcm-architect-scaffold-worker` subagent configured with `model: opus` and
 `effort: xhigh`. The worker has an independent context and returns before the
 Architect turn continues. Architect remains responsible for reviewing the
-scaffold commit, ledger reconciliation, and build evidence.
+scaffold commit, ledger reconciliation, and build evidence. Coder may delegate
+parallel marker implementation only to `vcm-coder-worker`. The fixed Agent hook
+enforces both role-specific worker allowlists independently of permission mode.
 
 Scaffold-ledger reconciliation is lifecycle-explicit. Architect Scaffold Worker
 and the architecture-plan Gate run `check-scaffold-ledger --mode scaffold`,

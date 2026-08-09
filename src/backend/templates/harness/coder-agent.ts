@@ -51,6 +51,7 @@ ${renderRoleMemoryRules("coder")}
 ### Parallel Worker Implementation
 
 - Coder may use Claude Code subagents to invoke \`vcm-coder-worker\` for parallel implementation.
+- Do not invoke any other subagent.
 - Use workers when the task has at least 20 \`VCM:CODE\` markers and the marker distribution can form at least two worker-sized groups.
 - Under a complete scaffold, marker implementations are order-independent — signatures, types, and cross-item contracts are frozen by the scaffold — so never serialize worker-sized groups for presumed implementation-order dependencies. When a group's module-scoped checks need peers that are still unimplemented, narrow that worker's assigned validation scope instead of serializing.
 - An item counts as blocked only when a genuine implementation attempt has produced objective compile/check evidence already reported under the failure rules; prediction never blocks an item. A blocked marker item never exempts the remaining markers from worker dispatch.
