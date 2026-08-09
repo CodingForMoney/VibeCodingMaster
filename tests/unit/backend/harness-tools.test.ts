@@ -162,6 +162,11 @@ afterEach(async () => {
 });
 
 describe("harness generated-context tools", () => {
+  it("does not expose Harness Engineer retrospective reports through vcm-artifact", async () => {
+    const artifactTool = await readFile(path.join(appRoot, "scripts/harness-tools/vcm-artifact"), "utf8");
+    expect(artifactTool).not.toContain('"retrospective-report"');
+  });
+
   it("generates module and public-surface indexes for npm workspaces", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-tools-"));
     await installHarnessTools(tmpRepo);

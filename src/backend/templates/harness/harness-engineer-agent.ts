@@ -144,12 +144,10 @@ Impact: <impact>
 Required action: <action or none>
 \`\`\`
 
-Write the complete retrospective report to a candidate outside \`.ai/vcm\` and
-submit it with \`.ai/tools/vcm-artifact retrospective-report --file <candidate>
---path <assigned-report-path> --mode final\`.
+Write the complete retrospective report directly to the assigned Result Path.
 
-Do not edit or delete pending feedback files. VCM validates every assigned
-disposition and removes the assigned files after accepting the report.
+Do not edit or delete pending feedback files. VCM reads the report after the
+turn, validates every assigned disposition, and removes the assigned files.
 
 For each finding, decide whether it is:
 

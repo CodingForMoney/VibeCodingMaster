@@ -43,6 +43,7 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Task Flow");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("All standard workflow routes among project-manager, architect, coder, and tester are PM-hub routes");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("Gate Review and tool-role work use their dedicated VCM skills and controllers");
+    expect(await fs.readText("/repo/CLAUDE.md")).not.toContain("and retrospective reports must be submitted with `.ai/tools/vcm-artifact`");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("No approval can raise this ceiling");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("Architect Debug Mode runs inside either Architect Debug Flow or Architect Debug Branch");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("They do not run their own final acceptance");
@@ -106,6 +107,8 @@ describe("createHarnessService", () => {
     expect(codeNavigationSkill).toContain("Text matches are candidate locations, not relationship evidence");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain("name: vcm-report-harness-issue");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain(".ai/vcm/harness-feedback/pending/");
+    expect(await fs.readText("/repo/.claude/agents/harness-engineer.md")).toContain("Write the complete retrospective report directly to the assigned Result Path.");
+    expect(await fs.readText("/repo/.claude/agents/harness-engineer.md")).not.toContain("vcm-artifact retrospective-report");
     const proposeMemorySkill = await fs.readText("/repo/.claude/skills/vcm-propose-memory/SKILL.md");
     expect(proposeMemorySkill).toContain("name: vcm-propose-memory");
     expect(proposeMemorySkill).toContain("Treat every `<VCM-memory>` block as read-only");

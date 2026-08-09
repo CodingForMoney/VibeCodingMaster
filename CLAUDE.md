@@ -49,7 +49,7 @@ No accumulated project memory yet.
 
 ## VCM Managed Artifacts
 
-- VCM-managed Markdown under `.ai/vcm/handoffs/`, Coder Worker reports, request-scoped Gate Review reports, route messages, memory proposals, Harness Feedback, and retrospective reports must be submitted with `.ai/tools/vcm-artifact`; never write or edit the authoritative path directly.
+- VCM-managed Markdown under `.ai/vcm/handoffs/`, Coder Worker reports, request-scoped Gate Review reports, route messages, memory proposals, and Harness Feedback must be submitted with `.ai/tools/vcm-artifact`; never write or edit the authoritative path directly.
 - Write the candidate outside `.ai/vcm/`, then run `.ai/tools/vcm-artifact <kind> --file <candidate> --mode <draft|final>`. Dynamic artifacts also require the exact VCM-assigned `--path`.
 - Use `draft` while an allowed lifecycle remains incomplete. Use `final` before routing or consuming a terminal artifact. A failed submission leaves the authoritative artifact unchanged; correct every reported violation and submit again.
 - Do not route, review, or rely on a candidate file. Only the VCM-written authoritative path is workflow evidence.

@@ -20,8 +20,7 @@ export type DynamicArtifactKind =
   | "coder-worker-report"
   | "gate-review-report"
   | "memory-proposal"
-  | "harness-feedback"
-  | "retrospective-report";
+  | "harness-feedback";
 
 export type ManagedArtifactKind = ArtifactKind | DynamicArtifactKind;
 export type ArtifactSubmissionMode = "draft" | "final";

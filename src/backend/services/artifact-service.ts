@@ -384,7 +384,7 @@ async function validateDynamicArtifact(
   input: SubmitArtifactInput,
   content: string,
   workflowControlService?: Pick<WorkflowControlService, "assertRouteAuthorized">
-): Promise<{ kind: "route-message" | "coder-worker-report" | "gate-review-report" | "memory-proposal" | "harness-feedback" | "retrospective-report"; root: string; path: string }> {
+): Promise<{ kind: "route-message" | "coder-worker-report" | "gate-review-report" | "memory-proposal" | "harness-feedback"; root: string; path: string }> {
   if (input.mode !== "final") {
     throw artifactRejected(input.kind, ["Dynamic artifacts must be submitted in final mode."]);
   }
@@ -453,39 +453,11 @@ async function validateDynamicArtifact(
     validateHarnessFeedback(content);
     return { kind: input.kind, root: input.baseRepoRoot, path: artifactPath };
   }
-  if (input.kind === "retrospective-report") {
-    if (input.role !== "harness-engineer") {
-      throw artifactRejected(input.kind, ["Only Harness Engineer may submit a retrospective report."]);
-    }
-    if (!/^\.ai\/vcm\/harness-feedback\/task-retrospectives\/[A-Za-z0-9._-]+\.md$/.test(artifactPath)) {
-      throw artifactRejected(input.kind, ["Retrospective report path must be under .ai/vcm/harness-feedback/task-retrospectives/."]);
-    }
-    validateRetrospectiveReport(content);
-    return { kind: input.kind, root: input.baseRepoRoot, path: artifactPath };
-  }
   throw new VcmError({
     code: "ARTIFACT_KIND_INVALID",
     message: `Unknown managed artifact kind: ${input.kind}`,
     statusCode: 400
   });
-}
-
-function validateRetrospectiveReport(content: string): void {
-  const errors = getRetrospectiveReportErrors(content);
-  if (errors.length > 0) throw artifactRejected("retrospective-report", errors);
-}
-
-export function getRetrospectiveReportErrors(content: string): string[] {
-  const errors: string[] = [];
-  if (!/^# Task Harness Retrospective(?::\s*.+)?\s*$/m.test(content)) {
-    errors.push("Retrospective report requires '# Task Harness Retrospective: <task>'.");
-  }
-  for (const heading of ["Findings", "Feedback Dispositions", "Recommended Harness Changes", "VCM Issue Drafts"]) {
-    if (!new RegExp(`^## ${escapeRegExp(heading)}\\s*$`, "m").test(content)) {
-      errors.push(`Missing required section: ${heading}.`);
-    }
-  }
-  return errors;
 }
 
 function validateCoderWorkerReport(content: string): void {

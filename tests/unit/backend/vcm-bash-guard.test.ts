@@ -160,6 +160,18 @@ describe("vcm-bash-guard", () => {
       }, "reviewer")).resolves.toContain("vcm-artifact");
     });
 
+    it("allows Harness Engineer to write the assigned retrospective report directly", async () => {
+      const reportPath = ".ai/vcm/harness-feedback/task-retrospectives/demo-task.md";
+      await expect(runGuard({
+        tool_name: "Write",
+        tool_input: { file_path: reportPath, content: "# Task Harness Retrospective: demo-task" }
+      }, "harness-engineer")).resolves.toBeUndefined();
+      await expect(runGuard(
+        bash(`printf report > ${reportPath}`),
+        "harness-engineer"
+      )).resolves.toBeUndefined();
+    });
+
     it("denies shell writes but allows vcm-artifact submission", async () => {
       await expect(runGuard(
         bash("printf bad > .ai/vcm/handoffs/architecture-plan.md"),

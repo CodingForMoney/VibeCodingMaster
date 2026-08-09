@@ -279,13 +279,13 @@ Architect, Coder, and Tester because Docs-Only Flow assigns documentation to
 the role that owns the relevant project evidence. `docs-sync-report.md` remains
 Architect-owned post-validation synchronization for code-producing flows.
 
-The shared PreToolUse guard blocks role attempts to write managed workflow
-Markdown directly through Bash, Write, or Edit. Route messages, Coder Worker
-reports, request-scoped Gate reports, memory proposals, Harness Feedback, and
-Task Harness Retrospective reports use the same submission boundary. Workflow
-consumers still validate the accepted artifact before using it, so an invalid
-or stale file cannot advance a Gate, Final Acceptance, memory review, or
-retrospective flow.
+The shared PreToolUse guard blocks workflow-role attempts to write managed
+workflow Markdown directly through Bash, Write, or Edit. Route messages, Coder
+Worker reports, request-scoped Gate reports, memory proposals, and Harness
+Feedback use that submission boundary. Harness Engineer is a tool role rather
+than a workflow role, so it writes the assigned Task Harness Retrospective
+Result Path directly. The Stop Hook reads that report and checks required
+feedback dispositions before completing the retrospective.
 
 Memory Proposal submission paths are defined centrally with the Memory Review
 layout. A workflow role may submit only its assigned run draft; Architect may

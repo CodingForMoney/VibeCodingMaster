@@ -138,6 +138,8 @@ describe("harness-feedback-service", () => {
     expect(writes.join("\n")).toContain("Pending Feedback:\nnone");
     expect(writes.join("\n")).toContain("Write the analysis to Result Path:");
     expect(writes.join("\n")).toContain(".ai/vcm/harness-feedback/task-retrospectives/demo-task.md");
+    expect(writes.join("\n")).toContain("Write the report directly to that path. Do not use vcm-artifact.");
+    expect(writes.join("\n")).not.toContain("vcm-artifact retrospective-report");
     expect(writes.join("\n")).not.toContain("Auto Memory Review:");
 
     const marker = JSON.parse(await readFile(

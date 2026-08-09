@@ -16,7 +16,6 @@ import type {
   AutoMemoryService,
   TaskRetrospectiveMemoryReviewContext
 } from "./auto-memory-service.js";
-import { getRetrospectiveReportErrors } from "./artifact-service.js";
 import type { SessionService } from "./session-service.js";
 
 export interface HarnessFeedbackService {
@@ -444,8 +443,8 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
         : []),
       "",
       `Write the analysis to Result Path: ${resolveRepoPath(repoRoot, analysisPath)}`,
-      `Submit with: .ai/tools/vcm-artifact retrospective-report --file <candidate> --path ${analysisPath} --mode final`,
-      "End your turn after VCM accepts the result."
+      "Write the report directly to that path. Do not use vcm-artifact.",
+      "End your turn after the report is complete."
     ].join("\n");
   }
 
@@ -622,6 +621,19 @@ function assertPendingFeedbackPath(feedbackPath: string): void {
   if (!/^\.ai\/vcm\/harness-feedback\/pending\/[A-Za-z0-9._-]+\.md$/.test(feedbackPath)) {
     throw new Error(`Invalid assigned Harness Feedback path: ${feedbackPath}.`);
   }
+}
+
+function getRetrospectiveReportErrors(content: string): string[] {
+  const errors: string[] = [];
+  if (!/^# Task Harness Retrospective(?::\s*.+)?\s*$/m.test(content)) {
+    errors.push("Retrospective report requires '# Task Harness Retrospective: <task>'.");
+  }
+  for (const heading of ["Findings", "Feedback Dispositions", "Recommended Harness Changes", "VCM Issue Drafts"]) {
+    if (!new RegExp(`^## ${heading}\\s*$`, "m").test(content)) {
+      errors.push(`Missing required section: ${heading}.`);
+    }
+  }
+  return errors;
 }
 
 function parseSimpleMetadata(content: string): Record<string, string> {

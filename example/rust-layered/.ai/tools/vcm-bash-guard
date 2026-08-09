@@ -56,7 +56,7 @@ MANAGED_ARTIFACT_PATH = re.compile(
     r"gate-reviews[/\\]requests[/\\].*\.report\.md|"
     r"memory-review[/\\].*\.md|"
     r"coder-workers[/\\]reports[/\\].*\.md|"
-    r"harness-feedback[/\\](?:pending|task-retrospectives)[/\\].*\.md"
+    r"harness-feedback[/\\]pending[/\\].*\.md"
     r")"
 )
 SHELL_SEPARATOR_TOKEN = re.compile(r"^[;&|()]+$")

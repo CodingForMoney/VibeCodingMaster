@@ -29,7 +29,6 @@ KINDS = (
     "gate-review-report",
     "memory-proposal",
     "harness-feedback",
-    "retrospective-report",
 )
 DYNAMIC_KINDS = {
     "route-message",
@@ -37,7 +36,6 @@ DYNAMIC_KINDS = {
     "gate-review-report",
     "memory-proposal",
     "harness-feedback",
-    "retrospective-report",
 }
 
 

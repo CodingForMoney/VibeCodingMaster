@@ -541,8 +541,8 @@ for the reply, and then copies the user's exact authorization into the next
 Workflow Progress submission. The authorization is bound to one revision,
 flow, target, evidence, and violated rule and can be consumed only once.
 
-Role-authored workflow Markdown must be submitted through
-`.ai/tools/vcm-artifact`. Roles write candidates outside `.ai/vcm`; VCM checks
+Workflow-role Markdown must be submitted through `.ai/tools/vcm-artifact`.
+Workflow roles write candidates outside `.ai/vcm`; VCM checks
 the artifact owner, required structure, strict values, lifecycle state, and
 assigned path before atomically replacing the authoritative file. Draft mode is
 for valid in-progress state, while final mode requires a terminal artifact.
@@ -553,6 +553,11 @@ updates to managed workflow Markdown.
 Docs-Only Flow uses the shared `docs-update-report.md`, which Architect, Coder,
 or Tester may submit. The code-producing-flow `docs-sync-report.md` remains
 Architect-owned and is not reused for Docs-Only completion.
+
+Harness Engineer is not a workflow role. It writes the assigned Task Harness
+Retrospective Result Path directly; its Stop Hook reads the report and checks
+the assigned feedback dispositions without routing the report through
+`vcm-artifact`.
 
 ## 12. Gate Review
 
