@@ -34,6 +34,7 @@ import type { ProjectService } from "./project-service.js";
 import type { RoundService } from "./round-service.js";
 import type { SessionService } from "./session-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
+import type { WorkflowControlService } from "./workflow-control-service.js";
 
 export interface GateReviewService {
   getState(repoRoot: string, taskSlug: string): Promise<GateReviewIndex>;
@@ -58,6 +59,7 @@ export interface GateReviewServiceDeps {
     "getRoleSession" | "markRoleActivityRunning" | "restartRoleSession" | "resumeRoleSession" | "startRoleSession"
   >;
   roundService: Pick<RoundService, "recordRoleTurnEvent">;
+  workflowControlService?: Pick<WorkflowControlService, "getProgress" | "getState">;
   onArchitecturePlanDisposition?: (input: {
     repoRoot: string;
     taskSlug: string;
@@ -77,6 +79,7 @@ interface ReviewContext {
   taskSlug: string;
   taskRepoRoot: string;
   stateRoot: string;
+  handoffDir: string;
   config: GateReviewRuntimeConfig;
 }
 
@@ -208,6 +211,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       taskSlug,
       taskRepoRoot,
       stateRoot: projectConfig.stateRoot,
+      handoffDir: task.handoffDir,
       config: loadRuntimeConfig(reviewSettings)
     };
   }
@@ -560,8 +564,11 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       return failedIndex;
     }
 
-    const codeDiffSources = gate === "code-diff" && codeDiffInput && codeDiffSource
-      ? resolveCodeDiffSources(record, codeDiffInput, codeDiffSource)
+    const currentCodeDiffSources = gate === "code-diff" && codeDiffSource
+      ? await resolveWorkflowCodeDiffSources(deps, context, codeDiffSource)
+      : undefined;
+    const codeDiffSources = gate === "code-diff" && codeDiffInput && currentCodeDiffSources
+      ? resolveCodeDiffSources(record, codeDiffInput, currentCodeDiffSources)
       : undefined;
     const inputHash = await computeInputHash(deps, context.taskRepoRoot, gate, codeDiffInput, codeDiffSources);
     if (
@@ -2291,7 +2298,7 @@ function getSourceArtifacts(gate: GateReviewGate, codeDiffSources?: CodeDiffSour
 function resolveCodeDiffSources(
   record: GateReviewGateRecord,
   codeDiffInput: CodeDiffInput,
-  currentSource: CodeDiffSource
+  currentSources: CodeDiffSource[]
 ): CodeDiffSource[] {
   const continuingRecordedRange = record.baseCommit === codeDiffInput.baseCommit
     && (
@@ -2299,12 +2306,53 @@ function resolveCodeDiffSources(
       || record.status === "failed"
     );
   if (!continuingRecordedRange) {
-    return [currentSource];
+    return currentSources;
   }
   return [...new Set([
     ...(normalizeCodeDiffSources(record.codeDiffSources, record.codeDiffSource) ?? []),
-    currentSource
+    ...currentSources
   ])];
+}
+
+async function resolveWorkflowCodeDiffSources(
+  deps: Pick<GateReviewServiceDeps, "workflowControlService">,
+  context: ReviewContext,
+  currentSource: CodeDiffSource
+): Promise<CodeDiffSource[]> {
+  if (!deps.workflowControlService) {
+    return [currentSource];
+  }
+  try {
+    const workflowContext = {
+      taskRepoRoot: context.taskRepoRoot,
+      stateRoot: context.stateRoot,
+      handoffDir: context.handoffDir,
+      taskSlug: context.taskSlug
+    };
+    const [state, progress] = await Promise.all([
+      deps.workflowControlService.getState(workflowContext),
+      deps.workflowControlService.getProgress(workflowContext)
+    ]);
+    const startedAtSequence = state.flowRun?.startedAtSequence;
+    if (state.warnings.length > 0 || startedAtSequence === undefined) {
+      return [currentSource];
+    }
+    const sources: CodeDiffSource[] = [];
+    for (const entry of progress.history) {
+      if (entry.sequence < startedAtSequence) continue;
+      if (entry.flow === "code-change" && entry.targetRole === "coder") {
+        sources.push("coder");
+      } else if (entry.flow === "architect-debug" && entry.targetRole === "architect") {
+        sources.push("architect-debug");
+      } else if (entry.flow === "architecture-diagnosis" && entry.targetRole === "architect") {
+        sources.push("architect-diagnosis");
+      }
+    }
+    sources.push(currentSource);
+    return [...new Set(sources)];
+  } catch {
+    return [currentSource];
+  }
 }
 
 function normalizeCodeDiffSources(sources: unknown, source: unknown): CodeDiffSource[] | undefined {

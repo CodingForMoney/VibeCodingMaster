@@ -396,6 +396,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     appSettings,
     sessionService,
     roundService,
+    workflowControlService,
     onArchitecturePlanDisposition: ({ repoRoot, taskSlug, accepted }) =>
       architectRestartService.recordArchitectureGateDisposition(repoRoot, taskSlug, accepted)
   });

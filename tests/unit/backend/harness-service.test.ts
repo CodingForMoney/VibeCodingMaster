@@ -222,6 +222,8 @@ describe("createHarnessService", () => {
     expect(diagnosisReviewerAgent).toContain("One symbol's reference result cannot");
     expect(diagnosisReviewerAgent).toContain("prove the class complete");
     expect(diagnosisReviewerAgent).toContain("text matches alone are not evidence");
+    expect(diagnosisReviewerAgent).toContain("as fresh code requiring independent review");
+    expect(diagnosisReviewerAgent).toContain("apply the complete code-diff checks to every repair");
     const finalAcceptanceSkill = await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md");
     expect(finalAcceptanceSkill).toContain("`incomplete` is not acceptance evidence");
     expect(finalAcceptanceSkill).toContain("do not accept `Test Result: incomplete`");

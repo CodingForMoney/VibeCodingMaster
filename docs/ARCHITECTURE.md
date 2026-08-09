@@ -206,6 +206,16 @@ relationships remain unresolved. Coder and Reviewer use generated context, Glob,
 Grep, and complete source reads without starting separate language servers. The
 shared PreToolUse guard supervises Bash execution but does not prohibit text search.
 
+Code-diff source chains come from the current Workflow Control run rather than
+PM wording. VCM reads the confirmed dispatch history for that run and includes
+each code producer that actually appeared: Coder, Architect Debug, and
+Architecture Diagnosis. A repair entered before the first code-diff therefore
+carries the original Coder evidence and the later Architect evidence, while a
+standalone Debug or Diagnosis flow keeps only its own sources. Reviewer treats
+every repair hunk as fresh code. Changed tests remain reviewable inputs; VCM
+does not require the test tree to stay unchanged because legitimate repairs may
+strengthen or add regression coverage.
+
 `code-intelligence-service` derives project languages from the active task
 worktree's root manifests and `module-index.json`. It validates the bundled
 plugin declaration, resolves the matching language-server executable from the

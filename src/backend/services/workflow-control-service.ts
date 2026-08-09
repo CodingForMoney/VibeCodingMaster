@@ -46,6 +46,7 @@ export interface WorkflowRouteAuthorizationInput extends WorkflowControlContext 
 
 export interface WorkflowControlService {
   getState(input: WorkflowControlContext): Promise<WorkflowControlState>;
+  getProgress(input: WorkflowControlContext): Promise<WorkflowProgressDocument>;
   requestUserInput(input: WorkflowControlContext, question: string): Promise<WorkflowControlState>;
   resolveUserInput(input: WorkflowControlContext): Promise<WorkflowControlState>;
   submitProgress(input: WorkflowControlContext, content: string): Promise<WorkflowProgressSubmissionResult>;
@@ -354,6 +355,7 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
 
   return {
     getState,
+    getProgress: (input) => readProgress(deps.fs, input),
     requestUserInput,
     resolveUserInput,
     submitProgress,

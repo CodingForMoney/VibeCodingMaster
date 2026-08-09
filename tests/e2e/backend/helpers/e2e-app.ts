@@ -215,6 +215,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     appSettings,
     sessionService,
     roundService,
+    workflowControlService,
     onArchitecturePlanDisposition: ({ repoRoot, taskSlug, accepted }) =>
       architectRestartService.recordArchitectureGateDisposition(repoRoot, taskSlug, accepted),
     reportPollIntervalMs: 10

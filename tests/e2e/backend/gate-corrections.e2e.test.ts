@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { renderWorkflowProgress } from "../../../src/backend/services/workflow-control-service.js";
 import { renderTestReportTemplate } from "../../../src/backend/templates/handoff.js";
 import type {
   GateReviewDecision,
@@ -127,6 +128,168 @@ describe("backend E2E Gate Review correction loops", () => {
     expect(prompts.at(-1)).toContain(".ai/vcm/handoffs/architect-debug.md");
   });
 
+  it("reconstructs coder and Architect Debug sources before the first code-diff review", async () => {
+    const env = await createMockClaudeE2eApp({ workflowControl: true });
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "mock-pre-gate-debug");
+    await updateGateSettings(env.app, task.taskSlug, { "code-diff": true });
+    await startRole(env.app, task.taskSlug, "project-manager");
+    registerPmGateCallback(env, "code-diff");
+
+    env.mockRuntime.onPrompt("reviewer", "[VCM GATE REVIEW]", async (ctx) => {
+      await writeGateReport(ctx, "approve");
+    });
+
+    await writeCompleteArchitecturePlan(task.worktreePath, task.taskSlug, "Initial delivery plan.");
+    await writeReadyCoderCompletion(task.worktreePath, task.taskSlug);
+    await writeCompletedArchitectDebug(task.worktreePath, task.taskSlug);
+    await fs.writeFile(
+      path.join(task.worktreePath, ".ai/vcm/handoffs/test-report.md"),
+      validTestReport(task.taskSlug, "Regression behavior -> L2 -> repaired implementation -> pass."),
+      "utf8"
+    );
+
+    const testPath = path.join(task.worktreePath, "tests/feature.test.ts");
+    await fs.mkdir(path.dirname(testPath), { recursive: true });
+    await fs.writeFile(path.join(task.worktreePath, "feature.txt"), "incomplete behavior\n", "utf8");
+    await fs.writeFile(testPath, "expect(runFeature()).toBeDefined();\n", "utf8");
+    await git(task.worktreePath, "add", "feature.txt", "tests/feature.test.ts");
+    await git(task.worktreePath, "commit", "-m", "implement feature");
+
+    await fs.writeFile(path.join(task.worktreePath, "feature.txt"), "correct boundary behavior\n", "utf8");
+    await fs.writeFile(testPath, "expect(runFeature()).toBe('correct boundary behavior');\n", "utf8");
+    await git(task.worktreePath, "add", "feature.txt", "tests/feature.test.ts");
+    await git(task.worktreePath, "commit", "-m", "repair feature boundary");
+
+    const timestamp = "2026-08-09T00:00:00.000Z";
+    const workflowProgress = renderWorkflowProgress({
+      taskSlug: task.taskSlug,
+      revision: 5,
+      flow: "architect-debug",
+      status: "active",
+      history: [
+        workflowHistory(1, "code-change", "architect", timestamp),
+        workflowHistory(2, "code-change", "coder", timestamp),
+        workflowHistory(3, "code-change", "tester", timestamp),
+        workflowHistory(4, "architect-debug", "architect", timestamp),
+        workflowHistory(5, "architect-debug", "tester", timestamp)
+      ]
+    });
+    await fs.writeFile(
+      path.join(task.worktreePath, ".ai/vcm/handoffs/workflow-progress.md"),
+      workflowProgress,
+      "utf8"
+    );
+    await fs.writeFile(
+      path.join(task.worktreePath, ".ai/vcm/workflow-control.json"),
+      JSON.stringify({
+        version: 1,
+        taskSlug: task.taskSlug,
+        awaitingUser: null,
+        pendingDispatch: null,
+        activeDispatch: null,
+        flowRun: {
+          rootFlow: "code-change",
+          activeBranch: "architect-debug",
+          startedAtSequence: 1
+        },
+        userAuthorizations: [],
+        warnings: [],
+        updatedAt: timestamp
+      }, null, 2) + "\n",
+      "utf8"
+    );
+
+    expect((await requestGateReview(env.app, task.taskSlug, "code-diff", {
+      codeDiffSource: "architect-debug"
+    })).status).toBe("started");
+    const approved = await waitForGateDecision(env.app, task.taskSlug, "code-diff", "approve");
+    expect(approved.gates["code-diff"].codeDiffSources).toEqual(["coder", "architect-debug"]);
+    expect(approved.gates["code-diff"].commits).toHaveLength(2);
+    expect(approved.gates["code-diff"].changedFiles).toEqual(["feature.txt", "tests/feature.test.ts"]);
+
+    const reviewer = env.mockRuntime.getSessionByRole(task.taskSlug, "reviewer");
+    const prompt = env.mockRuntime.getWrites(reviewer!.id).find((write) => write.includes("[VCM GATE REVIEW]"));
+    expect(prompt).toContain("Code sources: coder -> architect-debug");
+    expect(prompt).toContain(".ai/vcm/handoffs/architecture-plan.md");
+    expect(prompt).toContain(".ai/vcm/handoffs/coder-completion.md");
+    expect(prompt).toContain(".ai/vcm/handoffs/architect-debug.md");
+    expect(prompt).toContain("tests/feature.test.ts");
+  });
+
+  it("keeps a standalone Architect Debug review separate from earlier flow history", async () => {
+    const env = await createMockClaudeE2eApp({ workflowControl: true });
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "mock-standalone-debug");
+    await updateGateSettings(env.app, task.taskSlug, { "code-diff": true });
+    await startRole(env.app, task.taskSlug, "project-manager");
+    registerPmGateCallback(env, "code-diff");
+
+    env.mockRuntime.onPrompt("reviewer", "[VCM GATE REVIEW]", async (ctx) => {
+      await writeGateReport(ctx, "approve");
+    });
+
+    await writeCompletedArchitectDebug(task.worktreePath, task.taskSlug);
+    await fs.writeFile(
+      path.join(task.worktreePath, ".ai/vcm/handoffs/test-report.md"),
+      validTestReport(task.taskSlug, "Standalone repair behavior -> L2 -> repaired implementation -> pass."),
+      "utf8"
+    );
+    await fs.writeFile(path.join(task.worktreePath, "feature.txt"), "standalone debug repair\n", "utf8");
+    await git(task.worktreePath, "add", "feature.txt");
+    await git(task.worktreePath, "commit", "-m", "repair standalone feature");
+
+    const timestamp = "2026-08-09T01:00:00.000Z";
+    await fs.writeFile(
+      path.join(task.worktreePath, ".ai/vcm/handoffs/workflow-progress.md"),
+      renderWorkflowProgress({
+        taskSlug: task.taskSlug,
+        revision: 2,
+        flow: "architect-debug",
+        status: "active",
+        history: [
+          workflowHistory(1, "code-change", "coder", timestamp),
+          workflowHistory(2, "architect-debug", "architect", timestamp)
+        ]
+      }),
+      "utf8"
+    );
+    await fs.writeFile(
+      path.join(task.worktreePath, ".ai/vcm/workflow-control.json"),
+      JSON.stringify({
+        version: 1,
+        taskSlug: task.taskSlug,
+        awaitingUser: null,
+        pendingDispatch: null,
+        activeDispatch: null,
+        flowRun: {
+          rootFlow: "architect-debug",
+          startedAtSequence: 2
+        },
+        userAuthorizations: [],
+        warnings: [],
+        updatedAt: timestamp
+      }, null, 2) + "\n",
+      "utf8"
+    );
+
+    expect((await requestGateReview(env.app, task.taskSlug, "code-diff", {
+      codeDiffSource: "architect-debug"
+    })).status).toBe("started");
+    const approved = await waitForGateDecision(env.app, task.taskSlug, "code-diff", "approve");
+    expect(approved.gates["code-diff"].codeDiffSources).toEqual(["architect-debug"]);
+
+    const reviewer = env.mockRuntime.getSessionByRole(task.taskSlug, "reviewer");
+    const prompt = env.mockRuntime.getWrites(reviewer!.id).find((write) => write.includes("[VCM GATE REVIEW]"));
+    expect(prompt).toContain("Code sources: architect-debug");
+    expect(prompt).toContain(".ai/vcm/handoffs/architect-debug.md");
+    expect(prompt).not.toContain(".ai/vcm/handoffs/coder-completion.md");
+  });
+
   it("re-reviews revised Tester evidence and does not create Final Acceptance while rejected", async () => {
     const env = await createMockClaudeE2eApp();
     cleanups.push(() => env.close());
@@ -167,6 +330,21 @@ describe("backend E2E Gate Review correction loops", () => {
     expect(reviewCount).toBe(2);
   });
 });
+
+function workflowHistory(
+  sequence: number,
+  flow: "code-change" | "architect-debug" | "architecture-diagnosis",
+  targetRole: "architect" | "coder" | "tester",
+  confirmedAt: string
+) {
+  return {
+    sequence,
+    flow,
+    targetRole,
+    evidence: `dispatch-${sequence}`,
+    confirmedAt
+  };
+}
 
 function registerPmGateCallback(
   env: Awaited<ReturnType<typeof createMockClaudeE2eApp>>,

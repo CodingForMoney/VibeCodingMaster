@@ -269,6 +269,11 @@ corrective commits; review the complete named set against the combined evidence.
 completion reports, existing code, comments, and tests are evidence, not
 authority. Determine whether the committed implementation is actually correct.
 
+Treat every production and test hunk introduced by \`architect-debug\` or
+\`architect-diagnosis\` as fresh code requiring independent review. Do not reduce
+review to confirming that the reported symptom disappeared or that the recorded
+root cause was addressed; apply the complete code-diff checks to every repair.
+
 Before deciding:
 
 - Inspect every changed file and diff hunk. Read the complete implementation of
