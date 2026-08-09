@@ -6,7 +6,11 @@ import type {
   HarnessFileStatus,
   HarnessStatusReport
 } from "../../shared/types/harness.js";
-import type { AutoMemoryStateReport, MemoryReviewRunSummary } from "../../shared/types/memory.js";
+import type {
+  AutoMemoryStateReport,
+  DurableDocAssignmentState,
+  MemoryReviewRunSummary
+} from "../../shared/types/memory.js";
 import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel, SessionModelOption } from "../../shared/types/session.js";
 import { apiClient } from "../state/api-client.js";
 import { formatUiError } from "../state/error-format.js";
@@ -273,6 +277,24 @@ export function HarnessStudioModal({
     }
   }
 
+  async function retryDurableDocAssignment(assignment: DurableDocAssignmentState) {
+    if (!taskSlug) {
+      return;
+    }
+    setFileBusy(true);
+    setFileError(null);
+    try {
+      onMemoryStateChange(await apiClient.retryDurableDocAssignment({
+        taskSlug,
+        assignmentId: assignment.id
+      }));
+    } catch (error) {
+      setFileError(formatUiError(`Retry durable document assignment ${assignment.id}`, error));
+    } finally {
+      setFileBusy(false);
+    }
+  }
+
   if (!open) {
     return null;
   }
@@ -362,6 +384,7 @@ export function HarnessStudioModal({
                     onViewDiff={openMemoryDiff}
                     onRevert={(run) => void revertMemoryRun(run)}
                     onRetry={() => void retryMemoryReview()}
+                    onRetryAssignment={(assignment) => void retryDurableDocAssignment(assignment)}
                   />
                   <HarnessFeedbackInbox state={feedbackState} busy={busy} taskSlug={taskSlug} onSend={onSendFeedback} />
                   <HarnessCollapsibleSection title="Overview">
@@ -563,7 +586,8 @@ function MemorySection({
   onSelect,
   onViewDiff,
   onRevert,
-  onRetry
+  onRetry,
+  onRetryAssignment
 }: {
   state: AutoMemoryStateReport | null;
   busy: boolean;
@@ -573,7 +597,11 @@ function MemorySection({
   onViewDiff(run: MemoryReviewRunSummary): void;
   onRevert(run: MemoryReviewRunSummary): void;
   onRetry(): void;
+  onRetryAssignment(assignment: DurableDocAssignmentState): void;
 }) {
+  const assignments = state?.active?.assignments.length
+    ? state.active.assignments
+    : state?.runs.flatMap((run) => run.assignments) ?? [];
   return (
     <HarnessCollapsibleSection title="Memory">
       <div className="harness-memory-status">
@@ -603,6 +631,31 @@ function MemorySection({
           </li>
         )) ?? <li><span>No memory files.</span></li>}
       </ol>
+      {assignments.length ? (
+        <div className="harness-memory-runs">
+          <h4>Durable Documentation</h4>
+          <ol className="harness-studio-file-list">
+            {assignments.map((assignment) => (
+              <li key={assignment.id}>
+                <span className="harness-studio-file-path-button" title={assignment.id}>{assignment.targetPath}</span>
+                <code>{assignment.owner ?? "PM"}</code>
+                <StatusBadge status={assignmentStatusBadge(assignment.status)} />
+                {assignment.status === "failed" ? (
+                  <button
+                    className="harness-memory-action-button"
+                    type="button"
+                    disabled={busy}
+                    title={assignment.error}
+                    onClick={() => onRetryAssignment(assignment)}
+                  >
+                    Retry
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
       {state?.runs.length ? (
         <div className="harness-memory-runs">
           <h4>Applied History</h4>
@@ -665,13 +718,23 @@ function formatBytes(value: number): string {
 }
 
 function memoryStatusBadge(status: AutoMemoryStateReport["status"] | undefined) {
-  if (status === "collecting" || status === "reviewing") {
+  if (status === "collecting" || status === "reviewing" || status === "documenting") {
     return "running" as const;
   }
   if (status === "failed") {
     return "failed" as const;
   }
   return status === "idle" ? "ok" as const : "unknown" as const;
+}
+
+function assignmentStatusBadge(status: DurableDocAssignmentState["status"]) {
+  if (status === "completed") {
+    return "ok" as const;
+  }
+  if (status === "failed") {
+    return "failed" as const;
+  }
+  return "running" as const;
 }
 
 async function writeClipboardText(text: string): Promise<void> {

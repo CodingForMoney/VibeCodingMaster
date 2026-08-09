@@ -301,6 +301,9 @@ function createCoordinator(input: {
       }
     },
     harnessFeedbackService: {
+      async completeWaitingTaskRetrospective() {
+        return false;
+      },
       async startTaskRetrospective() {
         input.calls.push("task-retrospective");
         return {} as never;

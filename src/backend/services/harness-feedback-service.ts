@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import type { ClaudeHookEventName } from "../../shared/types/claude-hook.js";
+import type { AutoMemoryReviewStatus } from "../../shared/types/memory.js";
 import type {
   HarnessFeedbackQueueItem,
   HarnessFeedbackStateReport,
@@ -23,6 +24,11 @@ export interface HarnessFeedbackService {
   sendPendingFeedback(repoRoot: string, input: SendPendingFeedbackInput): Promise<RoleSessionRecord>;
   startTaskRetrospective(repoRoot: string, input: StartTaskRetrospectiveInput): Promise<HarnessFeedbackStateReport>;
   handleTaskRetrospectiveHook(repoRoot: string, input: TaskRetrospectiveHookInput): Promise<boolean>;
+  completeWaitingTaskRetrospective(
+    repoRoot: string,
+    taskSlug: string,
+    memoryStatus: AutoMemoryReviewStatus
+  ): Promise<boolean>;
   assertHarnessEngineerAvailable(repoRoot: string): Promise<void>;
 }
 
@@ -41,7 +47,7 @@ export interface StartTaskRetrospectiveInput {
 export interface TaskRetrospectiveHookInput {
   taskSlug: string;
   eventName: ClaudeHookEventName;
-  memoryReviewSucceeded: boolean;
+  memoryReviewStatus: AutoMemoryReviewStatus;
 }
 
 export interface HarnessFeedbackServiceDeps {
@@ -67,7 +73,7 @@ interface TaskRetrospectiveMarker {
   version: 1;
   taskSlug: string;
   trigger: TaskHarnessRetrospectiveTrigger;
-  status: "triggered" | "running" | "completed" | "failed";
+  status: "triggered" | "running" | "waiting-docs" | "completed" | "failed";
   analysisPath: string;
   finalAcceptanceHash: string;
   pendingFeedbackPaths: string[];
@@ -238,7 +244,7 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
         ]
       : ["Report is empty."];
     const reportReady = reportErrors.length === 0;
-    if (!reportReady || (marker.memoryRunId && !input.memoryReviewSucceeded)) {
+    if (!reportReady || (marker.memoryRunId && input.memoryReviewStatus === "failed")) {
       await persistTaskRetrospectiveMarker(repoRoot, {
         ...marker,
         status: "failed",
@@ -250,6 +256,47 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
       });
       return true;
     }
+    if (marker.memoryRunId && input.memoryReviewStatus === "documenting") {
+      await persistTaskRetrospectiveMarker(repoRoot, {
+        ...marker,
+        status: "waiting-docs",
+        updatedAt: timestamp
+      });
+      return true;
+    }
+    await completeTaskRetrospective(repoRoot, marker);
+    return true;
+  }
+
+  async function completeWaitingTaskRetrospective(
+    repoRoot: string,
+    taskSlug: string,
+    memoryStatus: AutoMemoryReviewStatus
+  ): Promise<boolean> {
+    const marker = await loadTaskRetrospectiveMarker(repoRoot, taskSlug);
+    if (!marker || marker.status !== "waiting-docs") {
+      return false;
+    }
+    if (memoryStatus === "documenting") {
+      return true;
+    }
+    if (memoryStatus === "failed") {
+      const timestamp = now();
+      await persistTaskRetrospectiveMarker(repoRoot, {
+        ...marker,
+        status: "failed",
+        failedAt: timestamp,
+        updatedAt: timestamp,
+        error: "Task Harness Retrospective durable-document assignment failed."
+      });
+      return true;
+    }
+    await completeTaskRetrospective(repoRoot, marker);
+    return true;
+  }
+
+  async function completeTaskRetrospective(repoRoot: string, marker: TaskRetrospectiveMarker): Promise<void> {
+    const timestamp = now();
     try {
       await removeProcessedFeedback(repoRoot, marker.pendingFeedbackPaths ?? []);
     } catch (error) {
@@ -260,7 +307,7 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
         updatedAt: timestamp,
         error: `VCM could not remove processed Harness Feedback: ${errorMessage(error)}`
       });
-      return true;
+      return;
     }
     await persistTaskRetrospectiveMarker(repoRoot, {
       ...marker,
@@ -268,7 +315,6 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
       completedAt: timestamp,
       updatedAt: timestamp
     });
-    return true;
   }
 
   async function assertHarnessEngineerAvailable(_repoRoot: string): Promise<void> {
@@ -390,6 +436,16 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
             `Current memory snapshot: ${memoryReview.currentMemoryPath}`,
             "Active memory files:",
             ...memoryReview.activeMemoryPaths.map((memoryPath) => `- ${memoryPath}`),
+            "Proposal candidates:",
+            ...(memoryReview.proposalCandidates.length > 0
+              ? memoryReview.proposalCandidates.map((candidate) => [
+                  candidate.id,
+                  `source=${candidate.source}`,
+                  `operation=${candidate.operation}`,
+                  `target=${candidate.target}`,
+                  `entry=${candidate.content ?? candidate.existing ?? "none"}`
+                ].join(" | "))
+              : ["none"]),
             ...(memoryReview.planningCandidatePath
               ? [`Architect planning-session candidate: ${memoryReview.planningCandidatePath}`]
               : []),
@@ -397,48 +453,22 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
             "Review every memory candidate against final task evidence while performing this retrospective.",
             "The snapshot files contain only the matching pre-review <VCM-memory> block content.",
             "Before evaluating proposals, review every substantive entry in every current memory snapshot against current code, documentation, and final task evidence.",
-            "For each existing entry, decide retain, update, remove, or move-to-durable-doc. Record the decision reason, the impact of removing it, and whether memory or a durable document is the correct source.",
-            "Complete this full existing-memory review even when every proposal says no-change.",
-            "Then evaluate every proposal item independently. Do not accept or reject a whole role draft as one decision.",
-            "For every Add or Update candidate, independently explain why the memory is necessary, what fails if it is absent, and why memory or a durable document is the correct destination.",
-            "Do not copy the proposer rationale as the review. Verify it against current code, durable documentation, and final task evidence.",
-            "Keep only verified, durable, reusable project knowledge. Merge duplicates and keep role-specific knowledge in the matching role file.",
-            "Do not record task narrative, temporary state, unverified conclusions, or Harness rules in memory.",
-            "Final content must be one exact line written to the selected active <VCM-memory> block. Use none when the decision does not keep memory.",
-            "For keep-in-memory use Durable doc disposition: memory. For keep-memory-reference use memory-reference. For move-to-durable-doc use durable-doc.",
-            "Existing-memory Target must be shared or the exact role name. Decision must be retain, update, remove, or move-to-durable-doc.",
-            "Durable doc disposition must be memory, durable-doc, or memory-reference. Use Durable doc path: none with memory and an actual path with the other dispositions.",
-            "Do not keep full content in memory when durable-doc is correct. Use memory-reference only when an ongoing role needs the document pointer.",
-            "Use none as the complete Existing Memory Decisions body only when no substantive existing memory entry exists.",
-            "Apply the reviewed result directly to the <VCM-memory> blocks in the listed active memory files. Do not change any content outside those blocks.",
-            "If memory changes, commit only the changed active memory files before ending the turn. Use commit message: [VCM Harness] Update VCM memory. If memory is unchanged, do not create a commit.",
-            "Use this exact block in the retrospective report and replace each option or placeholder with one allowed value or a concise summary:",
+            "Evaluate each proposal independently. Keep only verified, durable, reusable project knowledge; do not keep task narrative, temporary state, unverified conclusions, or Harness rules in memory.",
+            "For every existing entry and proposal, record why the decision is necessary, the impact if the knowledge is absent, the evidence checked, and whether a durable document is the correct source.",
+            "When the decision is move-to-durable-doc, remove the entry from memory now and add one durableDocAssignment. Do not wait for the durable document update before removing memory.",
+            "Apply the reviewed result directly to the listed <VCM-memory> blocks. Do not change content outside those blocks.",
+            "If memory changes, commit only the changed active memory files with message [VCM Harness] Update VCM memory. If memory is unchanged, do not create a commit.",
+            `Write the complete machine-readable review to: ${memoryReview.reviewResultPath}`,
+            "The JSON root must be: {\"version\":1,\"runId\":\"<assigned run id>\",\"memoryCommit\":\"<full commit or none>\",\"decisions\":[],\"durableDocAssignments\":[]}.",
+            "Each decision must contain itemId, source (existing|proposal), target, entry, decision, reason, impactIfAbsent, evidence (non-empty array), finalContent, and durableDocPath.",
+            "Existing decisions use retain|update|remove|move-to-durable-doc. Add or Update proposal decisions use keep-in-memory|keep-memory-reference|move-to-durable-doc|reject; Remove proposal decisions use remove|retain. Proposal itemId must equal the assigned candidate ID.",
+            "Each durableDocAssignment must contain sourceMemoryPath, sourceEntry, targetPath, content, reason, and evidence (non-empty array). Use a project-relative Markdown target outside .ai/vcm.",
+            "In the retrospective report, include only this memory summary:",
             "",
             "## Memory Review",
-            "Existing memory reviewed: complete",
-            "",
-            "### Proposal Decisions",
-            ...(memoryReview.proposalCandidates.length > 0
-              ? memoryReview.proposalCandidates.flatMap(renderMemoryProposalDecisionTemplate)
-              : ["none"]),
-            "",
-            "### Existing Memory Decisions",
-            "#### Item 1",
-            "Target: shared",
-            "Existing: <exact existing memory entry>",
-            "Decision: retain",
-            "Reason: <why this decision is correct>",
-            "Impact if removed: <specific future role or task failure>",
-            "Durable doc disposition: memory",
-            "Durable doc path: none",
-            "Evidence: <current code, durable documentation, or final task evidence>",
-            "",
-            "### Existing Memory Changes",
-            "- retained: <summary or none>",
-            "- updated: <summary or none>",
-            "- removed: <summary or none>",
-            "",
-            "Reviewed memory set: complete"
+            "Memory commit: <full commit or none>",
+            `Review result: ${memoryReview.reviewResultPath}`,
+            "Durable document assignments: <count>"
           ]
         : []),
       "",
@@ -446,41 +476,6 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
       "Write the report directly to that path. Do not use vcm-artifact.",
       "End your turn after the report is complete."
     ].join("\n");
-  }
-
-  function renderMemoryProposalDecisionTemplate(
-    candidate: TaskRetrospectiveMemoryReviewContext["proposalCandidates"][number]
-  ): string[] {
-    if (candidate.operation === "remove") {
-      return [
-        `#### Candidate ${candidate.id}`,
-        `Source: ${candidate.source}`,
-        "Operation: remove",
-        `Target: ${candidate.target}`,
-        `Existing: ${candidate.existing}`,
-        "Decision: remove|retain",
-        "Reason: <why the proposed removal should be applied or rejected>",
-        "Evidence checked: <current code, durable documentation, or final task evidence>",
-        ""
-      ];
-    }
-    return [
-      `#### Candidate ${candidate.id}`,
-      `Source: ${candidate.source}`,
-      `Operation: ${candidate.operation}`,
-      `Target: ${candidate.target}`,
-      `Candidate: ${candidate.content}`,
-      "Decision: keep-in-memory|keep-memory-reference|move-to-durable-doc|reject",
-      "Final target: shared|project-manager|architect|coder|tester|reviewer|harness-engineer|none",
-      "Why memory is necessary: <independent reason, or why it is not necessary>",
-      "Impact if absent: <specific impact, or why no durable impact exists>",
-      "Durable doc disposition: memory|durable-doc|memory-reference",
-      "Durable doc analysis: <why this destination is correct>",
-      "Durable doc path: <none or a project-relative durable doc path>",
-      "Evidence checked: <current code, durable documentation, or final task evidence>",
-      "Final content: <exact one-line reviewed-memory content or none>",
-      ""
-    ];
   }
 
   function buildPendingFeedbackPrompt(repoRoot: string, feedbackPath: string): string {
@@ -550,6 +545,7 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
     sendPendingFeedback,
     startTaskRetrospective,
     handleTaskRetrospectiveHook,
+    completeWaitingTaskRetrospective,
     assertHarnessEngineerAvailable
   };
 }

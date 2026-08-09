@@ -84,7 +84,10 @@ export interface ClaudeHookServiceDeps {
     AutoMemoryService,
     "isRoleMemoryTurn" | "handleRoleHook" | "handleHarnessEngineerHook" | "getState"
   >;
-  harnessFeedbackService?: Pick<HarnessFeedbackService, "handleTaskRetrospectiveHook">;
+  harnessFeedbackService?: Pick<
+    HarnessFeedbackService,
+    "handleTaskRetrospectiveHook" | "completeWaitingTaskRetrospective"
+  >;
   gatewayService?: Pick<GatewayService, "handlePmStop" | "handleRoleStopFailure">;
   jobGuard?: Pick<JobGuardService, "evaluateStop" | "notePromptSubmitted">;
   architectRestartService?: Pick<
@@ -245,7 +248,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
           {
             taskSlug: activeTask.taskSlug,
             eventName,
-            memoryReviewSucceeded: memoryState?.status !== "failed"
+            memoryReviewStatus: memoryState?.status ?? "idle"
           }
         )
       : false;
@@ -747,6 +750,19 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     if (!deps.autoMemoryService || !(await deps.autoMemoryService.isRoleMemoryTurn(context.taskRepoRoot, input.role))) {
       return undefined;
     }
+    const prompt = stringOrUndefined(input.event.prompt);
+    if (
+      eventName === "UserPromptSubmit"
+      && input.role === "project-manager"
+      && prompt
+      && isDirectUserPrompt(prompt)
+      && deps.workflowControlService
+    ) {
+      const workflowState = await deps.workflowControlService.getState(createWorkflowControlContext(context));
+      if (workflowState.awaitingUser) {
+        await deps.workflowControlService.resolveUserInput(createWorkflowControlContext(context));
+      }
+    }
     const session = await deps.sessionService.recordClaudeHookEvent(context.project.repoRoot, {
       taskSlug: context.taskSlug,
       role: input.role,
@@ -786,6 +802,17 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       role: input.role,
       eventName
     });
+    if (eventName === "Stop") {
+      const memoryState = await deps.autoMemoryService.getState(
+        context.project.repoRoot,
+        context.taskRepoRoot
+      );
+      await deps.harnessFeedbackService?.completeWaitingTaskRetrospective(
+        context.project.repoRoot,
+        context.taskSlug,
+        memoryState.status
+      );
+    }
     return {
       ok: true,
       eventName,

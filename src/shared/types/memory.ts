@@ -8,7 +8,7 @@ export const VCM_MEMORY_ROLE_NAMES = [
 ] as const;
 
 export type VcmMemoryRoleName = typeof VCM_MEMORY_ROLE_NAMES[number];
-export type AutoMemoryReviewStatus = "idle" | "collecting" | "reviewing" | "failed";
+export type AutoMemoryReviewStatus = "idle" | "collecting" | "reviewing" | "documenting" | "failed";
 export type MemoryReviewRunStatus = "applied" | "failed" | "reverted";
 export type MemoryReviewRunSource = "auto" | "user";
 export type MemoryReviewTrigger = "manual" | "auto";
@@ -18,8 +18,41 @@ export type AutoMemoryDisposition =
   | "pending"
   | "collecting"
   | "reviewing"
+  | "documenting"
   | "completed"
   | "failed";
+
+export type DurableDocAssignmentOwner = "architect" | "coder" | "tester";
+export type DurableDocAssignmentStatus =
+  | "waiting-owner"
+  | "resolving-owner"
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed";
+
+export interface DurableDocAssignmentState {
+  id: string;
+  runId: string;
+  sourceMemoryPath: string;
+  sourceEntry: string;
+  targetPath: string;
+  content: string;
+  reason: string;
+  evidence: string[];
+  owner?: DurableDocAssignmentOwner;
+  requestedOwner?: DurableDocAssignmentOwner;
+  status: DurableDocAssignmentStatus;
+  reportPath: string;
+  createdAt: string;
+  updatedAt: string;
+  dispatchedAt?: string;
+  completedAt?: string;
+  baseCommit?: string;
+  reportHashBefore?: string;
+  commit?: string;
+  error?: string;
+}
 
 export interface TaskRetrospectiveMemoryReadiness {
   ready: boolean;
@@ -55,6 +88,7 @@ export interface ActiveMemoryReview {
   updatedAt: string;
   currentRole?: MemoryDraftState["role"];
   drafts: MemoryDraftState[];
+  assignments: DurableDocAssignmentState[];
   trigger: MemoryReviewTrigger;
   error?: string;
 }
@@ -71,6 +105,7 @@ export interface MemoryReviewRunSummary {
   finalAcceptanceHash?: string;
   trigger?: MemoryReviewTrigger;
   diff: string;
+  assignments: DurableDocAssignmentState[];
   canRevert: boolean;
   error?: string;
 }
@@ -96,4 +131,15 @@ export interface RevertMemoryRunRequest {
 
 export interface RetryMemoryReviewRequest {
   taskSlug?: string;
+}
+
+export interface RetryDurableDocAssignmentRequest {
+  taskSlug?: string;
+  assignmentId: string;
+}
+
+export interface ResolveDurableDocAssignmentOwnerRequest {
+  taskSlug?: string;
+  assignmentId: string;
+  owner: DurableDocAssignmentOwner;
 }

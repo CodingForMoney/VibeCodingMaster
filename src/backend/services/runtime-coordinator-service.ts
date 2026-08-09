@@ -45,7 +45,10 @@ export interface RuntimeCoordinatorServiceDeps {
   >;
   translationService: Pick<TranslationService, "startSession" | "stopTask">;
   harnessService: Pick<HarnessService, "getHarnessStatus">;
-  harnessFeedbackService: Pick<HarnessFeedbackService, "startTaskRetrospective">;
+  harnessFeedbackService: Pick<
+    HarnessFeedbackService,
+    "startTaskRetrospective" | "completeWaitingTaskRetrospective"
+  >;
   autoMemoryService: Pick<AutoMemoryService, "reconcileTask" | "getTaskRetrospectiveReadiness">;
   roundService: Pick<RoundService, "getSessionRoundState">;
   roleStallDetector: Pick<RoleStallDetectorService, "reconcileTask" | "clearProject" | "stop">;
@@ -139,10 +142,15 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
         await deps.translationService.stopTask(taskRepoRoot, activeTask.taskSlug).catch(() => undefined);
       }
 
-      await reconcileAutoMemory(
+      const memoryState = await reconcileAutoMemory(
         repoRoot,
         activeTask,
         preferences.autoTaskHarnessReviewEnabled ? "auto" : undefined
+      );
+      await deps.harnessFeedbackService.completeWaitingTaskRetrospective(
+        repoRoot,
+        activeTask.taskSlug,
+        memoryState.status
       );
       const memoryReadiness = await getTaskRetrospectiveMemoryReadiness(repoRoot, activeTask);
       if ((preferences.autoTaskHarnessReviewEnabled || memoryReadiness.trigger) && memoryReadiness.ready) {

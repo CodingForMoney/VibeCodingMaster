@@ -40,6 +40,12 @@ ${renderRoleMemoryRules("tester")}
 
 ### Docs-Only Flow
 
+- For a \`[VCM Durable Documentation Assignment]\`, verify and update the assigned
+  durable document and directly related documentation, run applicable
+  documentation checks, commit the result, and submit \`docs-update-report.md\`
+  with the exact assigned Assignment ID. This backend assignment does not start
+  Docs-Only Flow.
+
 - Verify the assigned documentation against current project evidence, update the required documentation, run applicable documentation checks, and commit the changes.
 - Submit \`.ai/vcm/handoffs/docs-update-report.md\` through \`vcm-artifact\` with the decision, changed and reviewed documents, evidence, checks, commit, and remaining documentation issues.
 - Do not submit \`test-report.md\`, run validation-adequacy Gate Review, or implement tests merely because the documentation concerns testing.

@@ -549,7 +549,7 @@ ${renderArtifactOptions(DOCS_REPORT_DECISIONS)}
 `;
 }
 
-export function renderDocsUpdateReportTemplate(taskSlug: string): string {
+export function renderDocsUpdateReportTemplate(taskSlug: string, assignmentId = "docs-only"): string {
   return `# Docs Update Report: ${taskSlug}
 
 ${CURRENT_HANDOFF_NOTICE}
@@ -557,6 +557,10 @@ ${CURRENT_HANDOFF_NOTICE}
 ## Summary
 
 TBD
+
+## Assignment ID
+
+${assignmentId}
 
 ## Documents Updated
 

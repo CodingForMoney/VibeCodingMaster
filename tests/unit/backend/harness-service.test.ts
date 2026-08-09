@@ -21,7 +21,7 @@ describe("createHarnessService", () => {
   it("plans and applies recommended harness files when they are missing", async () => {
     const fs = createMemoryFs();
     const service = createHarnessService({ fs });
-    const expectedHarnessFileCount = 34;
+    const expectedHarnessFileCount = 35;
 
     const status = await service.getHarnessStatus("/repo");
     expect(status.needsApply).toBe(true);

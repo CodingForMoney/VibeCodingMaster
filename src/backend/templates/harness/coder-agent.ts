@@ -78,6 +78,11 @@ ${renderRoleMemoryRules("coder")}
 
 ### Handoff
 
+- For a \`[VCM Durable Documentation Assignment]\`, verify and update the assigned
+  durable document and directly related documentation, run applicable checks,
+  commit the result, and submit \`docs-update-report.md\` with the exact assigned
+  Assignment ID. This backend assignment does not start Docs-Only Flow.
+
 - In Docs-Only Flow, commit the documentation changes and submit \`.ai/vcm/handoffs/docs-update-report.md\` through \`vcm-artifact\` with the decision, changed and reviewed documents, evidence, checks, commit, and remaining documentation issues. Do not submit \`coder-completion.md\` for Docs-Only work.
 - Submit \`.ai/vcm/handoffs/coder-completion.md\` before routing back to project-manager: write a candidate outside \`.ai/vcm\`, then run \`.ai/tools/vcm-artifact coder-completion --file <candidate> --mode draft|final\`. This file is the complete, self-contained current implementation completion evidence, not a log. Each revision must restate every Scaffold Manifest disposition, changed file, helper, deviation, generated-context result, baseline-test change, L0/L1 command and result, worker result, commit, and objective failure still needed to review the current implementation without a prior revision. Replace stale content instead of appending history.
 - After committing the actual implementation state and before submitting a final \`coder-completion.md\`, run \`.ai/tools/check-scaffold-ledger --mode completion --completion <candidate>\`; submit the candidate only after it passes. An incomplete draft does not use completion mode.

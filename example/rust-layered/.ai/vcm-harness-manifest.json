@@ -4,7 +4,7 @@
   "harnessVersion": "0.7.43",
   "installMode": "fixed",
   "installedAt": "2026-06-07T00:00:00Z",
-  "updatedAt": "2026-08-09T01:36:38.543Z",
+  "updatedAt": "2026-08-09T02:48:39.796Z",
   "runtimeRoots": [
     ".ai/vcm/",
     ".claude/worktrees/"
@@ -666,6 +666,18 @@
     },
     {
       "path": ".ai/tools/request-architect-restart",
+      "entryType": "file",
+      "category": "runtime-tool",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "conditional-long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".ai/tools/resolve-durable-doc-assignment",
       "entryType": "file",
       "category": "runtime-tool",
       "ownership": "whole-file",

@@ -31,6 +31,7 @@ export type HarnessFileKind =
   | "tool-update-task-state"
   | "tool-check-scaffold-ledger"
   | "tool-request-architect-restart"
+  | "tool-resolve-durable-doc-assignment"
   | "agent-project-manager"
   | "agent-architect"
   | "agent-coder"

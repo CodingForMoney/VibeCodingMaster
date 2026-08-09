@@ -53,6 +53,7 @@ import {
   renderRequestArchitectRestartTool,
   renderRestartArchitectSkillRules
 } from "../templates/harness/restart-architect-skill.js";
+import { renderResolveDurableDocAssignmentTool } from "../templates/harness/resolve-durable-doc-assignment.js";
 import { readVcmPackageVersion } from "../app-version.js";
 
 const CLI_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -482,6 +483,12 @@ const WHOLE_FILES = [
     category: "runtime-tool",
     mode: 0o755,
     content: renderRequestArchitectRestartTool()
+  },
+  {
+    path: ".ai/tools/resolve-durable-doc-assignment",
+    category: "runtime-tool",
+    mode: 0o755,
+    content: renderResolveDurableDocAssignmentTool()
   },
   {
     path: ".ai/tools/run-long-check",

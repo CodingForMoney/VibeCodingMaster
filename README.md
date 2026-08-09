@@ -508,10 +508,11 @@ files.
 `Auto memory` is the switch for the entire automated memory workflow. During
 Review Task Harness after Final Acceptance, Project Manager, Architect, Coder,
 Tester, and an enabled Reviewer submit proposals in sequence through
-`vcm-propose-memory`. Harness Engineer verifies and consolidates them before VCM
-records the result as part of the same Task Harness Retrospective. Workflow roles
-cannot edit active memory directly; Harness Engineer edits it only during the
-assigned Auto Memory Retrospective.
+`vcm-propose-memory`. Harness Engineer verifies and consolidates them, commits
+the reviewed memory, and writes the assigned machine-readable review result as
+part of the same Task Harness Retrospective. Workflow roles cannot edit active
+memory directly; Harness Engineer edits it only during the assigned Auto Memory
+Retrospective.
 
 When Auto Memory is enabled, the planning Architect writes a provisional memory
 candidate before its post-planning Session restart. VCM snapshots that candidate
@@ -538,7 +539,10 @@ Final Acceptance
        -> Review pending Harness Feedback
        -> Review Auto Memory proposals, when Auto Memory is enabled
        -> Harness Engineer updates and commits memory, when Auto Memory is enabled
-  -> VCM records the committed memory result
+       -> Harness Engineer writes review-result.json, when Auto Memory is enabled
+  -> VCM validates and records the committed memory result
+  -> VCM dispatches durable-document assignments one at a time
+  -> Complete Task Harness Retrospective after every assignment completes
 ```
 
 Memory proposal prompts sent to Project Manager, Architect, Coder, Tester, and
@@ -552,16 +556,29 @@ impact, and durable-document disposition, then evaluates every proposal item
 independently. Each Add or Update decision records why the memory is necessary,
 what happens if it is absent, whether it belongs in memory or a durable
 document, and the exact final memory content when retained. VCM validates that
-the commit changes only assigned memory host files and only their
-`<VCM-memory>` blocks; it does not parse or apply Harness Engineer's semantic
-decisions. Harness Engineer review and retrospective work remain tool role
-activity and do not participate in Round completion.
+every existing entry and proposal has one structurally valid decision, every
+move decision has one durable-document assignment, moved content has already
+been removed from memory, and the commit changes only assigned memory host
+files and only their `<VCM-memory>` blocks. VCM does not decide whether the
+Harness Engineer's semantic judgment is correct. Harness Engineer review and
+retrospective work remain tool role activity and do not participate in Round
+completion.
+
+For `move-to-durable-doc`, memory is removed in the Harness Engineer commit
+before documentation work starts. VCM assigns architecture and known-issues
+documents to Architect and testing documentation to Tester. For another target,
+PM selects Architect, Coder, or Tester and asks the user only when ownership
+cannot be determined. These assignments are backend-dispatched work rather than
+a Docs-Only Flow. Each owner updates and commits the document, submits the exact
+assignment ID in `docs-update-report.md`, and finishes before the next assignment
+starts. Harness Studio shows assignment status and allows failed work to be
+retried.
 
 When Auto Memory is disabled, Review Task Harness does not collect proposals or
 ask Harness Engineer to update memory. When enabled, both automatic and manual
 review requests collect proposals before starting the retrospective. A failed
-proposal collection or combined retrospective memory review must be retried
-from Harness Studio.
+proposal collection, combined retrospective memory review, or durable-document
+assignment must be retried from Harness Studio.
 
 ## Closing a Task
 

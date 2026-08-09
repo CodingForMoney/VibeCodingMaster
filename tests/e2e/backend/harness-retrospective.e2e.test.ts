@@ -1,8 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { renderFinalAcceptanceTemplate } from "../../../src/backend/templates/handoff.js";
-import { replaceVcmMemoryBlock } from "../../../src/backend/templates/harness/memory-block.js";
+import {
+  renderDocsUpdateReportTemplate,
+  renderFinalAcceptanceTemplate
+} from "../../../src/backend/templates/handoff.js";
+import { readVcmMemoryBlock, replaceVcmMemoryBlock } from "../../../src/backend/templates/harness/memory-block.js";
 import { createMockClaudeE2eApp } from "./helpers/e2e-app.js";
 import { createE2eRepo, git } from "./helpers/e2e-repo.js";
 import {
@@ -137,7 +140,8 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
     expect(harnessWrites).toContain("[VCM Task Harness Retrospective]");
     expect(harnessWrites).toContain("Auto Memory Review:");
     expect(harnessWrites).toContain("Active memory files:");
-    expect(harnessWrites).toContain("Apply the reviewed result directly to the <VCM-memory> blocks");
+    expect(harnessWrites).toContain("Apply the reviewed result directly to the listed <VCM-memory> blocks");
+    expect(harnessWrites).toContain("Write the complete machine-readable review to:");
     expect(harnessWrites).not.toContain("Write the complete reviewed memory set to:");
     await expect(fs.readFile(
       path.join(repo.repoRoot, ".ai/vcm/harness-feedback/task-retrospectives", `${task.taskSlug}.md`),
@@ -221,6 +225,73 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
     });
     expect(feedbackState.json()).toMatchObject({ status: "idle", queuedCount: 0, pending: [] });
   });
+
+  it("keeps the retrospective open until moved memory is committed to durable documentation", async () => {
+    const env = await createMockClaudeE2eApp();
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "mock-memory-durable-doc");
+    await updatePreferences(env.app, { autoMemoryEnabled: true });
+    const sourceEntry = "Lifecycle ownership belongs in durable architecture documentation.";
+    const sharedPath = path.join(task.worktreePath, "CLAUDE.md");
+    await fs.writeFile(
+      sharedPath,
+      replaceVcmMemoryBlock(await fs.readFile(sharedPath, "utf8"), `${sourceEntry}\n`),
+      "utf8"
+    );
+    await git(task.worktreePath, "add", "--", "CLAUDE.md");
+    await git(task.worktreePath, "commit", "-m", "test: seed memory for durable doc move");
+
+    env.mockRuntime.onPrompt("project-manager", "Complete task with durable documentation move", async (ctx) => {
+      await ctx.userPromptSubmit();
+      await ctx.writeFile(".ai/vcm/handoffs/final-acceptance.md", acceptedFinalAcceptance(task.taskSlug));
+      await ctx.stop();
+    });
+    for (const role of ["project-manager", "architect", "coder", "tester"] as const) {
+      env.mockRuntime.onPrompt(role, "[VCM Task Harness Review: Memory Proposal]", writeNoChangeMemoryDraft);
+    }
+    env.mockRuntime.onPrompt("harness-engineer", "[VCM Task Harness Retrospective]", async (ctx) => {
+      await writeHarnessRetrospectiveWithDurableDocMove(ctx, sourceEntry);
+    });
+    env.mockRuntime.onPrompt("architect", "[VCM Durable Documentation Assignment]", writeDurableArchitectureAssignment);
+
+    for (const role of ["project-manager", "architect", "coder", "tester"] as const) {
+      await startRole(env.app, task.taskSlug, role);
+    }
+    await startHarnessEngineer(env.app, task.taskSlug);
+    const pmSession = env.mockRuntime.getSessionByRole(task.taskSlug, "project-manager")!;
+    env.mockRuntime.write(pmSession.id, "Complete task with durable documentation move");
+    await env.mockRuntime.waitForIdle();
+
+    await startTaskHarnessRetrospective(env.app, task.taskSlug);
+    await env.mockRuntime.waitForIdle();
+    await env.deps.runtimeCoordinator.reconcileProject(repo.repoRoot, { taskSlug: task.taskSlug });
+    await env.mockRuntime.waitForIdle();
+
+    const memoryState = (await injectOk(env.app, {
+      method: "GET",
+      url: `/api/projects/harness/memory?taskSlug=${task.taskSlug}`
+    })).json();
+    expect(memoryState).toMatchObject({
+      status: "idle",
+      runs: [expect.objectContaining({
+        assignments: [expect.objectContaining({
+          owner: "architect",
+          status: "completed",
+          targetPath: "docs/ARCHITECTURE.md"
+        })]
+      })]
+    });
+    await expect(fs.readFile(sharedPath, "utf8")).resolves.not.toContain(sourceEntry);
+    await expect(fs.readFile(path.join(task.worktreePath, "docs/ARCHITECTURE.md"), "utf8"))
+      .resolves.toContain("Lifecycle ownership is maintained by backend hooks.");
+    const marker = JSON.parse(await fs.readFile(
+      path.join(repo.repoRoot, ".ai/vcm/harness-feedback/task-retrospectives", `${task.taskSlug}.json`),
+      "utf8"
+    ));
+    expect(marker.status).toBe("completed");
+  });
 });
 
 async function writeNoChangeMemoryDraft(ctx: MockClaudePromptContext): Promise<void> {
@@ -259,7 +330,23 @@ async function writeHarnessRetrospective(ctx: MockClaudePromptContext): Promise<
   await ctx.userPromptSubmit();
   const resultPath = matchPromptPath(ctx.prompt, "Write the analysis to Result Path");
   const autoMemoryReview = ctx.prompt.includes("Auto Memory Review:");
+  let memoryCommit = "none";
+  let reviewResultPath: string | undefined;
+  let memoryDecisions: ReturnType<typeof e2eExistingDecision>[] = [];
   if (autoMemoryReview) {
+    const activeMemoryPaths = matchPromptList(ctx.prompt, "Active memory files:", "Proposal candidates:");
+    memoryDecisions = await Promise.all(activeMemoryPaths.map(async (memoryPath) => {
+      const entry = readVcmMemoryBlock(await fs.readFile(memoryPath, "utf8"))!.trim();
+      const target = memoryPath.endsWith("/CLAUDE.md") && !memoryPath.includes("/.claude/agents/")
+        ? "shared"
+        : path.basename(memoryPath, ".md");
+      return e2eExistingDecision(
+        target,
+        entry,
+        target === "shared" ? "update" : "retain",
+        target === "shared" ? "Backend hooks own lifecycle completion." : entry
+      );
+    }));
     await ctx.writeFile(
       "CLAUDE.md",
       replaceVcmMemoryBlock(
@@ -269,6 +356,15 @@ async function writeHarnessRetrospective(ctx: MockClaudePromptContext): Promise<
     );
     await git(ctx.cwd, "add", "--", "CLAUDE.md");
     await git(ctx.cwd, "commit", "-m", "[VCM Harness] Update VCM memory");
+    memoryCommit = (await git(ctx.cwd, "rev-parse", "HEAD")).stdout.trim();
+    reviewResultPath = matchPromptPath(ctx.prompt, "Write the complete machine-readable review to");
+    await ctx.writeAbsoluteFile(reviewResultPath, `${JSON.stringify({
+      version: 1,
+      runId: path.basename(path.dirname(reviewResultPath)),
+      memoryCommit,
+      decisions: memoryDecisions,
+      durableDocAssignments: []
+    }, null, 2)}\n`);
   }
   const pendingFeedback = matchPendingFeedbackPaths(ctx.prompt);
   const dispositions = pendingFeedback.flatMap((feedbackPath) => [
@@ -301,24 +397,97 @@ async function writeHarnessRetrospective(ctx: MockClaudePromptContext): Promise<
         ? [
             "",
             "## Memory Review",
-            "Existing memory reviewed: complete",
-            "",
-            "### Proposal Decisions",
-            "none",
-            "",
-            "### Existing Memory Decisions",
-            "none",
-            "",
-            "### Existing Memory Changes",
-            "- retained: all verified entries",
-            "- updated: shared lifecycle ownership",
-            "- removed: none",
-            "",
-            "Reviewed memory set: complete"
+            `Memory commit: ${memoryCommit}`,
+            `Review result: ${reviewResultPath}`,
+            "Durable document assignments: 0"
           ]
         : []),
       ""
     ].join("\n")
+  );
+  await ctx.stop();
+}
+
+async function writeHarnessRetrospectiveWithDurableDocMove(
+  ctx: MockClaudePromptContext,
+  sourceEntry: string
+): Promise<void> {
+  await ctx.userPromptSubmit();
+  const resultPath = matchPromptPath(ctx.prompt, "Write the analysis to Result Path");
+  const reviewResultPath = matchPromptPath(ctx.prompt, "Write the complete machine-readable review to");
+  const activeMemoryPaths = matchPromptList(ctx.prompt, "Active memory files:", "Proposal candidates:");
+  const decisions = await Promise.all(activeMemoryPaths.map(async (memoryPath) => {
+    const entry = readVcmMemoryBlock(await fs.readFile(memoryPath, "utf8"))!.trim();
+    const target = memoryPath.endsWith("/CLAUDE.md") && !memoryPath.includes("/.claude/agents/")
+      ? "shared"
+      : path.basename(memoryPath, ".md");
+    return target === "shared"
+      ? {
+          ...e2eExistingDecision(target, entry, "move-to-durable-doc", "none"),
+          durableDocPath: "docs/ARCHITECTURE.md"
+        }
+      : e2eExistingDecision(target, entry, "retain", entry);
+  }));
+  await ctx.writeFile(
+    "CLAUDE.md",
+    replaceVcmMemoryBlock(await ctx.readFile("CLAUDE.md"), "No accumulated project memory yet.\n")
+  );
+  await git(ctx.cwd, "add", "--", "CLAUDE.md");
+  await git(ctx.cwd, "commit", "-m", "[VCM Harness] Update VCM memory");
+  const memoryCommit = (await git(ctx.cwd, "rev-parse", "HEAD")).stdout.trim();
+  await ctx.writeAbsoluteFile(reviewResultPath, `${JSON.stringify({
+    version: 1,
+    runId: path.basename(path.dirname(reviewResultPath)),
+    memoryCommit,
+    decisions,
+    durableDocAssignments: [{
+      sourceMemoryPath: "CLAUDE.md",
+      sourceEntry,
+      targetPath: "docs/ARCHITECTURE.md",
+      content: "Lifecycle ownership is maintained by backend hooks.",
+      reason: "Architecture ownership belongs in the durable architecture overview.",
+      evidence: ["src/backend/services/claude-hook-service.ts"]
+    }]
+  }, null, 2)}\n`);
+  await ctx.writeAbsoluteFile(resultPath, [
+    "# Task Harness Retrospective: durable-doc",
+    "",
+    "## Findings",
+    "Moved durable architecture knowledge out of memory.",
+    "",
+    "## Feedback Dispositions",
+    "none",
+    "",
+    "## Recommended Harness Changes",
+    "None.",
+    "",
+    "## VCM Issue Drafts",
+    "None.",
+    "",
+    "## Memory Review",
+    `Memory commit: ${memoryCommit}`,
+    `Review result: ${reviewResultPath}`,
+    "Durable document assignments: 1",
+    ""
+  ].join("\n"));
+  await ctx.stop();
+}
+
+async function writeDurableArchitectureAssignment(ctx: MockClaudePromptContext): Promise<void> {
+  await ctx.userPromptSubmit();
+  const assignmentId = matchPromptPath(ctx.prompt, "Assignment ID");
+  await ctx.writeFile(
+    "docs/ARCHITECTURE.md",
+    "# Architecture\n\nLifecycle ownership is maintained by backend hooks.\n"
+  );
+  await git(ctx.cwd, "add", "--", "docs/ARCHITECTURE.md");
+  await git(ctx.cwd, "commit", "-m", "docs: record lifecycle ownership");
+  const commit = (await git(ctx.cwd, "rev-parse", "HEAD")).stdout.trim();
+  await ctx.writeFile(
+    ".ai/vcm/handoffs/docs-update-report.md",
+    renderDocsUpdateReportTemplate("durable-doc", assignmentId)
+      .replaceAll("TBD", commit)
+      .replace("synced|unchanged|blocked", "synced")
   );
   await ctx.stop();
 }
@@ -332,6 +501,31 @@ function matchPendingFeedbackPaths(prompt: string): string[] {
     .split("\n")
     .map((line) => line.match(/^-\s+(.+)$/)?.[1]?.trim())
     .filter((feedbackPath): feedbackPath is string => Boolean(feedbackPath));
+}
+
+function matchPromptList(prompt: string, startLabel: string, endLabel: string): string[] {
+  const block = prompt.split(`${startLabel}\n`, 2)[1]?.split(`\n${endLabel}`, 1)[0]?.trim();
+  if (!block || block === "none") {
+    return [];
+  }
+  return block.split("\n")
+    .map((line) => line.match(/^-\s+(.+)$/)?.[1]?.trim())
+    .filter((item): item is string => Boolean(item));
+}
+
+function e2eExistingDecision(target: string, entry: string, decision: string, finalContent: string) {
+  return {
+    itemId: `existing:${target}`,
+    source: "existing",
+    target,
+    entry,
+    decision,
+    reason: "Verified against final task evidence.",
+    impactIfAbsent: "Future roles could lose durable project context.",
+    evidence: [".ai/vcm/handoffs/final-acceptance.md"],
+    finalContent,
+    durableDocPath: "none"
+  };
 }
 
 function acceptedFinalAcceptance(taskSlug: string): string {

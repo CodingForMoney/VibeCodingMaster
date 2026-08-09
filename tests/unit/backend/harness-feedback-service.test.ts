@@ -174,7 +174,7 @@ None.
     await expect(service.handleTaskRetrospectiveHook(tmpRepo, {
       taskSlug: "demo-task",
       eventName: "Stop",
-      memoryReviewSucceeded: true
+      memoryReviewStatus: "idle"
     })).resolves.toBe(true);
     const completedMarker = JSON.parse(await readFile(
       path.join(tmpRepo, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.json"),
@@ -222,6 +222,7 @@ None.
               target: "shared",
               content: "Backend hooks own lifecycle completion."
             }],
+            reviewResultPath: path.join(taskRepoRoot, "memory-run/review-result.json"),
             planningCandidatePath: path.join(taskRepoRoot, "memory-run/architect-planning.md")
           };
         },
@@ -246,16 +247,14 @@ None.
     expect(prompt).toContain(`Current memory snapshot: ${path.join(taskRepoRoot, "memory-run/before")}`);
     expect(prompt).toContain(`Architect planning-session candidate: ${path.join(taskRepoRoot, "memory-run/architect-planning.md")}`);
     expect(prompt).toContain(`- ${path.join(taskRepoRoot, "CLAUDE.md")}`);
-    expect(prompt).toContain("Apply the reviewed result directly to the <VCM-memory> blocks");
-    expect(prompt).toContain("Use commit message: [VCM Harness] Update VCM memory");
+    expect(prompt).toContain("Apply the reviewed result directly to the listed <VCM-memory> blocks");
+    expect(prompt).toContain("commit only the changed active memory files with message [VCM Harness] Update VCM memory");
     expect(prompt).not.toContain("Write the complete reviewed memory set to:");
     expect(prompt).toContain("Before evaluating proposals, review every substantive entry in every current memory snapshot");
-    expect(prompt).toContain("#### Candidate architect:add:1");
-    expect(prompt).toContain("Why memory is necessary:");
-    expect(prompt).toContain("Durable doc analysis:");
-    expect(prompt).toContain("### Existing Memory Decisions");
-    expect(prompt).toContain("Impact if removed:");
-    expect(prompt).toContain("Reviewed memory set: complete");
+    expect(prompt).toContain("architect:add:1 | source=architect | operation=add");
+    expect(prompt).toContain(`Write the complete machine-readable review to: ${path.join(taskRepoRoot, "memory-run/review-result.json")}`);
+    expect(prompt).toContain("For every existing entry and proposal");
+    expect(prompt).toContain("Durable document assignments: <count>");
     const marker = JSON.parse(await readFile(
       path.join(tmpRepo, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.json"),
       "utf8"
@@ -288,7 +287,7 @@ None.
     await service.handleTaskRetrospectiveHook(tmpRepo, {
       taskSlug: "demo-task",
       eventName: "Stop",
-      memoryReviewSucceeded: true
+      memoryReviewStatus: "idle"
     });
     const failedMarker = JSON.parse(await readFile(
       path.join(tmpRepo, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.json"),
@@ -393,7 +392,7 @@ None.
     await service.handleTaskRetrospectiveHook(tmpRepo, {
       taskSlug: "demo-task",
       eventName: "Stop",
-      memoryReviewSucceeded: true
+      memoryReviewStatus: "idle"
     });
 
     for (const name of assigned) {
@@ -443,7 +442,7 @@ None.
     await service.handleTaskRetrospectiveHook(tmpRepo, {
       taskSlug: "demo-task",
       eventName: "Stop",
-      memoryReviewSucceeded: true
+      memoryReviewStatus: "idle"
     });
 
     for (const name of assigned) {

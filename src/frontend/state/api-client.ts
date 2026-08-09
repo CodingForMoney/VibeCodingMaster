@@ -42,6 +42,7 @@ import type {
   AutoMemoryStateReport,
   MemoryFileContent,
   RevertMemoryRunRequest,
+  RetryDurableDocAssignmentRequest,
   RetryMemoryReviewRequest,
   UpdateMemoryFileRequest
 } from "../../shared/types/memory.js";
@@ -299,6 +300,12 @@ export const apiClient = {
   },
   retryMemoryReview(input: RetryMemoryReviewRequest) {
     return request<AutoMemoryStateReport>("/api/projects/harness/memory/retry", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  retryDurableDocAssignment(input: RetryDurableDocAssignmentRequest) {
+    return request<AutoMemoryStateReport>("/api/projects/harness/memory/assignments/retry", {
       method: "POST",
       body: JSON.stringify(input)
     });

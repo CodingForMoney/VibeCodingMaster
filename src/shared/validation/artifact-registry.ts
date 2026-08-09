@@ -172,6 +172,7 @@ export const ARTIFACT_DEFINITIONS: readonly ArtifactDefinition[] = [
     owner: ["architect", "coder", "tester"],
     requiredHeadings: [
       "Summary",
+      "Assignment ID",
       "Documents Updated",
       "Documents Reviewed And Left Unchanged",
       "Evidence Reviewed",

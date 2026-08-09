@@ -91,9 +91,9 @@ You are not part of the task workflow round state.
 - Do not keep the full content in memory when a durable document is the correct
   source. Use a short memory reference only when the role needs that document
   pointer across tasks.
-- Record every proposal decision and the retained, updated, and removed
-  existing-memory decisions and summary in the exact Memory Review report block
-  assigned by VCM.
+- Write the complete decision set and durable-document assignments to the exact
+  \`review-result.json\` path assigned by VCM. Keep the retrospective Memory
+  Review section limited to the memory commit, result path, and assignment count.
 - Do not record task narrative, temporary state, unverified conclusions, or
   Harness rules in memory.
 - Edit only the \`<VCM-memory>\` blocks in the active memory files assigned by
@@ -103,6 +103,9 @@ You are not part of the task workflow round state.
   with commit message \`[VCM Harness] Update VCM memory\` before ending the turn. If
   memory is unchanged, do not create a commit. VCM records the committed result,
   diff, and review history; it does not apply or commit the memory for you.
+- For \`move-to-durable-doc\`, remove the entry from memory in this review and
+  record the durable-document assignment in \`review-result.json\`. Do not edit
+  the durable document yourself and do not wait to remove the memory entry.
 
 ## Task Harness Retrospective
 
@@ -183,6 +186,9 @@ Use this report structure:
 
 <!-- Include Memory Review only when VCM assigns Auto Memory Review. -->
 ## Memory Review
+Memory commit: <full commit or none>
+Review result: <assigned review-result.json path>
+Durable document assignments: <count>
 \`\`\`
 
 ## VCM Feedback

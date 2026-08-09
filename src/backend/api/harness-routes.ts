@@ -10,7 +10,13 @@ import type {
   StartTaskHarnessRetrospectiveRequest,
   UpdateHarnessFileContentRequest
 } from "../../shared/types/harness.js";
-import type { RevertMemoryRunRequest, RetryMemoryReviewRequest, UpdateMemoryFileRequest } from "../../shared/types/memory.js";
+import type {
+  ResolveDurableDocAssignmentOwnerRequest,
+  RevertMemoryRunRequest,
+  RetryDurableDocAssignmentRequest,
+  RetryMemoryReviewRequest,
+  UpdateMemoryFileRequest
+} from "../../shared/types/memory.js";
 import { isOpenFileLimitError, VcmError } from "../errors.js";
 import type { HarnessService } from "../services/harness-service.js";
 import type { HarnessFeedbackService } from "../services/harness-feedback-service.js";
@@ -283,6 +289,33 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
   app.post<{ Body: RetryMemoryReviewRequest }>("/api/projects/harness/memory/retry", async (request) => {
     const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
     return deps.autoMemoryService.retryFailedReview(project.repoRoot, task.worktreePath);
+  });
+
+  app.post<{ Body: RetryDurableDocAssignmentRequest }>("/api/projects/harness/memory/assignments/retry", async (request) => {
+    const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
+    return deps.autoMemoryService.retryDurableDocAssignment(
+      project.repoRoot,
+      task.worktreePath,
+      request.body?.assignmentId ?? ""
+    );
+  });
+
+  app.post<{ Body: ResolveDurableDocAssignmentOwnerRequest }>("/api/projects/harness/memory/assignments/owner", async (request) => {
+    const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
+    const owner = request.body?.owner;
+    if (owner !== "architect" && owner !== "coder" && owner !== "tester") {
+      throw new VcmError({
+        code: "DURABLE_DOC_OWNER_INVALID",
+        message: "Durable-document owner must be architect, coder, or tester.",
+        statusCode: 400
+      });
+    }
+    return deps.autoMemoryService.resolveDurableDocAssignmentOwner(
+      project.repoRoot,
+      task.worktreePath,
+      request.body?.assignmentId ?? "",
+      owner
+    );
   });
 }
 

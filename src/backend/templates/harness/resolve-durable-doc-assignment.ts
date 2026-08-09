@@ -1,0 +1,60 @@
+export function renderResolveDurableDocAssignmentTool(): string {
+  return `#!/usr/bin/env python3
+import argparse
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+
+def emit(status, message=None):
+    payload = {"status": status}
+    if message:
+        payload["message"] = message
+    print(json.dumps(payload, ensure_ascii=False))
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Assign a VCM durable-document update to a workflow role.")
+    parser.add_argument("--assignment", required=True)
+    parser.add_argument("--owner", required=True, choices=["architect", "coder", "tester"])
+    args = parser.parse_args()
+
+    if os.environ.get("VCM_ROLE") != "project-manager":
+        emit("rejected", "Only project-manager may resolve a durable-document owner.")
+        return 2
+
+    api_url = os.environ.get("VCM_API_URL", "").rstrip("/")
+    task_slug = os.environ.get("VCM_TASK_SLUG", "").strip()
+    if not api_url or not task_slug:
+        emit("rejected", "VCM_API_URL or VCM_TASK_SLUG is unavailable.")
+        return 2
+
+    request = urllib.request.Request(
+        api_url + "/api/projects/harness/memory/assignments/owner",
+        data=json.dumps({
+            "taskSlug": task_slug,
+            "assignmentId": args.assignment,
+            "owner": args.owner,
+        }).encode("utf-8"),
+        headers={"content-type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5):
+            pass
+        emit("accepted")
+        return 0
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")
+        emit("rejected", f"VCM rejected the owner: HTTP {error.code} {detail}")
+    except (OSError, ValueError, urllib.error.URLError) as error:
+        emit("failed", f"VCM could not record the owner: {error}")
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+`;
+}

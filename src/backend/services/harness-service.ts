@@ -79,6 +79,7 @@ import {
   renderRequestArchitectRestartTool,
   renderRestartArchitectSkillRules
 } from "../templates/harness/restart-architect-skill.js";
+import { renderResolveDurableDocAssignmentTool } from "../templates/harness/resolve-durable-doc-assignment.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import { VcmError } from "../errors.js";
@@ -493,6 +494,13 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "Request Architect Restart Tool",
     ownership: "raw-file",
     renderRules: renderRequestArchitectRestartTool
+  },
+  {
+    kind: "tool-resolve-durable-doc-assignment",
+    path: ".ai/tools/resolve-durable-doc-assignment",
+    title: "Resolve Durable Documentation Assignment Tool",
+    ownership: "raw-file",
+    renderRules: renderResolveDurableDocAssignmentTool
   },
   {
     kind: "agent-project-manager",

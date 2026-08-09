@@ -14,7 +14,10 @@ import {
 } from "../../../src/shared/types/app-settings.js";
 import type { RoleName } from "../../../src/shared/types/role.js";
 import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
-import { renderFinalAcceptanceTemplate } from "../../../src/backend/templates/handoff.js";
+import {
+  renderDocsUpdateReportTemplate,
+  renderFinalAcceptanceTemplate
+} from "../../../src/backend/templates/handoff.js";
 
 describe("auto-memory-service", () => {
   let root: string | undefined;
@@ -239,6 +242,25 @@ describe("auto-memory-service", () => {
       "utf8"
     );
     context.recordHarnessCommit(["CLAUDE.md"]);
+    await writeFile(
+      memoryReview!.reviewResultPath,
+      `${JSON.stringify({
+        version: 1,
+        runId: memoryReview!.runId,
+        memoryCommit: "harness-memory-commit",
+        decisions: [
+          proposalDecision(
+            "architect-planning:add:1",
+            "Planning discovered backend-owned lifecycle state.",
+            "Lifecycle completion is owned by backend hooks."
+          ),
+          existingDecision("shared", "Lifecycle completion is inferred by each client.", "update", "Lifecycle completion is owned by backend hooks."),
+          ...defaultRoleMemoryDecisions()
+        ],
+        durableDocAssignments: []
+      }, null, 2)}\n`,
+      "utf8"
+    );
     await context.service.handleHarnessEngineerHook({
       baseRepoRoot: context.baseRepoRoot,
       taskRepoRoot: context.taskRepoRoot,
@@ -300,6 +322,181 @@ describe("auto-memory-service", () => {
     const state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
     expect(state.runs).toHaveLength(0);
     expect(context.gitCommits).toHaveLength(0);
+  });
+
+  it("removes moved memory before dispatching and completes a fixed-owner durable document assignment", async () => {
+    const context = await createContext(true);
+    const sourceEntry = "Lifecycle ownership must be documented for maintainers.";
+    const review = await prepareHarnessMemoryReview(context, sourceEntry);
+    const sharedPath = path.join(context.taskRepoRoot, "CLAUDE.md");
+    await writeFile(
+      sharedPath,
+      replaceVcmMemoryBlock(await readFile(sharedPath, "utf8"), "No accumulated project memory yet.\n"),
+      "utf8"
+    );
+    context.recordHarnessCommit(["CLAUDE.md"], "memory-move-commit");
+    await writeFile(review.reviewResultPath, `${JSON.stringify({
+      version: 1,
+      runId: review.runId,
+      memoryCommit: "memory-move-commit",
+      decisions: [
+        {
+          ...existingDecision("shared", sourceEntry, "move-to-durable-doc", "none"),
+          durableDocPath: "docs/ARCHITECTURE.md"
+        },
+        ...defaultRoleMemoryDecisions()
+      ],
+      durableDocAssignments: [{
+        sourceMemoryPath: "CLAUDE.md",
+        sourceEntry,
+        targetPath: "docs/ARCHITECTURE.md",
+        content: "Document lifecycle ownership in the architecture overview.",
+        reason: "The architecture document is the durable source for maintainers.",
+        evidence: ["src/backend/services/claude-hook-service.ts"]
+      }]
+    }, null, 2)}\n`, "utf8");
+
+    await context.service.handleHarnessEngineerHook({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      eventName: "Stop"
+    });
+
+    let state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.status).toBe("documenting");
+    expect(state.active?.assignments[0]).toMatchObject({
+      owner: "architect",
+      status: "running",
+      targetPath: "docs/ARCHITECTURE.md"
+    });
+    expect(await readText(context.taskRepoRoot, "CLAUDE.md")).not.toContain(sourceEntry);
+    expect(context.terminalWrites.join("\n")).toContain("[VCM Durable Documentation Assignment]");
+
+    const writesBeforeRecovery = context.terminalWrites.length;
+    await context.service.reconcileTask({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      handoffDir: ".ai/vcm/handoffs",
+      roundReady: false
+    });
+    expect(context.terminalWrites.length).toBeGreaterThan(writesBeforeRecovery);
+    expect(context.terminalWrites.slice(writesBeforeRecovery).join("\n"))
+      .toContain("[VCM Durable Documentation Assignment]");
+    state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.active?.assignments[0]).toMatchObject({
+      owner: "architect",
+      status: "running"
+    });
+
+    await mkdir(path.join(context.taskRepoRoot, "docs"), { recursive: true });
+    await writeFile(
+      path.join(context.taskRepoRoot, "docs/ARCHITECTURE.md"),
+      "# Architecture\n\nLifecycle ownership is backend-owned.\n",
+      "utf8"
+    );
+    context.recordHarnessCommit(["docs/ARCHITECTURE.md"], "docs-commit");
+    const assignmentId = state.active!.assignments[0].id;
+    await writeFile(
+      path.join(context.taskRepoRoot, ".ai/vcm/handoffs/docs-update-report.md"),
+      renderDocsUpdateReportTemplate("demo", assignmentId)
+        .replaceAll("TBD", "docs-commit")
+        .replace("synced|unchanged|blocked", "synced"),
+      "utf8"
+    );
+    await context.service.handleRoleHook({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      role: "architect",
+      eventName: "Stop"
+    });
+
+    state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.active?.assignments[0].error).toBeUndefined();
+    expect(state.status).toBe("idle");
+    expect(state.runs[0].assignments[0]).toMatchObject({
+      id: assignmentId,
+      status: "completed",
+      commit: "docs-commit"
+    });
+  });
+
+  it("asks PM to resolve an unknown durable document owner and retains failures for retry", async () => {
+    const context = await createContext(true);
+    const sourceEntry = "Operations recovery guidance is durable project knowledge.";
+    const review = await prepareHarnessMemoryReview(context, sourceEntry);
+    const sharedPath = path.join(context.taskRepoRoot, "CLAUDE.md");
+    await writeFile(
+      sharedPath,
+      replaceVcmMemoryBlock(await readFile(sharedPath, "utf8"), "No accumulated project memory yet.\n"),
+      "utf8"
+    );
+    context.recordHarnessCommit(["CLAUDE.md"], "memory-owner-commit");
+    await writeFile(review.reviewResultPath, `${JSON.stringify({
+      version: 1,
+      runId: review.runId,
+      memoryCommit: "memory-owner-commit",
+      decisions: [
+        {
+          ...existingDecision("shared", sourceEntry, "move-to-durable-doc", "none"),
+          durableDocPath: "docs/OPERATIONS.md"
+        },
+        ...defaultRoleMemoryDecisions()
+      ],
+      durableDocAssignments: [{
+        sourceMemoryPath: "CLAUDE.md",
+        sourceEntry,
+        targetPath: "docs/OPERATIONS.md",
+        content: "Document operations recovery guidance.",
+        reason: "Operators need a durable runbook.",
+        evidence: ["src/backend/services/runtime-coordinator-service.ts"]
+      }]
+    }, null, 2)}\n`, "utf8");
+    await context.service.handleHarnessEngineerHook({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      eventName: "Stop"
+    });
+
+    let state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    const assignmentId = state.active!.assignments[0].id;
+    expect(state.active!.assignments[0].status).toBe("resolving-owner");
+    expect(context.terminalWrites.join("\n")).toContain("[VCM Durable Documentation Owner Resolution]");
+    await context.service.resolveDurableDocAssignmentOwner(
+      context.baseRepoRoot,
+      context.taskRepoRoot,
+      assignmentId,
+      "coder"
+    );
+    await context.service.handleRoleHook({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      role: "project-manager",
+      eventName: "Stop"
+    });
+    state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.active!.assignments[0]).toMatchObject({ owner: "coder", status: "running" });
+
+    await context.service.handleRoleHook({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      role: "coder",
+      eventName: "StopFailure"
+    });
+    state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.active!.assignments[0].status).toBe("failed");
+    await context.service.retryDurableDocAssignment(
+      context.baseRepoRoot,
+      context.taskRepoRoot,
+      assignmentId
+    );
+    state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.active!.assignments[0]).toMatchObject({ owner: "coder", status: "running" });
   });
 
   it("does not mix existing host-file changes into a memory commit", async () => {
@@ -551,14 +748,25 @@ describe("auto-memory-service", () => {
       setGitDiff(diff: string) {
         gitDiff = diff;
       },
-      recordHarnessCommit(paths: string[]) {
+      recordHarnessCommit(paths: string[], commit = "harness-memory-commit") {
         harnessChangedPaths = [...paths];
-        headCommit = "harness-memory-commit";
+        headCommit = commit;
       }
     };
   }
 
-  async function prepareHarnessMemoryReview(context: Awaited<ReturnType<typeof createContext>>): Promise<void> {
+  async function prepareHarnessMemoryReview(
+    context: Awaited<ReturnType<typeof createContext>>,
+    sharedMemory = "No accumulated project memory yet."
+  ) {
+    if (sharedMemory !== "No accumulated project memory yet.") {
+      const sharedPath = path.join(context.taskRepoRoot, "CLAUDE.md");
+      await writeFile(
+        sharedPath,
+        replaceVcmMemoryBlock(await readFile(sharedPath, "utf8"), `${sharedMemory}\n`),
+        "utf8"
+      );
+    }
     const finalAcceptancePath = path.join(context.taskRepoRoot, ".ai/vcm/handoffs/final-acceptance.md");
     await mkdir(path.dirname(finalAcceptancePath), { recursive: true });
     await writeFile(finalAcceptancePath, acceptedFinalAcceptance("demo"), "utf8");
@@ -587,9 +795,21 @@ describe("auto-memory-service", () => {
       context.baseRepoRoot,
       ".ai/vcm/harness-feedback/task-retrospectives/demo.md"
     );
-    await context.service.prepareTaskRetrospectiveReview(context.taskRepoRoot, retrospectiveReportPath);
+    const review = await context.service.prepareTaskRetrospectiveReview(context.taskRepoRoot, retrospectiveReportPath);
     await mkdir(path.dirname(retrospectiveReportPath), { recursive: true });
     await writeFile(retrospectiveReportPath, "# Task Harness Retrospective\n", "utf8");
+    await writeFile(
+      review!.reviewResultPath,
+      `${JSON.stringify({
+        version: 1,
+        runId: review!.runId,
+        memoryCommit: "none",
+        decisions: [existingDecision("shared", sharedMemory, "retain"), ...defaultRoleMemoryDecisions()],
+        durableDocAssignments: []
+      }, null, 2)}\n`,
+      "utf8"
+    );
+    return review!;
   }
 });
 
@@ -686,4 +906,44 @@ function memoryReviewReport(): string {
     "Reviewed memory set: complete",
     ""
   ].join("\n");
+}
+
+function existingDecision(
+  target: "shared" | "project-manager" | "architect" | "coder" | "tester" | "reviewer" | "harness-engineer",
+  entry: string,
+  decision: "retain" | "update" | "remove" | "move-to-durable-doc",
+  finalContent = entry
+) {
+  return {
+    itemId: `existing:${target}`,
+    source: "existing",
+    target,
+    entry,
+    decision,
+    reason: "Verified against final task evidence.",
+    impactIfAbsent: "Future roles could lose durable project context.",
+    evidence: [".ai/vcm/handoffs/final-acceptance.md"],
+    finalContent,
+    durableDocPath: "none"
+  };
+}
+
+function defaultRoleMemoryDecisions() {
+  return (["project-manager", "architect", "coder", "tester", "reviewer", "harness-engineer"] as const)
+    .map((role) => existingDecision(role, "No accumulated project memory yet.", "retain"));
+}
+
+function proposalDecision(itemId: string, entry: string, finalContent: string) {
+  return {
+    itemId,
+    source: "proposal",
+    target: "shared",
+    entry,
+    decision: "keep-in-memory",
+    reason: "Verified durable lifecycle ownership.",
+    impactIfAbsent: "Future roles could infer lifecycle ownership incorrectly.",
+    evidence: [".ai/vcm/handoffs/final-acceptance.md"],
+    finalContent,
+    durableDocPath: "none"
+  };
 }

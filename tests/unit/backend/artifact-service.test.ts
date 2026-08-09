@@ -180,6 +180,8 @@ describe("createArtifactService", () => {
       "",
       "## Summary",
       "Updated documentation.",
+      "## Assignment ID",
+      "docs-only",
       "## Documents Updated",
       "docs/TESTING.md",
       "## Documents Reviewed And Left Unchanged",

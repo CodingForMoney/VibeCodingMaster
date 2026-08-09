@@ -811,14 +811,18 @@ It then reviews every proposal item separately. For each Add or Update candidate
 the report must independently explain why it is necessary, the impact if absent,
 whether it belongs in memory or a durable document, the evidence checked, and
 the exact final memory content when retained. The required report block contains
-those decisions and the retained, updated, and removed summary. Harness Engineer
-owns the semantic judgment, directly edits shared memory in the root
+only the memory commit, review-result path, and durable-document assignment
+count. Harness Engineer writes the complete decision set to the assigned
+`review-result.json`, owns the semantic judgment, directly edits shared memory in the root
 `CLAUDE.md` `<VCM-memory>` block and role memory in the matching
 `.claude/agents/*.md` block, and commits only the changed memory host files. VCM
-does not parse the semantic decisions, apply an intermediate reviewed-memory
-set, or create that commit. On Stop it verifies only the commit and memory-block
-boundaries, then records the committed after snapshot, diff, and review history
-under `.ai/vcm/memory-review/`. Active memory is read-only to other role turns.
+requires one structurally valid decision for every existing entry and proposal,
+requires one assignment for every move-to-durable-doc decision, and verifies
+that moved content is already absent. It does not replace Harness Engineer's
+semantic judgment, apply an intermediate reviewed-memory set, or create that
+commit. On Stop it also verifies the commit and memory-block boundaries, then
+records the committed after snapshot, diff, and review history under
+`.ai/vcm/memory-review/`. Active memory is read-only to other role turns.
 Proposal prompts sent to workflow roles use their normal task sessions and
 participate in Round/Turn tracking. Their hooks start or continue the
 post-acceptance Round, which settles to stopped after the last workflow-role
@@ -839,8 +843,17 @@ retrospective; `reviewing` means proposals are ready. The single retrospective
 turn reviews reusable harness problems, pending Harness Feedback, memory
 proposals, the current memory snapshot, and the final task evidence. Harness
 Engineer applies and commits reviewed memory in that turn; VCM records the result
-only after the retrospective report exists and the committed changes stay within
-the assigned memory blocks.
+only after the retrospective report and `review-result.json` exist and the
+committed changes stay within the assigned memory blocks. A
+move-to-durable-doc decision removes memory immediately, then enters a
+backend-owned sequence of durable-document assignments. Architect owns
+architecture and known-issues documents; Tester owns testing documentation; PM
+chooses Architect, Coder, or Tester for an unknown path and asks the user only
+when ownership remains uncertain. Each role commits the documentation and
+submits the exact Assignment ID in `docs-update-report.md`. This work is not a
+Docs-Only Flow. The retrospective remains open until every assignment succeeds;
+failed assignments remain available for retry and are resumed after backend
+restart.
 
 ## 16. Final Acceptance
 
