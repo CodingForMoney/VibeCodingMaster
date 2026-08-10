@@ -249,7 +249,10 @@ services with controlled runtime doubles:
   that Auto Memory assigns and preserves a planning-session candidate through
   the real Artifact API, blocks replacement when that candidate is missing,
   and supplies its run snapshot to the final Architect proposal and Harness
-  Engineer review.
+  Engineer review. It also covers backend restart while the original planning
+  Session is still pending and after the replacement starts but before its first
+  prompt, including durable restoration-state cleanup after the replacement
+  Claude Session ID is recorded.
 - PM-declared task workflow state persistence, workspace aggregation, and PM
   session restoration.
 - Codex Bridge settings redaction, authenticated model availability, native-vs-Bridge

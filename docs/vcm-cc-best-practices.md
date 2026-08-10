@@ -843,7 +843,10 @@ If planning used the post-planning Architect restart, the old planning Session
 first records a provisional candidate at the VCM-assigned path. The Auto Memory
 run snapshots that candidate, presents it to the replacement Architect with the
 final task evidence, and includes it in Harness Engineer review. It is review
-input only and never active memory by itself.
+input only and never active memory by itself. VCM keeps the deferred restart and
+replacement restoration intent in the task worktree until the new Architect's
+first prompt records a durable Claude Session ID, so a backend restart cannot
+discard that planning handoff.
 
 Task Harness Retrospective runs after optional memory proposal collection. The backend
 uses the current accepted `final-acceptance.md` hash as the ordering key. When

@@ -172,6 +172,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
   const architectRestartService = createArchitectRestartService({
     fs: fsAdapter,
     taskService,
+    projectService,
     sessionService,
     appSettings
   });
@@ -294,7 +295,8 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     runtime: mockRuntime,
     projectService,
     taskService,
-    translationWorkerService
+    translationWorkerService,
+    architectRestartService
   });
   const claudeHookService = createClaudeHookService({
     projectService,

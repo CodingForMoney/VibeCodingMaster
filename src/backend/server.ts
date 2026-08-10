@@ -363,6 +363,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   const architectRestartService = createArchitectRestartService({
     fs,
     taskService,
+    projectService,
     sessionService,
     appSettings
   });
@@ -467,7 +468,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     runtime,
     projectService,
     taskService,
-    translationWorkerService
+    translationWorkerService,
+    architectRestartService
   });
   const claudeHookService = createClaudeHookService({
     projectService,

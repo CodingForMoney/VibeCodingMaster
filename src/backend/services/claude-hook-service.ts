@@ -92,7 +92,7 @@ export interface ClaudeHookServiceDeps {
   jobGuard?: Pick<JobGuardService, "evaluateStop" | "notePromptSubmitted">;
   architectRestartService?: Pick<
     ArchitectRestartService,
-    "recordArchitectStop" | "recordRouteAccepted"
+    "recordArchitectStop" | "recordRouteAccepted" | "recordReplacementPromptSubmitted"
   >;
   roleStallDetector?: Pick<RoleStallDetectorService, "recordHook">;
   workflowControlService?: Pick<
@@ -338,6 +338,13 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     });
     if (!session) {
       return completedHookResult(input, eventName);
+    }
+    if (input.role === "architect") {
+      await deps.architectRestartService?.recordReplacementPromptSubmitted(
+        context.project.repoRoot,
+        context.taskSlug,
+        session.id
+      );
     }
     const boundToTask = await isHookSessionBoundToTask(context, input.role);
     if (boundToTask) {

@@ -509,11 +509,13 @@ sets when one member of an existing semantic class is newly handled. The plan
 states each assumption's effect and every member's disposition. Architecture
 review reconstructs both from current code before approval.
 
-`architect-restart-service` owns the task-local, in-memory deferred restart
-between completed planning and later Architect work. The Architect schedules it
-through `.ai/tools/request-architect-restart` before writing the first completed
-route to PM. Repeated requests from the same Architect Session are idempotent.
-The service keeps the current session and pending restart through
+`architect-restart-service` owns the task-local deferred restart between
+completed planning and later Architect work. It persists the restart state in
+the task worktree so backend restart cannot lose either a pending restart or a
+new Architect's restoration context. The Architect schedules it through
+`.ai/tools/request-architect-restart` before writing the first completed route
+to PM. Repeated requests from the same Architect Session are idempotent. The
+service keeps the current session and pending restart through
 architecture-plan `request_changes` rounds and starts a fresh Architect session
 only after a normal Architect Stop, delivery of the latest Architect-to-PM
 message, PM's matching `UserPromptSubmit` confirmation, and an approved,
@@ -522,8 +524,12 @@ restart prerequisite becomes a visible blocked state and is retried only by an
 explicit restart request. The service preserves the selected permission, model,
 and effort and launches Claude Code with a short `--append-system-prompt` that
 points to the accepted brief, evidence, plan, scaffold, and latest Gate report.
-It does not inject a user prompt or create an extra turn. StopFailure and task
-close never execute a pending restart.
+It does not inject a user prompt or create an extra turn. The restoration state
+remains durable until the replacement Architect's first `UserPromptSubmit`
+records its Claude Session ID. Project recovery resumes an unfinished planning
+Session when available or recreates an unconfirmed replacement with the same
+settings and restoration prompt. StopFailure never executes a pending restart,
+and task close removes its persisted state.
 
 Each Gate Review request owns an immutable prompt, metadata record, captured
 snapshot of every referenced `.ai/vcm` handoff or prior-Gate input, and report

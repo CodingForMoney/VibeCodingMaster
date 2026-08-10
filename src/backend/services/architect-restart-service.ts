@@ -5,12 +5,18 @@ import type {
   ArchitectRestartStatus
 } from "../../shared/types/architect-restart.js";
 import type { VcmRoleMessage } from "../../shared/types/message.js";
-import type { RoleSessionRecord } from "../../shared/types/session.js";
+import type {
+  ClaudePermissionMode,
+  RoleSessionRecord,
+  SessionEffort,
+  SessionModel
+} from "../../shared/types/session.js";
 import { resolveRepoPath, type FileSystemAdapter } from "../adapters/filesystem.js";
 import { toVcmError, VcmError } from "../errors.js";
 import type { SessionService } from "./session-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 import type { AppSettingsService } from "./app-settings-service.js";
+import type { ProjectService } from "./project-service.js";
 import { ARCHITECT_PLANNING_MEMORY_CANDIDATE_PATH } from "./memory-review-paths.js";
 import { validateMemoryProposal } from "./memory-proposal-validation.js";
 
@@ -39,83 +45,105 @@ export interface ArchitectRestartScheduleResult {
 export interface ArchitectRestartService {
   schedule(repoRoot: string, taskSlug: string): Promise<ArchitectRestartScheduleResult>;
   getState(repoRoot: string, taskSlug: string): ArchitectRestartState | null;
+  recoverTask(repoRoot: string, taskSlug: string): Promise<void>;
   recordArchitectStop(repoRoot: string, taskSlug: string, sessionId: string): Promise<void>;
   recordRouteDelivered(repoRoot: string, taskSlug: string, message: VcmRoleMessage): Promise<void>;
   recordRouteAccepted(repoRoot: string, taskSlug: string, message: VcmRoleMessage): Promise<void>;
   recordArchitectureGateDisposition(repoRoot: string, taskSlug: string, accepted: boolean): Promise<void>;
-  clear(repoRoot: string, taskSlug: string): void;
+  recordReplacementPromptSubmitted(repoRoot: string, taskSlug: string, sessionId: string): Promise<void>;
+  clear(repoRoot: string, taskSlug: string): Promise<void>;
 }
 
 export interface ArchitectRestartServiceDeps {
   fs: FileSystemAdapter;
   taskService: Pick<TaskService, "loadTask">;
-  sessionService: Pick<SessionService, "getRoleSession" | "restartRoleSession">;
+  projectService: Pick<ProjectService, "loadConfig">;
+  sessionService: Pick<
+    SessionService,
+    "getRoleSession" | "restartRoleSession"
+  >;
   appSettings: Pick<AppSettingsService, "getPreferences">;
 }
 
 interface PendingArchitectRestart {
+  version: 1;
   repoRoot: string;
   taskSlug: string;
-  sessionId: string;
+  sourceSessionId: string;
+  sourceClaudeSessionId?: string;
   stopped: boolean;
   deliveredMessageId?: string;
   acceptedMessageId?: string;
   gateAccepted: boolean;
   status: ArchitectRestartStatus;
+  permissionMode: ClaudePermissionMode;
+  model?: SessionModel;
+  effort?: SessionEffort;
+  replacementSessionId?: string;
   memoryCandidatePath?: string;
   blocker?: ArchitectRestartBlocker;
+  updatedAt: string;
 }
+
+type StoredArchitectRestart = Omit<PendingArchitectRestart, "repoRoot">;
+
+const ARCHITECT_RESTART_STATE_FILE = "architect-restart.json";
 
 export function createArchitectRestartService(deps: ArchitectRestartServiceDeps): ArchitectRestartService {
   const pendingByTask = new Map<string, PendingArchitectRestart>();
+  const operationsByTask = new Map<string, Promise<unknown>>();
 
   return {
     async schedule(repoRoot, taskSlug) {
-      const session = await requireRunningArchitect(repoRoot, taskSlug);
-      await requireCompletePlan(repoRoot, taskSlug);
       const key = taskKey(repoRoot, taskSlug);
-      const existing = pendingByTask.get(key);
-      if (existing?.sessionId === session.id) {
-        if (existing.status === "blocked") {
-          existing.status = "pending";
-          existing.blocker = undefined;
-          await tryRestart(existing);
+      return withTaskLock(key, async () => {
+        const session = await requireRunningArchitect(repoRoot, taskSlug);
+        await requireCompletePlan(repoRoot, taskSlug);
+        const existing = pendingByTask.get(key);
+        if (existing?.status === "executing") {
           return {
             taskSlug,
-            sessionId: session.id,
-            status: "scheduled",
+            sessionId: existing.replacementSessionId ?? existing.sourceSessionId,
+            status: "already_scheduled" as const,
             ...(existing.memoryCandidatePath
               ? { memoryCandidatePath: existing.memoryCandidatePath }
               : {})
           };
         }
-        return {
+        if (existing && isSourceSession(existing, session)) {
+          if (existing.status === "blocked") {
+            existing.status = "pending";
+            existing.blocker = undefined;
+            existing.sourceSessionId = session.id;
+            existing.updatedAt = timestamp();
+            await persistPending(existing);
+            await tryRestart(existing);
+            return scheduleResult(existing, "scheduled");
+          }
+          return scheduleResult(existing, "already_scheduled");
+        }
+        const memoryCandidatePath = (await deps.appSettings.getPreferences()).autoMemoryEnabled
+          ? ARCHITECT_PLANNING_MEMORY_CANDIDATE_PATH
+          : undefined;
+        const pending: PendingArchitectRestart = {
+          version: 1,
+          repoRoot,
           taskSlug,
-          sessionId: session.id,
-          status: "already_scheduled",
-          ...(existing.memoryCandidatePath
-            ? { memoryCandidatePath: existing.memoryCandidatePath }
-            : {})
+          sourceSessionId: session.id,
+          ...(session.claudeSessionId ? { sourceClaudeSessionId: session.claudeSessionId } : {}),
+          stopped: false,
+          gateAccepted: false,
+          status: "pending",
+          permissionMode: session.permissionMode,
+          model: session.model,
+          effort: session.effort,
+          memoryCandidatePath: existing?.memoryCandidatePath ?? memoryCandidatePath,
+          updatedAt: timestamp()
         };
-      }
-      const memoryCandidatePath = (await deps.appSettings.getPreferences()).autoMemoryEnabled
-        ? ARCHITECT_PLANNING_MEMORY_CANDIDATE_PATH
-        : undefined;
-      pendingByTask.set(key, {
-        repoRoot,
-        taskSlug,
-        sessionId: session.id,
-        stopped: false,
-        gateAccepted: false,
-        status: "pending",
-        memoryCandidatePath
+        pendingByTask.set(key, pending);
+        await persistPending(pending);
+        return scheduleResult(pending, "scheduled");
       });
-      return {
-        taskSlug,
-        sessionId: session.id,
-        status: "scheduled",
-        ...(memoryCandidatePath ? { memoryCandidatePath } : {})
-      };
     },
 
     getState(repoRoot, taskSlug) {
@@ -125,7 +153,7 @@ export function createArchitectRestartService(deps: ArchitectRestartServiceDeps)
       }
       return {
         taskSlug: pending.taskSlug,
-        sessionId: pending.sessionId,
+        sessionId: pending.replacementSessionId ?? pending.sourceSessionId,
         status: pending.status,
         ...(pending.memoryCandidatePath
           ? { memoryCandidatePath: pending.memoryCandidatePath }
@@ -134,50 +162,137 @@ export function createArchitectRestartService(deps: ArchitectRestartServiceDeps)
       };
     },
 
+    async recoverTask(repoRoot, taskSlug) {
+      const key = taskKey(repoRoot, taskSlug);
+      await withTaskLock(key, async () => {
+        const stored = await loadPending(repoRoot, taskSlug);
+        if (!stored) {
+          pendingByTask.delete(key);
+          return;
+        }
+        const pending: PendingArchitectRestart = { ...stored, repoRoot };
+        pendingByTask.set(key, pending);
+        const session = await deps.sessionService.getRoleSession(repoRoot, taskSlug, ARCHITECT_ROLE);
+        if (pending.status === "executing") {
+          if (isConfirmedReplacement(pending, session)) {
+            await removePending(pending);
+            return;
+          }
+          if (
+            session?.status === "running"
+            && pending.replacementSessionId === session.id
+          ) {
+            return;
+          }
+          await launchReplacement(pending);
+          return;
+        }
+        if (pending.status === "pending" && restartPrerequisitesMet(pending)) {
+          if (session?.status === "running") {
+            await tryRestart(pending);
+          } else {
+            await launchReplacement(pending);
+          }
+        }
+      });
+    },
+
     async recordArchitectStop(repoRoot, taskSlug, sessionId) {
-      const pending = pendingByTask.get(taskKey(repoRoot, taskSlug));
-      if (!pending || pending.sessionId !== sessionId || pending.status === "blocked") {
-        return;
-      }
-      pending.stopped = true;
-      await tryRestart(pending);
+      const key = taskKey(repoRoot, taskSlug);
+      await withTaskLock(key, async () => {
+        const pending = pendingByTask.get(key);
+        if (!pending || pending.status !== "pending") {
+          return;
+        }
+        const session = await deps.sessionService.getRoleSession(repoRoot, taskSlug, ARCHITECT_ROLE);
+        if (!session || session.id !== sessionId || !isSourceSession(pending, session)) {
+          return;
+        }
+        pending.sourceSessionId = session.id;
+        pending.stopped = true;
+        pending.updatedAt = timestamp();
+        await persistPending(pending);
+        await tryRestart(pending);
+      });
     },
 
     async recordRouteDelivered(repoRoot, taskSlug, message) {
       if (!isArchitectToPm(message)) {
         return;
       }
-      const pending = pendingByTask.get(taskKey(repoRoot, taskSlug));
-      if (!pending || pending.status === "blocked") {
-        return;
-      }
-      pending.deliveredMessageId = message.id;
-      await tryRestart(pending);
+      const key = taskKey(repoRoot, taskSlug);
+      await withTaskLock(key, async () => {
+        const pending = pendingByTask.get(key);
+        if (!pending || pending.status !== "pending") {
+          return;
+        }
+        pending.deliveredMessageId = message.id;
+        pending.updatedAt = timestamp();
+        await persistPending(pending);
+        await tryRestart(pending);
+      });
     },
 
     async recordRouteAccepted(repoRoot, taskSlug, message) {
       if (!isArchitectToPm(message)) {
         return;
       }
-      const pending = pendingByTask.get(taskKey(repoRoot, taskSlug));
-      if (!pending || pending.status === "blocked") {
-        return;
-      }
-      pending.acceptedMessageId = message.id;
-      await tryRestart(pending);
+      const key = taskKey(repoRoot, taskSlug);
+      await withTaskLock(key, async () => {
+        const pending = pendingByTask.get(key);
+        if (!pending || pending.status !== "pending") {
+          return;
+        }
+        pending.acceptedMessageId = message.id;
+        pending.updatedAt = timestamp();
+        await persistPending(pending);
+        await tryRestart(pending);
+      });
     },
 
     async recordArchitectureGateDisposition(repoRoot, taskSlug, accepted) {
-      const pending = pendingByTask.get(taskKey(repoRoot, taskSlug));
-      if (!pending || pending.status === "blocked") {
-        return;
-      }
-      pending.gateAccepted = accepted;
-      await tryRestart(pending);
+      const key = taskKey(repoRoot, taskSlug);
+      await withTaskLock(key, async () => {
+        const pending = pendingByTask.get(key);
+        if (!pending || pending.status !== "pending") {
+          return;
+        }
+        pending.gateAccepted = accepted;
+        pending.updatedAt = timestamp();
+        await persistPending(pending);
+        await tryRestart(pending);
+      });
     },
 
-    clear(repoRoot, taskSlug) {
-      pendingByTask.delete(taskKey(repoRoot, taskSlug));
+    async recordReplacementPromptSubmitted(repoRoot, taskSlug, sessionId) {
+      const key = taskKey(repoRoot, taskSlug);
+      await withTaskLock(key, async () => {
+        const pending = pendingByTask.get(key);
+        if (!pending || pending.status !== "executing") {
+          return;
+        }
+        const session = await deps.sessionService.getRoleSession(repoRoot, taskSlug, ARCHITECT_ROLE);
+        if (
+          !session
+          || session.id !== sessionId
+          || !session.claudeSessionId
+          || (pending.replacementSessionId && pending.replacementSessionId !== session.id)
+        ) {
+          return;
+        }
+        await removePending(pending);
+      });
+    },
+
+    async clear(repoRoot, taskSlug) {
+      const key = taskKey(repoRoot, taskSlug);
+      await withTaskLock(key, async () => {
+        const pending = pendingByTask.get(key) ?? await loadPending(repoRoot, taskSlug);
+        pendingByTask.delete(key);
+        if (pending) {
+          await removePending({ ...pending, repoRoot });
+        }
+      });
     }
   };
 
@@ -209,13 +324,7 @@ export function createArchitectRestartService(deps: ArchitectRestartServiceDeps)
   }
 
   async function tryRestart(pending: PendingArchitectRestart): Promise<void> {
-    if (
-      pending.status !== "pending"
-      || !pending.stopped
-      || !pending.deliveredMessageId
-      || pending.deliveredMessageId !== pending.acceptedMessageId
-      || !pending.gateAccepted
-    ) {
+    if (pending.status !== "pending" || !restartPrerequisitesMet(pending)) {
       return;
     }
 
@@ -224,11 +333,8 @@ export function createArchitectRestartService(deps: ArchitectRestartServiceDeps)
       pending.taskSlug,
       ARCHITECT_ROLE
     );
-    if (
-      !session
-      || session.id !== pending.sessionId
-    ) {
-      blockPending(pending, new VcmError({
+    if (!session || !isSourceSession(pending, session)) {
+      await blockPending(pending, new VcmError({
         code: "ARCHITECT_RESTART_SESSION_UNAVAILABLE",
         message: "Architect restart is blocked because the scheduled Architect session no longer exists.",
         statusCode: 409
@@ -236,7 +342,7 @@ export function createArchitectRestartService(deps: ArchitectRestartServiceDeps)
       return;
     }
     if (session.status !== "running") {
-      blockPending(pending, new VcmError({
+      await blockPending(pending, new VcmError({
         code: "ARCHITECT_RESTART_SESSION_NOT_RUNNING",
         message: "Architect restart is blocked because the scheduled Architect session is not running.",
         statusCode: 409
@@ -246,36 +352,154 @@ export function createArchitectRestartService(deps: ArchitectRestartServiceDeps)
     if (session.activityStatus !== "idle") {
       return;
     }
+    pending.sourceSessionId = session.id;
+    await launchReplacement(pending);
+  }
 
+  async function launchReplacement(pending: PendingArchitectRestart): Promise<void> {
     pending.status = "executing";
+    pending.blocker = undefined;
+    pending.updatedAt = timestamp();
+    await persistPending(pending);
     try {
       await requireCompletePlan(pending.repoRoot, pending.taskSlug);
       await requirePlanningMemoryCandidate(pending);
-      await deps.sessionService.restartRoleSession(
+      const replacement = await deps.sessionService.restartRoleSession(
         pending.repoRoot,
         pending.taskSlug,
         ARCHITECT_ROLE,
         {
-          permissionMode: session.permissionMode,
-          model: session.model,
-          effort: session.effort,
+          permissionMode: pending.permissionMode,
+          model: pending.model,
+          effort: pending.effort,
           appendSystemPrompt: ARCHITECT_RESTORE_PROMPT
         }
       );
-      pendingByTask.delete(taskKey(pending.repoRoot, pending.taskSlug));
+      pending.replacementSessionId = replacement.id;
+      pending.updatedAt = timestamp();
+      await persistPending(pending);
     } catch (error) {
-      blockPending(pending, error);
+      await blockPending(pending, error);
     }
   }
 
-  function blockPending(pending: PendingArchitectRestart, error: unknown): void {
+  async function blockPending(pending: PendingArchitectRestart, error: unknown): Promise<void> {
     const normalized = toVcmError(error);
     pending.status = "blocked";
     pending.blocker = {
       code: normalized.code,
       message: normalized.message,
-      blockedAt: new Date().toISOString()
+      blockedAt: timestamp()
     };
+    pending.updatedAt = timestamp();
+    await persistPending(pending);
+  }
+
+  function restartPrerequisitesMet(pending: PendingArchitectRestart): boolean {
+    return Boolean(
+      pending.stopped
+      && pending.deliveredMessageId
+      && pending.deliveredMessageId === pending.acceptedMessageId
+      && pending.gateAccepted
+    );
+  }
+
+  function isSourceSession(pending: PendingArchitectRestart, session: RoleSessionRecord): boolean {
+    return session.id === pending.sourceSessionId
+      || Boolean(
+        pending.sourceClaudeSessionId
+        && session.claudeSessionId
+        && pending.sourceClaudeSessionId === session.claudeSessionId
+      );
+  }
+
+  function isConfirmedReplacement(
+    pending: PendingArchitectRestart,
+    session: RoleSessionRecord | undefined
+  ): boolean {
+    return Boolean(
+      session?.claudeSessionId
+      && (
+        (pending.replacementSessionId && session.id === pending.replacementSessionId)
+        || !pending.sourceClaudeSessionId
+        || session.claudeSessionId !== pending.sourceClaudeSessionId
+      )
+    );
+  }
+
+  function scheduleResult(
+    pending: PendingArchitectRestart,
+    status: ArchitectRestartScheduleResult["status"]
+  ): ArchitectRestartScheduleResult {
+    return {
+      taskSlug: pending.taskSlug,
+      sessionId: pending.replacementSessionId ?? pending.sourceSessionId,
+      status,
+      ...(pending.memoryCandidatePath ? { memoryCandidatePath: pending.memoryCandidatePath } : {})
+    };
+  }
+
+  async function persistPending(pending: PendingArchitectRestart): Promise<void> {
+    const { repoRoot: _repoRoot, ...stored } = pending;
+    await deps.fs.writeJsonAtomic(await statePath(pending.repoRoot, pending.taskSlug), stored);
+    pendingByTask.set(taskKey(pending.repoRoot, pending.taskSlug), pending);
+  }
+
+  async function loadPending(repoRoot: string, taskSlug: string): Promise<StoredArchitectRestart | undefined> {
+    const target = await statePath(repoRoot, taskSlug);
+    if (!(await deps.fs.pathExists(target))) {
+      return undefined;
+    }
+    const stored = await deps.fs.readJson<StoredArchitectRestart>(target);
+    if (
+      stored.version !== 1
+      || stored.taskSlug !== taskSlug
+      || !stored.sourceSessionId
+      || !["pending", "executing", "blocked"].includes(stored.status)
+    ) {
+      throw new VcmError({
+        code: "ARCHITECT_RESTART_STATE_INVALID",
+        message: `Architect restart state is invalid for task ${taskSlug}.`,
+        statusCode: 500
+      });
+    }
+    return stored;
+  }
+
+  async function removePending(pending: PendingArchitectRestart): Promise<void> {
+    pendingByTask.delete(taskKey(pending.repoRoot, pending.taskSlug));
+    const target = await statePath(pending.repoRoot, pending.taskSlug);
+    if (await deps.fs.pathExists(target)) {
+      await deps.fs.removePath?.(target, { force: true });
+    }
+  }
+
+  async function statePath(repoRoot: string, taskSlug: string): Promise<string> {
+    const [config, task] = await Promise.all([
+      deps.projectService.loadConfig(repoRoot),
+      deps.taskService.loadTask(repoRoot, taskSlug)
+    ]);
+    return resolveRepoPath(
+      getTaskRuntimeRepoRoot(task),
+      path.posix.join(config.stateRoot, ARCHITECT_RESTART_STATE_FILE)
+    );
+  }
+
+  async function withTaskLock<T>(key: string, run: () => Promise<T>): Promise<T> {
+    const previous = operationsByTask.get(key) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(run);
+    operationsByTask.set(key, current);
+    try {
+      return await current;
+    } finally {
+      if (operationsByTask.get(key) === current) {
+        operationsByTask.delete(key);
+      }
+    }
+  }
+
+  function timestamp(): string {
+    return new Date().toISOString();
   }
 
   async function requirePlanningMemoryCandidate(pending: PendingArchitectRestart): Promise<void> {

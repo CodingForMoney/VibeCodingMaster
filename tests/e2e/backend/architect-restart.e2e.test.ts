@@ -5,10 +5,12 @@ import { createMockClaudeE2eApp } from "./helpers/e2e-app.js";
 import { createE2eRepo } from "./helpers/e2e-repo.js";
 import {
   connectAndCreateTask,
+  connectProject,
   getGateState,
   getWorkspaceState,
   injectOk,
   requestGateReview,
+  resumeRole,
   scheduleArchitectRestart,
   updateGateSettings,
   updatePreferences,
@@ -96,6 +98,133 @@ describe("backend E2E Architect post-planning restart", () => {
     expect(createInput.args).toContain("--effort");
     expect(createInput.args).toContain("high");
     expect(env.mockRuntime.getWrites(replacement!.id)).toEqual([]);
+    expect((await getWorkspaceState(env.app, task.taskSlug)).architectRestart).toMatchObject({
+      status: "executing",
+      sessionId: replacement!.id
+    });
+    await postUserPromptHook(env, task.taskSlug, "architect-restored-session");
+    expect((await getWorkspaceState(env.app, task.taskSlug)).architectRestart).toBeNull();
+  });
+
+  it("recreates the restoration session after VCM restarts before its first prompt", async () => {
+    const repo = await createE2eRepo();
+    const first = await createMockClaudeE2eApp();
+    const tempRoot = first.tempRoot;
+    let firstClosed = false;
+    let second: Awaited<ReturnType<typeof createMockClaudeE2eApp>> | undefined;
+    cleanups.push(async () => {
+      if (second) {
+        await second.close();
+      } else if (!firstClosed) {
+        await first.close();
+      } else {
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
+      await repo.cleanup();
+    });
+
+    const task = await connectAndCreateTask(first.app, repo, "architect-restore-runtime-recovery");
+    await writeConfirmedArchitectureBrief(task.worktreePath, task.taskSlug);
+    await writeCompletePlan(task.worktreePath);
+    await startRole(first.app, task.taskSlug, "project-manager");
+    const architect = await startRole(first.app, task.taskSlug, "architect", {
+      permissionMode: "bypassPermissions",
+      model: "fable",
+      effort: "high"
+    });
+    await postUserPromptHook(first, task.taskSlug, "architect-source-session");
+    first.mockRuntime.onPrompt("project-manager", "Architecture complete. Plan ready.", async (ctx) => {
+      await ctx.userPromptSubmit();
+      await ctx.stop();
+    });
+
+    await scheduleArchitectRestart(first.app, task.taskSlug);
+    await writeArchitectRoute(task.worktreePath);
+    await postRoleHook(first, task.taskSlug, "architect", "Stop", "architect-source-session", true);
+    await first.mockRuntime.waitForIdle();
+    expect((await requestGateReview(first.app, task.taskSlug, "architecture-plan")).status).toBe("disabled");
+    await waitForArchitectReplacement(first, task.taskSlug, architect.id);
+    expect((await getWorkspaceState(first.app, task.taskSlug)).architectRestart?.status).toBe("executing");
+    const restartStatePath = path.join(task.worktreePath, ".ai/vcm/architect-restart.json");
+    await expect(fs.access(restartStatePath)).resolves.toBeUndefined();
+
+    await first.close({ preserveTempRoot: true });
+    firstClosed = true;
+    second = await createMockClaudeE2eApp({ tempRoot });
+    await connectProject(second.app, repo.repoRoot);
+
+    const recovered = second.mockRuntime.getSessionByRole(task.taskSlug, "architect");
+    expect(recovered).toBeDefined();
+    const createInput = second.mockRuntime.getCreateInput(recovered!.id);
+    expect(createInput.args).toContain("--append-system-prompt");
+    expect(createInput.args).toContain("fable");
+    expect(createInput.args).toContain("high");
+    expect((await getWorkspaceState(second.app, task.taskSlug)).architectRestart).toMatchObject({
+      status: "executing",
+      sessionId: recovered!.id
+    });
+
+    await postUserPromptHook(second, task.taskSlug, "architect-recovered-session");
+    expect((await getWorkspaceState(second.app, task.taskSlug)).architectRestart).toBeNull();
+    await expect(fs.access(restartStatePath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("restores a deferred restart and completes it after the planning session resumes", async () => {
+    const repo = await createE2eRepo();
+    const first = await createMockClaudeE2eApp();
+    const tempRoot = first.tempRoot;
+    let firstClosed = false;
+    let second: Awaited<ReturnType<typeof createMockClaudeE2eApp>> | undefined;
+    cleanups.push(async () => {
+      if (second) {
+        await second.close();
+      } else if (!firstClosed) {
+        await first.close();
+      } else {
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
+      await repo.cleanup();
+    });
+
+    const task = await connectAndCreateTask(first.app, repo, "architect-deferred-runtime-recovery");
+    await writeConfirmedArchitectureBrief(task.worktreePath, task.taskSlug);
+    await writeCompletePlan(task.worktreePath);
+    await startRole(first.app, task.taskSlug, "architect");
+    await postUserPromptHook(first, task.taskSlug, "architect-deferred-source-session");
+    await scheduleArchitectRestart(first.app, task.taskSlug);
+    expect((await getWorkspaceState(first.app, task.taskSlug)).architectRestart?.status).toBe("pending");
+
+    await first.close({ preserveTempRoot: true });
+    firstClosed = true;
+    second = await createMockClaudeE2eApp({ tempRoot });
+    await connectProject(second.app, repo.repoRoot);
+    expect((await getWorkspaceState(second.app, task.taskSlug)).architectRestart?.status).toBe("pending");
+
+    await startRole(second.app, task.taskSlug, "project-manager");
+    const resumed = await resumeRole(second.app, task.taskSlug, "architect");
+    expect(resumed.claudeSessionId).toBe("architect-deferred-source-session");
+    second.mockRuntime.onPrompt("project-manager", "Architecture complete. Plan ready.", async (ctx) => {
+      await ctx.userPromptSubmit();
+      await ctx.stop();
+    });
+    await writeArchitectRoute(task.worktreePath);
+    await postRoleHook(
+      second,
+      task.taskSlug,
+      "architect",
+      "Stop",
+      "architect-deferred-source-session",
+      true
+    );
+    await second.mockRuntime.waitForIdle();
+    expect((await requestGateReview(second.app, task.taskSlug, "architecture-plan")).status).toBe("disabled");
+    await waitForArchitectReplacement(second, task.taskSlug, resumed.id);
+
+    const replacement = second.mockRuntime.getSessionByRole(task.taskSlug, "architect");
+    expect(second.mockRuntime.getCreateInput(replacement!.id).args).toContain("--append-system-prompt");
+    expect((await getWorkspaceState(second.app, task.taskSlug)).architectRestart?.status).toBe("executing");
+    await postUserPromptHook(second, task.taskSlug, "architect-deferred-restored-session");
+    expect((await getWorkspaceState(second.app, task.taskSlug)).architectRestart).toBeNull();
   });
 
   it("keeps the Architect session through request_changes and restarts once a revised plan is approved", async () => {
@@ -358,6 +487,12 @@ describe("backend E2E Architect post-planning restart", () => {
     await submitPlanningMemoryCandidate(env.app, task.taskSlug, architect, scheduled.memoryCandidatePath!);
     expect((await scheduleArchitectRestart(env.app, task.taskSlug)).status).toBe("scheduled");
     await waitForArchitectReplacement(env, task.taskSlug, architect.id);
+    const replacement = env.mockRuntime.getSessionByRole(task.taskSlug, "architect");
+    expect((await getWorkspaceState(env.app, task.taskSlug)).architectRestart).toMatchObject({
+      status: "executing",
+      sessionId: replacement?.id
+    });
+    await postUserPromptHook(env, task.taskSlug, "architect-memory-restored-session");
     expect((await getWorkspaceState(env.app, task.taskSlug)).architectRestart).toBeNull();
   });
 

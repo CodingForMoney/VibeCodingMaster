@@ -31,7 +31,13 @@ export function createTaskCloseService(deps: TaskCloseServiceDeps): TaskCloseSer
     async closeTask(repoRoot, taskSlug) {
       const task = await deps.taskService.markTaskCleaned(repoRoot, taskSlug);
       const warnings: string[] = [];
-      deps.architectRestartService?.clear(repoRoot, taskSlug);
+      if (deps.architectRestartService) {
+        await bestEffort(
+          "Unable to clear Architect restart state",
+          () => deps.architectRestartService!.clear(repoRoot, taskSlug),
+          warnings
+        );
+      }
 
       await stopTaskRoleSessions(repoRoot, taskSlug, warnings);
       await bestEffort(
