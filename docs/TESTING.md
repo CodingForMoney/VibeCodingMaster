@@ -211,6 +211,7 @@ tests/
 | INT-RT-005 | Workflow-role stall warning and explicit recovery | Claude progress hooks + Role Stall Detector + Session Service + Round Service | A missing model/tool completion is visible without automatic flow mutation | A timed-out phase exposes one warning through task workspace state; progress clears it; Ignore suppresses that generation; Recover revalidates the runtime token and active Round, resumes the same Claude Session, and leaves the Round running | L2, on Hook, Session recovery, or runtime warning changes | Covered by `role-stall-detector-service.test.ts` and `runtime-recovery.e2e.test.ts` with mock Claude hooks and PTY; a live provider hang remains environment-dependent |
 | INT-RT-006 | PM question hard pause | `vcm-ask-user` + Workflow Control + Claude Stop/UserPromptSubmit hooks | Every PM question stops routing until the user answers | Registering a question clears pending dispatch in the same state update; Stop performs no route or settle scan; VCM-marked prompts do not unlock; a new direct user prompt clears the wait; the old approval remains canceled | L2, on PM communication, Workflow Control, or Hook change | Covered by workflow-control service/route tests, Claude Hook unit tests, and backend mock-Claude E2E |
 | INT-RT-007 | Multi-role Docs-Only Flow | Workflow Control + Artifact API + Architect/Coder/Tester sessions | Documentation-only work can be assigned to the role that owns the relevant evidence without entering code or validation gates | All three roles may submit `docs-update-report.md`; each sequential assignment requires a fresh report; only the latest `synced` or `unchanged` result completes; a testing-document update by Tester remains Docs-Only | L2, on Docs-Only or managed-artifact changes | Covered by artifact, workflow-control, Harness-template, and backend mock-Claude E2E tests |
+| INT-RT-008 | Workflow-role Restart With Context | Session routes + Role Context Restart Service + Claude Hook | A fresh workflow-role Session can continue from durable task artifacts without a new context document | All five workflow roles receive role-specific artifact references and one continuation prompt; Translator and Harness Engineer are rejected; the first prompt clears intent; backend restart recreates an unconfirmed replacement | L2, on Session restart or recovery changes | Covered by `role-context-restart.e2e.test.ts` with the mock Claude runtime |
 
 ### Backend E2E (implemented: `tests/e2e/backend/`)
 
@@ -223,6 +224,8 @@ services with controlled runtime doubles:
   unlock, and refusal to dispatch a stale route after the answer.
 - Session ID persistence, restart/close behavior, backend restart recovery, and
   resuming a recovered Claude session.
+- Restart With Context for all five workflow roles, explicit tool-Agent
+  exclusion, and recovery before the replacement's first accepted prompt.
 - Complete architecture, code, test, Gate Review callback, Final Acceptance,
   and automatic Task Harness Retrospective orchestration.
 - Architecture, validation, and code-diff rejection/correction loops, including

@@ -17,6 +17,7 @@ import {
 } from "./services/codex-bridge-integration-service.js";
 import { createAutoMemoryService, type AutoMemoryService } from "./services/auto-memory-service.js";
 import { createArchitectRestartService, type ArchitectRestartService } from "./services/architect-restart-service.js";
+import { createRoleContextRestartService, type RoleContextRestartService } from "./services/role-context-restart-service.js";
 import { createRoleStallDetectorService, type RoleStallDetectorService } from "./services/role-stall-detector-service.js";
 import { createClaudeTranscriptService } from "./services/claude-transcript-service.js";
 import { createGateReviewService, type GateReviewService } from "./services/gate-review-service.js";
@@ -91,6 +92,7 @@ export interface ServerDeps {
   taskCloseService: TaskCloseService;
   taskWorkflowService: TaskWorkflowService;
   architectRestartService: ArchitectRestartService;
+  roleContextRestartService: RoleContextRestartService;
   sessionService: SessionService;
   artifactService: ArtifactService;
   harnessService: HarnessService;
@@ -197,7 +199,8 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     commandDispatcher: deps.commandDispatcher,
     translationService: deps.translationService,
     roundService: deps.roundService,
-    architectRestartService: deps.architectRestartService
+    architectRestartService: deps.architectRestartService,
+    roleContextRestartService: deps.roleContextRestartService
   });
   registerArtifactRoutes(app, {
     projectService: deps.projectService,
@@ -367,6 +370,12 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     sessionService,
     appSettings
   });
+  const roleContextRestartService = createRoleContextRestartService({
+    fs,
+    projectService,
+    taskService,
+    sessionService
+  });
   const messageService = createMessageService({
     fs,
     runtime,
@@ -446,7 +455,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     roundService,
     projectService,
     taskWorkflowService,
-    architectRestartService
+    architectRestartService,
+    roleContextRestartService
   });
   const gatewayService = createGatewayService({
     fs,
@@ -469,7 +479,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     projectService,
     taskService,
     translationWorkerService,
-    architectRestartService
+    architectRestartService,
+    roleContextRestartService
   });
   const claudeHookService = createClaudeHookService({
     projectService,
@@ -487,6 +498,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     jobGuard: createJobGuardService(),
     translationWorkerService,
     architectRestartService,
+    roleContextRestartService,
     roleStallDetector,
     workflowControlService
   });
@@ -535,6 +547,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     taskCloseService,
     taskWorkflowService,
     architectRestartService,
+    roleContextRestartService,
     sessionService,
     artifactService,
     harnessService,

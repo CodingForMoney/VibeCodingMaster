@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CORE_VCM_ROLE_DEFINITIONS, REVIEWER_ROLE_DEFINITION, VCM_ROLE_DEFINITIONS } from "../../shared/constants.js";
+import { CORE_VCM_ROLE_DEFINITIONS, REVIEWER_ROLE_DEFINITION, VCM_ROLE_DEFINITIONS, isVcmRoleName } from "../../shared/constants.js";
 import type { TaskStatusReport } from "../../shared/types/api.js";
 import type { ArchitectRestartState } from "../../shared/types/architect-restart.js";
 import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
@@ -464,6 +464,19 @@ export function TaskWorkspace({
                       });
                       appendEvent(`restarted ${role} with ${permissionModes[role]} / ${models[role]} / ${efforts[role]}`);
                     }, `Restart ${role} session`)}
+                    onRestartWithContext={() => void runAction(async () => {
+                      if (!isVcmRoleName(role)) {
+                        return;
+                      }
+                      await apiClient.restartRoleSessionWithContext(task.taskSlug, role, {
+                        cols: 100,
+                        rows: 28,
+                        permissionMode: permissionModes[role],
+                        model: models[role],
+                        effort: efforts[role]
+                      });
+                      appendEvent(`restarted ${role} with task context`);
+                    }, `Restart ${role} session with task context`)}
                     onNotifyHarnessUpdated={() => void runAction(async () => {
                       await apiClient.notifyRoleHarnessUpdated(task.taskSlug, role);
                       appendEvent(`notified ${role} to reload latest harness`);

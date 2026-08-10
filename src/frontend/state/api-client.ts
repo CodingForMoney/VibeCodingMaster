@@ -63,7 +63,7 @@ import type {
   DeleteMessageHistoryResult
 } from "../../shared/types/message.js";
 import type { ProjectSummary, ConnectProjectRequest } from "../../shared/types/project.js";
-import type { DispatchableRole, RoleName } from "../../shared/types/role.js";
+import type { DispatchableRole, RoleName, VcmRoleName } from "../../shared/types/role.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { RoleSessionRecord, StartRoleSessionRequest } from "../../shared/types/session.js";
 import type { CleanupTaskResult, CreateTaskRequest, OneClickStartTaskResult, TaskRecord } from "../../shared/types/task.js";
@@ -360,6 +360,12 @@ export const apiClient = {
   },
   restartRoleSession(taskSlug: string, role: RoleName, input: StartRoleSessionRequest = {}) {
     return request<RoleSessionRecord>(`/api/tasks/${encodeURIComponent(taskSlug)}/sessions/${role}/restart`, {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  restartRoleSessionWithContext(taskSlug: string, role: VcmRoleName, input: StartRoleSessionRequest = {}) {
+    return request<RoleSessionRecord>(`/api/tasks/${encodeURIComponent(taskSlug)}/sessions/${role}/restart-with-context`, {
       method: "POST",
       body: JSON.stringify(input)
     });

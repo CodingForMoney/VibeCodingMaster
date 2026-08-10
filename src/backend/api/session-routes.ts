@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { isDispatchableRole, isRoleName } from "../../shared/constants.js";
+import { isDispatchableRole, isRoleName, isVcmRoleName } from "../../shared/constants.js";
 import type { StartRoleSessionRequest } from "../../shared/types/session.js";
 import { VcmError } from "../errors.js";
 import type { CommandDispatcher } from "../services/command-dispatcher.js";
@@ -8,6 +8,7 @@ import type { RoundService } from "../services/round-service.js";
 import type { SessionService } from "../services/session-service.js";
 import type { TranslationService } from "../services/translation-service.js";
 import type { ArchitectRestartService } from "../services/architect-restart-service.js";
+import type { RoleContextRestartService } from "../services/role-context-restart-service.js";
 
 export interface SessionRouteDeps {
   projectService: ProjectService;
@@ -15,7 +16,8 @@ export interface SessionRouteDeps {
   commandDispatcher: CommandDispatcher;
   translationService: Pick<TranslationService, "stopSession">;
   roundService: Pick<RoundService, "stopSession">;
-  architectRestartService: Pick<ArchitectRestartService, "schedule">;
+  architectRestartService: Pick<ArchitectRestartService, "schedule" | "getState">;
+  roleContextRestartService: Pick<RoleContextRestartService, "restart" | "clearRole">;
 }
 
 export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDeps): void {
@@ -29,6 +31,9 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
     async (request) => {
       const project = await requireCurrentProject(deps.projectService);
       const role = parseRole(request.params.role);
+      if (isVcmRoleName(role)) {
+        await deps.roleContextRestartService.clearRole(project.repoRoot, request.params.taskSlug, role);
+      }
       return deps.sessionService.startRoleSession(project.repoRoot, request.params.taskSlug, role, request.body);
     }
   );
@@ -50,6 +55,9 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
     async (request) => {
       const project = await requireCurrentProject(deps.projectService);
       const role = parseRole(request.params.role);
+      if (isVcmRoleName(role)) {
+        await deps.roleContextRestartService.clearRole(project.repoRoot, request.params.taskSlug, role);
+      }
       const session = await deps.sessionService.stopRoleSession(project.repoRoot, request.params.taskSlug, role);
       await deps.translationService.stopSession(session.id);
       deps.roundService.stopSession(session.id);
@@ -58,10 +66,40 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
   );
 
   app.post<{ Params: { taskSlug: string; role: string }; Body: StartRoleSessionRequest }>(
+    "/api/tasks/:taskSlug/sessions/:role/restart-with-context",
+    async (request) => {
+      const project = await requireCurrentProject(deps.projectService);
+      const role = parseVcmRole(request.params.role);
+      if (role === "architect" && deps.architectRestartService.getState(project.repoRoot, request.params.taskSlug)) {
+        throw new VcmError({
+          code: "ARCHITECT_RESTART_CONFLICT",
+          message: "Architect already has a pending post-planning restart.",
+          statusCode: 409
+        });
+      }
+      const existing = await deps.sessionService.getRoleSession(project.repoRoot, request.params.taskSlug, role);
+      await deps.sessionService.assertModelLaunchReady(request.body?.model ?? existing?.model);
+      if (existing) {
+        await deps.translationService.stopSession(existing.id, { clearCache: true });
+        deps.roundService.stopSession(existing.id);
+      }
+      return deps.roleContextRestartService.restart(
+        project.repoRoot,
+        request.params.taskSlug,
+        role,
+        request.body
+      );
+    }
+  );
+
+  app.post<{ Params: { taskSlug: string; role: string }; Body: StartRoleSessionRequest }>(
     "/api/tasks/:taskSlug/sessions/:role/restart",
     async (request) => {
       const project = await requireCurrentProject(deps.projectService);
       const role = parseRole(request.params.role);
+      if (isVcmRoleName(role)) {
+        await deps.roleContextRestartService.clearRole(project.repoRoot, request.params.taskSlug, role);
+      }
       const existing = await deps.sessionService.getRoleSession(project.repoRoot, request.params.taskSlug, role);
       await deps.sessionService.assertModelLaunchReady(request.body?.model ?? existing?.model);
       if (existing) {
@@ -77,6 +115,9 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
     async (request) => {
       const project = await requireCurrentProject(deps.projectService);
       const role = parseRole(request.params.role);
+      if (isVcmRoleName(role)) {
+        await deps.roleContextRestartService.clearRole(project.repoRoot, request.params.taskSlug, role);
+      }
       return deps.sessionService.resumeRoleSession(project.repoRoot, request.params.taskSlug, role, request.body);
     }
   );
@@ -115,6 +156,17 @@ function parseRole(role: string) {
     throw new VcmError({
       code: "UNKNOWN_ROLE",
       message: `Unknown role: ${role}`,
+      statusCode: 400
+    });
+  }
+  return role;
+}
+
+function parseVcmRole(role: string) {
+  if (!isVcmRoleName(role)) {
+    throw new VcmError({
+      code: "ROLE_CONTEXT_RESTART_UNSUPPORTED",
+      message: `Restart With Context is available only for VCM workflow roles: ${role}`,
       statusCode: 400
     });
   }

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { ROLE_NAMES, isDispatchableRole } from "../../shared/constants.js";
 import type { ClaudeHookEventName } from "../../shared/types/claude-hook.js";
-import type { RoleName } from "../../shared/types/role.js";
+import type { RoleName, VcmRoleName } from "../../shared/types/role.js";
 import {
   isCodexBridgeSessionModel,
   type ClaudePermissionMode,
@@ -52,6 +52,8 @@ export interface SessionService {
   resumeRoleSession(repoRoot: string, taskSlug: string, role: RoleName, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
   stopRoleSession(repoRoot: string, taskSlug: string, role: RoleName): Promise<RoleSessionRecord>;
   restartRoleSession(repoRoot: string, taskSlug: string, role: RoleName, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
+  restartRoleSessionForContext(repoRoot: string, taskSlug: string, role: VcmRoleName, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
+  submitRolePrompt(repoRoot: string, taskSlug: string, role: VcmRoleName, expectedSessionId: string, prompt: string): Promise<void>;
   getRoleSession(repoRoot: string, taskSlug: string, role: RoleName): Promise<RoleSessionRecord | undefined>;
   listRoleSessions(repoRoot: string, taskSlug: string): Promise<RoleSessionRecord[]>;
   notifyRoleHarnessUpdated(repoRoot: string, taskSlug: string, role: RoleName): Promise<RoleSessionRecord>;
@@ -195,7 +197,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     taskSlug: string,
     role: RoleName,
     input: StartRoleSessionRequest,
-    launchMode: LaunchMode
+    launchMode: LaunchMode,
+    options: { restoreProjectManagerContext?: boolean } = {}
   ): Promise<RoleSessionRecord> {
     const config = await deps.projectService.loadConfig(repoRoot);
     const task = await deps.taskService.loadTask(repoRoot, taskSlug);
@@ -314,7 +317,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
 
     deps.registry.upsert(record);
     await persistRoleSessionRecord(deps.fs, repoRoot, taskRepoRoot, config.stateRoot, record);
-    if (role === "project-manager") {
+    if (role === "project-manager" && options.restoreProjectManagerContext !== false) {
       await restoreProjectManagerWorkflowContext(record, taskRepoRoot, config.stateRoot);
     }
     return withHarnessRevisionView(taskRepoRoot, record);
@@ -1479,6 +1482,53 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       );
 
       return launchRoleSession(repoRoot, taskSlug, role, input, "fresh");
+    },
+    async restartRoleSessionForContext(repoRoot, taskSlug, role, input = {}) {
+      const existing = await this.getRoleSession(repoRoot, taskSlug, role);
+      if (!existing) {
+        return launchRoleSession(repoRoot, taskSlug, role, input, "fresh", {
+          restoreProjectManagerContext: false
+        });
+      }
+
+      await getModelLaunchEnvironment(normalizeClaudeModel(input.model ?? existing.model));
+
+      if (deps.runtime.getSession(existing.id)) {
+        await deps.runtime.stop(existing.id);
+      }
+      deps.registry.remove(existing.id);
+      const config = await deps.projectService.loadConfig(repoRoot);
+      const task = await deps.taskService.loadTask(repoRoot, taskSlug);
+      await clearPersistedRoleSessionRecord(
+        deps.fs,
+        getTaskRuntimeRepoRoot(task),
+        config.stateRoot,
+        taskSlug,
+        role,
+        now()
+      );
+
+      return launchRoleSession(repoRoot, taskSlug, role, input, "fresh", {
+        restoreProjectManagerContext: false
+      });
+    },
+    async submitRolePrompt(repoRoot, taskSlug, role, expectedSessionId, prompt) {
+      const session = await this.getRoleSession(repoRoot, taskSlug, role);
+      if (!session || session.id !== expectedSessionId || session.status !== "running") {
+        throw new VcmError({
+          code: "ROLE_SESSION_NOT_RUNNING",
+          message: `${role} replacement session is not running.`,
+          statusCode: 409
+        });
+      }
+      if ((await waitForSessionInputReady(session.id)) === "exited") {
+        throw new VcmError({
+          code: "ROLE_SESSION_START_FAILED",
+          message: `${role} replacement session exited before it could accept the recovery prompt.`,
+          statusCode: 409
+        });
+      }
+      await submitTerminalInput(deps.runtime, session.id, prompt);
     },
     async getRoleSession(repoRoot, taskSlug, role) {
       const config = await deps.projectService.loadConfig(repoRoot);

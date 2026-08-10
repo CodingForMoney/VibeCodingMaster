@@ -31,6 +31,7 @@ export interface SessionConsoleProps {
   onResume(): void;
   onStop(): void;
   onRestart(): void;
+  onRestartWithContext?(): void;
   onNotifyHarnessUpdated?(): void;
   onTerminalEvent(message: string): void;
 }
@@ -58,6 +59,7 @@ export function SessionConsole({
   onResume,
   onStop,
   onRestart,
+  onRestartWithContext,
   onNotifyHarnessUpdated,
   onTerminalEvent
 }: SessionConsoleProps) {
@@ -84,6 +86,7 @@ export function SessionConsole({
             onResume={onResume}
             onStop={onStop}
             onRestart={onRestart}
+            onRestartWithContext={onRestartWithContext}
             onNotifyHarnessUpdated={onNotifyHarnessUpdated}
           />
           {session?.status === "running" ? (

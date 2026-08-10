@@ -1007,6 +1007,13 @@ Restart clears the stored Claude session id until the next accepted prompt.
 Resume failure must fall back or surface a clear error; VCM must not keep
 polling a missing terminal session forever.
 
+The five workflow roles also support Restart With Context. VCM persists the
+restart intent before replacing the process, points the fresh Session to the
+role's existing task artifacts, and submits a continuation prompt. Confirmation
+comes from the replacement's first `UserPromptSubmit`; an unconfirmed restart is
+recreated during project recovery. This mechanism creates no generic context
+file and does not apply to Translator or Harness Engineer.
+
 ## 20. Minimum VCM Rules
 
 1.  Fixed harness ownership is defined by installer entries, managed markers,

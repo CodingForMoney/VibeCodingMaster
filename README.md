@@ -221,7 +221,14 @@ Controls:
 - `Start`: start a new Claude Code role session
 - `Resume`: resume a saved Claude Code session
 - `Restart`: stop current process and start fresh
+- `Restart With Context`: restart a VCM workflow role and continue from its current task artifacts
 - `Stop`: stop the embedded terminal process
+
+`Restart With Context` is available only for Project Manager, Architect, Coder,
+Tester, and Reviewer. It reuses their existing handoffs, workflow state, Gate
+requests, worktree, and Git state; it does not create a separate context file.
+Translator and Harness Engineer are tool Agents and do not use this workflow-role
+recovery path.
 
 Permission modes:
 

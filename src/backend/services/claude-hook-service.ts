@@ -29,6 +29,7 @@ import type { TranslationWorkerService } from "./translation-worker-service.js";
 import type { ArchitectRestartService } from "./architect-restart-service.js";
 import type { RoleStallDetectorService } from "./role-stall-detector-service.js";
 import type { WorkflowControlService } from "./workflow-control-service.js";
+import type { RoleContextRestartService } from "./role-context-restart-service.js";
 
 const MAX_ROLE_RETRY_ATTEMPTS = 20;
 const ROLE_RETRY_BASE_DELAY_MS = 60_000;
@@ -94,6 +95,7 @@ export interface ClaudeHookServiceDeps {
     ArchitectRestartService,
     "recordArchitectStop" | "recordRouteAccepted" | "recordReplacementPromptSubmitted"
   >;
+  roleContextRestartService?: Pick<RoleContextRestartService, "recordPromptSubmitted">;
   roleStallDetector?: Pick<RoleStallDetectorService, "recordHook">;
   workflowControlService?: Pick<
     WorkflowControlService,
@@ -343,6 +345,14 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       await deps.architectRestartService?.recordReplacementPromptSubmitted(
         context.project.repoRoot,
         context.taskSlug,
+        session.id
+      );
+    }
+    if (isVcmRoleName(input.role)) {
+      await deps.roleContextRestartService?.recordPromptSubmitted(
+        context.project.repoRoot,
+        context.taskSlug,
+        input.role,
         session.id
       );
     }

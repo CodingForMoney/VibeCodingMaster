@@ -21,6 +21,7 @@ import { createHarnessService } from "../../../../src/backend/services/harness-s
 import { createHarnessFeedbackService } from "../../../../src/backend/services/harness-feedback-service.js";
 import { createAutoMemoryService } from "../../../../src/backend/services/auto-memory-service.js";
 import { createArchitectRestartService } from "../../../../src/backend/services/architect-restart-service.js";
+import { createRoleContextRestartService } from "../../../../src/backend/services/role-context-restart-service.js";
 import { createRoleStallDetectorService } from "../../../../src/backend/services/role-stall-detector-service.js";
 import { createCommandDispatcher } from "../../../../src/backend/services/command-dispatcher.js";
 import { createStatusService } from "../../../../src/backend/services/status-service.js";
@@ -176,6 +177,13 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     sessionService,
     appSettings
   });
+  const roleContextRestartService = createRoleContextRestartService({
+    fs: fsAdapter,
+    projectService,
+    taskService,
+    sessionService,
+    now: options.now
+  });
   const messageService = createMessageService({
     fs: fsAdapter,
     runtime: mockRuntime,
@@ -273,7 +281,8 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     roundService,
     projectService,
     taskWorkflowService,
-    architectRestartService
+    architectRestartService,
+    roleContextRestartService
   });
   const gatewayService = createGatewayService({
     fs: fsAdapter,
@@ -296,7 +305,8 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     projectService,
     taskService,
     translationWorkerService,
-    architectRestartService
+    architectRestartService,
+    roleContextRestartService
   });
   const claudeHookService = createClaudeHookService({
     projectService,
@@ -314,6 +324,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     jobGuard: createJobGuardService(),
     translationWorkerService,
     architectRestartService,
+    roleContextRestartService,
     roleStallDetector,
     workflowControlService,
     retrySetTimeout(callback) {
@@ -373,6 +384,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     taskCloseService,
     taskWorkflowService,
     architectRestartService,
+    roleContextRestartService,
     sessionService,
     artifactService,
     harnessService,

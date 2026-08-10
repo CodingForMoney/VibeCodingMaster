@@ -26,6 +26,7 @@ export interface SessionToolbarProps {
   onResume(): void;
   onStop(): void;
   onRestart(): void;
+  onRestartWithContext?(): void;
   onNotifyHarnessUpdated?(): void;
 }
 
@@ -44,6 +45,7 @@ export function SessionToolbar({
   onResume,
   onStop,
   onRestart,
+  onRestartWithContext,
   onNotifyHarnessUpdated
 }: SessionToolbarProps) {
   const isRunning = session?.status === "running";
@@ -120,6 +122,11 @@ export function SessionToolbar({
         <button type="button" disabled={busy || !session} onClick={onRestart}>
           Restart
         </button>
+        {onRestartWithContext ? (
+          <button type="button" disabled={busy || !session} onClick={onRestartWithContext}>
+            Restart With Context
+          </button>
+        ) : null}
         <button type="button" disabled={busy || !session} onClick={onStop}>
           Stop
         </button>

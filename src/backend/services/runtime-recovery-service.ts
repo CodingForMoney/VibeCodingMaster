@@ -10,6 +10,7 @@ import type { TaskService } from "./task-service.js";
 import { getTaskRuntimeRepoRoot } from "./task-service.js";
 import type { TranslationWorkerService } from "./translation-worker-service.js";
 import type { ArchitectRestartService } from "./architect-restart-service.js";
+import type { RoleContextRestartService } from "./role-context-restart-service.js";
 
 export interface RuntimeRecoveryService {
   recoverProject(repoRoot: string): Promise<ProjectRuntimeRecoveryReport>;
@@ -29,6 +30,7 @@ export interface RuntimeRecoveryServiceDeps {
   taskService: Pick<TaskService, "listTasks" | "updateTaskStatus" | "cleanupTask">;
   translationWorkerService?: Pick<TranslationWorkerService, "cleanupStartupRuntime">;
   architectRestartService?: Pick<ArchitectRestartService, "recoverTask">;
+  roleContextRestartService?: Pick<RoleContextRestartService, "recoverTask">;
   now?: () => string;
 }
 
@@ -120,6 +122,7 @@ export function createRuntimeRecoveryService(deps: RuntimeRecoveryServiceDeps): 
           await recoverGateReview(taskRepoRoot, recoveredAt, context);
           await cleanupCoderWorkers(taskRepoRoot, context);
           await deps.architectRestartService?.recoverTask(repoRoot, task.taskSlug);
+          await deps.roleContextRestartService?.recoverTask(repoRoot, task.taskSlug);
           if ((roundRecovered || task.status === "running") && !hasLiveTaskSession(task.taskSlug)) {
             await deps.taskService.updateTaskStatus(repoRoot, task.taskSlug, "stopped");
           }

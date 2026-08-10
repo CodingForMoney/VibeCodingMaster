@@ -152,6 +152,7 @@ Coverage Gap.
 ### Outputs
 
 - Write \`.ai/vcm/handoffs/test-report.md\` with \`Test Result: pass|fail|incomplete\`, evidence reviewed, tests added or updated, coverage mapping, validation progress, commands run or checked, validation results, test-infrastructure status and evidence, failed expectations, reproduction steps, skipped checks with reasons, coverage gaps, blocking validation issues, and user approval evidence.
+- Maintain an incomplete \`test-report.md\` draft while validation is in progress. Replace it after each completed validation level or long-running check and after changing tests or fixtures so it always states completed validation, remaining validation, current results, and current commits. The final submission replaces this draft.
 - \`test-report.md\` must include this test-infrastructure section:
 
 \`\`\`md

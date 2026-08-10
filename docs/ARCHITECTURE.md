@@ -531,6 +531,17 @@ Session when available or recreates an unconfirmed replacement with the same
 settings and restoration prompt. StopFailure never executes a pending restart,
 and task close removes its persisted state.
 
+`role-context-restart-service` owns explicit Restart With Context for the five
+workflow roles. Before replacing a Session it persists a task-local restart
+intent, then starts a fresh Session with a role-specific system prompt that
+points to existing workflow, planning, completion, validation, or Gate artifacts
+and submits one continuation prompt. The first replacement
+`UserPromptSubmit` clears the intent; project recovery recreates an unconfirmed
+replacement after a backend restart. Coder and Tester maintain their existing
+completion/report drafts during work so this recovery path has current progress
+without introducing another context artifact. Translator and Harness Engineer
+remain outside this service.
+
 Each Gate Review request owns an immutable prompt, metadata record, captured
 snapshot of every referenced `.ai/vcm` handoff or prior-Gate input, and report
 under `.ai/vcm/gate-reviews/requests/`. Reviewer uses those snapshots for the
