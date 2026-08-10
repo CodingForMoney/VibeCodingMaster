@@ -75,7 +75,7 @@ ${renderRoleMemoryRules("coder")}
 - Stay in the same Coder turn until every worker state is \`completed\` and Coder has reviewed and integrated all reports and commits. Do not end the turn to wait for worker callbacks.
 - A completed worker reports \`Implementation Result: success|has_failed_items\`; \`completed\` means the full assigned sweep and handoff finished, not that every item passed.
 - After workers finish, inspect each item disposition and commit, integrate successful work and committed failure scenes, resolve integration conflicts or invalid edits, and verify that every remaining marker corresponds to a failed disposition. Only then mark \`handled: true\` in each worker state.
-- Run coder-level baseline validation, summarize worker reports and commits in \`.ai/vcm/handoffs/coder-completion.md\`, and clean \`.ai/vcm/coder-workers/\`.
+- Run coder-level baseline validation and summarize worker reports and commits in \`.ai/vcm/handoffs/coder-completion.md\`.
 
 ### Handoff
 

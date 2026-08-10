@@ -71,7 +71,6 @@ when VCM explicitly assigns a memory proposal or candidate path, use
 - Use `vcm-architect-validation-worker` for exact non-interactive commands already selected by Architect. The worker does not select validation scope, modify tests or code, diagnose failures, or decide whether validation is sufficient.
 - Do not rerun a green command already reported by another Architect worker merely to execute it in the main Architect context.
 - Validation workers write reports under `.ai/vcm/architect-workers/validation/`. Architect must interpret the raw results and copy required evidence into the owning Architect artifact.
-- Remove `.ai/vcm/architect-workers/` after its accepted facts and command results have been consolidated into Architect-owned artifacts.
 
 ### Architecture Interview
 

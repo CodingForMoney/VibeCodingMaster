@@ -479,8 +479,7 @@ Scaffold workers execute the complete plan's exact scaffold and mechanical
 text/configuration changes. Validation workers execute only commands already
 selected by Architect and preserve their raw results. Architect owns every
 architecture decision, worker review, validation interpretation, and final
-claim, and removes temporary worker reports after consolidating accepted
-evidence. All workers return before the current Architect turn continues and
+claim. All workers return before the current Architect turn continues and
 cannot invoke nested subagents. Bridge launches override the worker model so it
 inherits the selected GPT model. Coder may delegate parallel marker
 implementation only to `vcm-coder-worker`. The fixed Agent hook enforces both

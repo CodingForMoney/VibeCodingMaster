@@ -24,7 +24,7 @@ The hard ceiling is 60 minutes per job, enforced by the job worker itself. No ap
 3. If watch-job exits 125, the job is still running and a bounded handoff is active for the next watcher: run `.ai/tools/watch-job <job-id>` again immediately. Do not end the turn between windows.
 4. Repeat until watch-job reports a terminal result.
 5. Read the final status and the relevant log tail.
-6. Record command, result, duration, and required follow-up wherever the caller normally records command evidence.
+6. Record job ID, command, result, duration, and required follow-up wherever the caller normally records command evidence.
 
 Example:
 
@@ -76,7 +76,3 @@ On timeout the worker stops the command process group and records `timeout` in `
 - report whether the timed-out process was stopped
 - do not mark the command as passed
 - do not retry in the background
-
-## Cleanup
-
-`.ai/vcm/jobs/**` is runtime state. Delete it after the command result and useful log evidence have been recorded where needed.

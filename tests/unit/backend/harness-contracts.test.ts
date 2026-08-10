@@ -8,6 +8,7 @@ import { renderProjectCodingStandardsRules } from "../../../src/backend/template
 import { renderTesterHarnessRules } from "../../../src/backend/templates/harness/tester-agent.js";
 import { renderVcmArchitectureInterviewSkillRules } from "../../../src/backend/templates/harness/vcm-architecture-interview-skill.js";
 import { renderVcmFinalAcceptanceSkillRules } from "../../../src/backend/templates/harness/vcm-final-acceptance-skill.js";
+import { renderVcmLongRunningValidationSkillRules } from "../../../src/backend/templates/harness/vcm-long-running-validation-skill.js";
 import { renderVcmRouteMessageSkillRules } from "../../../src/backend/templates/harness/vcm-route-message-skill.js";
 import {
   renderArchitecturePlanTemplate,
@@ -44,6 +45,18 @@ describe("machine-consumed harness contracts", () => {
     expect(rules).toContain('"status": "running"');
     expect(rules).toContain('"handled": false');
     expect(rules).toContain('add `"commitHash": "<exact-report-commit-hash>"`');
+  });
+
+  it("keeps task-scoped validation and worker evidence until task cleanup", () => {
+    const longRunningValidation = renderVcmLongRunningValidationSkillRules();
+    const architect = renderArchitectHarnessRules();
+    const coder = renderCoderHarnessRules();
+
+    expect(longRunningValidation).toContain("Record job ID, command, result, duration");
+    expect(longRunningValidation).not.toContain("## Cleanup");
+    expect(longRunningValidation).not.toContain("Delete it after the command result");
+    expect(architect).not.toContain("Remove `.ai/vcm/architect-workers/`");
+    expect(coder).not.toContain("clean `.ai/vcm/coder-workers/`");
   });
 
   it("uses the exact final-acceptance decision options in the skill template", () => {

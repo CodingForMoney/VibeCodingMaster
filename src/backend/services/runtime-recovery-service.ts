@@ -120,7 +120,7 @@ export function createRuntimeRecoveryService(deps: RuntimeRecoveryServiceDeps): 
           const roundRecovered = await recoverRound(taskRepoRoot, config.stateRoot, task.taskSlug, recoveredAt, context);
           await recoverMessages(taskRepoRoot, config.stateRoot, task.taskSlug, recoveredAt, context);
           await recoverGateReview(taskRepoRoot, recoveredAt, context);
-          await cleanupCoderWorkers(taskRepoRoot, context);
+          await recoverCoderWorkers(taskRepoRoot, task.taskSlug, context);
           await deps.architectRestartService?.recoverTask(repoRoot, task.taskSlug);
           await deps.roleContextRestartService?.recoverTask(repoRoot, task.taskSlug);
           if ((roundRecovered || task.status === "running") && !hasLiveTaskSession(task.taskSlug)) {
@@ -376,19 +376,37 @@ export function createRuntimeRecoveryService(deps: RuntimeRecoveryServiceDeps): 
     context.changedPaths.add(relativePath);
   }
 
-  async function cleanupCoderWorkers(
+  async function recoverCoderWorkers(
     taskRepoRoot: string,
+    taskSlug: string,
     context: RuntimeRecoveryContext
   ): Promise<void> {
-    const absolutePath = path.join(taskRepoRoot, CODER_WORKERS_RUNTIME_DIR);
-    if (!(await deps.fs.pathExists(absolutePath))) {
+    if (hasLiveRoundRole(taskSlug, "coder") || !deps.fs.removePath) {
       return;
     }
-    if (!deps.fs.removePath) {
+
+    const tasksPath = path.join(taskRepoRoot, CODER_WORKERS_RUNTIME_DIR, "tasks");
+    if (!(await deps.fs.pathExists(tasksPath))) {
       return;
     }
-    await deps.fs.removePath(absolutePath, { recursive: true, force: true });
-    context.changedPaths.add(CODER_WORKERS_RUNTIME_DIR);
+
+    for (const entry of await deps.fs.readDir(tasksPath)) {
+      if (!entry.endsWith(".json")) {
+        continue;
+      }
+      const absolutePath = path.join(tasksPath, entry);
+      let state: Record<string, unknown>;
+      try {
+        state = await deps.fs.readJson<Record<string, unknown>>(absolutePath);
+      } catch {
+        continue;
+      }
+      if (state.status !== "running" || state.handled === true) {
+        continue;
+      }
+      await deps.fs.removePath(absolutePath, { force: true });
+      context.changedPaths.add(path.posix.join(CODER_WORKERS_RUNTIME_DIR, "tasks", entry));
+    }
   }
 
   async function recoverHarnessBootstrap(
