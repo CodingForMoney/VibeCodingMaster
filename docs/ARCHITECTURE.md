@@ -602,6 +602,14 @@ stores the pending one-time dispatch, hard user-question wait, and exact user
 override evidence in the active task worktree. The frontend only renders this
 backend-owned state.
 
+## Task Creation Ownership
+
+`task-service` creates every task branch and worktree from the connected base
+repository. After validating that no task is active and the base repository is
+clean, it fast-forward pulls the current branch when an upstream is configured.
+Only a successful pull may be followed by task branch and worktree creation; a
+missing upstream keeps the local-only workflow unchanged.
+
 ## Task Close Ownership
 
 `task-close-service` is the single owner of task shutdown for both the GUI and

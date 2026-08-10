@@ -124,8 +124,9 @@ If you want VCM app state to survive container rebuilds, set:
 1. Start VCM with `vcm`.
 2. Open the GUI.
 3. In `Repository`, enter a local Git repository path and click `Connect`.
-4. Create or select a task in the `Task` section. VCM creates a task branch and
-   worktree immediately.
+4. Create or select a task in the `Task` section. Before creating a new task,
+   VCM fast-forward pulls the connected branch when it has an upstream, then
+   creates the task branch and worktree from the updated `HEAD`.
 5. In `VCM Harness`, initialize or update fixed harness files if VCM reports
    pending changes. Harness changes are written to the active task worktree.
 6. If bootstrap is incomplete, open Harness Studio and run bootstrap through
@@ -632,6 +633,7 @@ Make sure:
 
 - the repository is a Git repository
 - the connected base repo is clean
+- the connected branch can be fast-forward pulled when it has an upstream
 - no other task is currently active for this project
 - the derived `feature/<task>` branch does not already exist
 - the derived `.claude/worktrees/<task>` directory does not already exist

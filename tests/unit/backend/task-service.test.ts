@@ -6,6 +6,7 @@ import { createCommandRunner } from "../../../src/backend/adapters/command-runne
 import { createNodeFileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import { createGitAdapter } from "../../../src/backend/adapters/git-adapter.js";
 import type { GitAdapter } from "../../../src/backend/adapters/git-adapter.js";
+import { VcmError } from "../../../src/backend/errors.js";
 import { createArtifactService } from "../../../src/backend/services/artifact-service.js";
 import { createTaskService } from "../../../src/backend/services/task-service.js";
 import type { ProjectConfig } from "../../../src/shared/types/project.js";
@@ -46,6 +47,47 @@ describe("createTaskService", () => {
     await expect(readText(path.join(task.worktreePath, ".ai/vcm/handoffs/role-commands/coder.md")))
       .resolves.toContain("Branch: feature/demo-task");
     await expect(readGit(repoRoot, ["status", "--porcelain"])).resolves.toBe("");
+  });
+
+  it("fast-forward pulls the tracked base branch before creating a task", async () => {
+    const { repoRoot, remoteHead } = await createTrackedRepoWithRemoteUpdate(tempDirs);
+    const headBeforeTask = (await readGit(repoRoot, ["rev-parse", "HEAD"])).trim();
+    const service = createService(repoRoot);
+
+    const task = await service.createTask(repoRoot, { taskSlug: "updated-base-task" });
+
+    expect(headBeforeTask).not.toBe(remoteHead);
+    expect((await readGit(repoRoot, ["rev-parse", "HEAD"])).trim()).toBe(remoteHead);
+    expect((await readGit(task.worktreePath, ["rev-parse", "HEAD"])).trim()).toBe(remoteHead);
+    await expect(readText(path.join(task.worktreePath, "README.md"))).resolves.toBe("# remote update\n");
+  });
+
+  it("does not create a task branch or worktree when the tracked branch cannot be pulled", async () => {
+    const repoRoot = await createTempGitRepo(tempDirs);
+    const git = createGitAdapter(createCommandRunner());
+    const service = createService(repoRoot, {
+      git: {
+        ...git,
+        async getUpstreamBranch() {
+          return "origin/main";
+        },
+        async pullFastForward() {
+          throw new VcmError({
+            code: "GIT_PULL_FAILED",
+            message: "Unable to pull connected repository with fast-forward only.",
+            statusCode: 409,
+            hint: "remote unavailable"
+          });
+        }
+      }
+    });
+
+    await expect(service.createTask(repoRoot, { taskSlug: "pull-failed-task" })).rejects.toMatchObject({
+      code: "GIT_PULL_FAILED"
+    });
+    await expect(fileExists(path.join(repoRoot, ".claude/worktrees/pull-failed-task"))).resolves.toBe(false);
+    await expect(gitExitCode(repoRoot, ["show-ref", "--verify", "--quiet", "refs/heads/feature/pull-failed-task"]))
+      .resolves.toBe(1);
   });
 
   it("closes a task by removing its worktree, branch, and central task state", async () => {
@@ -268,6 +310,33 @@ async function createTempGitRepo(
   await readGit(repoRoot, ["add", "README.md", ".gitignore"]);
   await readGit(repoRoot, ["commit", "-qm", "init"]);
   return repoRoot;
+}
+
+async function createTrackedRepoWithRemoteUpdate(
+  tempDirs: string[]
+): Promise<{ repoRoot: string; remoteHead: string }> {
+  const repoRoot = await createTempGitRepo(tempDirs);
+  const fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), "vcm-task-remote-"));
+  tempDirs.push(fixtureRoot);
+  const remoteRoot = path.join(fixtureRoot, "remote.git");
+  const updaterRoot = path.join(fixtureRoot, "updater");
+  const branch = (await readGit(repoRoot, ["branch", "--show-current"])).trim();
+
+  await readGit(fixtureRoot, ["init", "--bare", "-q", remoteRoot]);
+  await readGit(repoRoot, ["remote", "add", "origin", remoteRoot]);
+  await readGit(repoRoot, ["push", "-q", "-u", "origin", branch]);
+  await readGit(fixtureRoot, ["clone", "-q", "--branch", branch, remoteRoot, updaterRoot]);
+  await readGit(updaterRoot, ["config", "user.email", "test@example.com"]);
+  await readGit(updaterRoot, ["config", "user.name", "Test User"]);
+  await fs.writeFile(path.join(updaterRoot, "README.md"), "# remote update\n");
+  await readGit(updaterRoot, ["add", "README.md"]);
+  await readGit(updaterRoot, ["commit", "-qm", "remote update"]);
+  await readGit(updaterRoot, ["push", "-q", "origin", branch]);
+
+  return {
+    repoRoot,
+    remoteHead: (await readGit(updaterRoot, ["rev-parse", "HEAD"])).trim()
+  };
 }
 
 async function readGit(cwd: string, args: string[]): Promise<string> {

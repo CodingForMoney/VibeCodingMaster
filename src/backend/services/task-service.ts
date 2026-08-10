@@ -85,6 +85,20 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
         });
       }
 
+      const upstreamBranch = await deps.git.getUpstreamBranch(repoRoot);
+      if (upstreamBranch) {
+        await deps.git.pullFastForward(repoRoot);
+        const postPullVisibleChanges = await getBaseRepoVisibleChanges(deps.git, repoRoot);
+        if (postPullVisibleChanges.length > 0) {
+          throw new VcmError({
+            code: "BASE_REPO_DIRTY",
+            message: "The connected repository has Git-visible changes after pulling its upstream branch.",
+            statusCode: 409,
+            hint: `Commit, stash, or discard these changes before creating a task worktree: ${postPullVisibleChanges.slice(0, 12).join(", ")}`
+          });
+        }
+      }
+
       const timestamp = now();
       await deps.fs.ensureDir(path.dirname(worktreePath));
       await deps.git.createWorktree({

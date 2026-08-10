@@ -277,7 +277,9 @@ one task
 ```
 
 Tasks do not run directly in the connected base repo. Roles for the same task
-share the same task worktree and hand off sequentially.
+share the same task worktree and hand off sequentially. Before creating a task,
+VCM fast-forward pulls the connected branch when it has an upstream and uses the
+updated `HEAD` as the task branch base.
 
 Harness changes that affect the task should be made in the active task
 worktree. Fixed-harness updates should be committed immediately so users review
