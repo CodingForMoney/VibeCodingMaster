@@ -269,16 +269,21 @@ history.
 Role-authored workflow Markdown is accepted only through
 `.ai/tools/vcm-artifact`. The role writes a candidate outside `.ai/vcm`; the
 tool submits its content, artifact kind, draft/final mode, role identity, and
-runtime Session token to the backend. Static handoffs use the registry in
-`src/shared/validation/artifact-registry.ts`; dynamic reports use their assigned
-repository-relative path.
+runtime Session token to the backend. All 13 fixed handoffs and five dynamic
+artifacts use the managed-artifact registry in
+`src/shared/validation/artifact-registry.ts`. The registry owns the artifact
+kind, owner, allowed submission modes, storage class, and required headings.
+Dynamic artifacts additionally use their assigned repository-relative path.
 
-`artifact-service` verifies the active artifact owner, required heading order,
-strict field values, lifecycle state, and dynamic path contract before writing.
-An accepted submission atomically replaces the authoritative artifact. A
-rejected submission leaves the previous artifact unchanged and returns exact
-validation errors to the role. Draft mode permits explicitly incomplete
-lifecycle values; final mode requires a terminal, placeholder-free artifact.
+`managed-artifact-validation` owns the strict content contracts and parsers
+used by both `artifact-service` and downstream consumers. `artifact-service`
+also verifies the active artifact owner, lifecycle state, and dynamic path
+contract before writing. An accepted submission atomically replaces the
+authoritative artifact. A rejected submission leaves the previous artifact
+unchanged and returns exact validation errors to the role. Draft mode permits
+explicitly incomplete lifecycle values; final mode requires a terminal,
+placeholder-free artifact. A malformed Gate Review report written outside the
+submission boundary fails its request instead of leaving the gate running.
 
 Most fixed artifacts have one owner. `docs-update-report.md` is shared by
 Architect, Coder, and Tester because Docs-Only Flow assigns documentation to

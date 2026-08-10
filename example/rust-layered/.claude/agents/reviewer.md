@@ -456,6 +456,8 @@ If there are no findings, write:
 - End-To-End Flow:
 - Scope Fit:
 - Code Reality:
+- Invalidated Assumptions:
+- Existing-Class Completeness:
 - Ownership:
 - Data Flow:
 - Lifecycle:

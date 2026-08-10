@@ -329,6 +329,50 @@ describe("backend E2E Gate Review correction loops", () => {
     expect(approved.gates["validation-adequacy"].callbackStatus).toBe("sent");
     expect(reviewCount).toBe(2);
   });
+
+  it("fails a malformed written Gate report instead of polling it forever", async () => {
+    const env = await createMockClaudeE2eApp();
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "mock-malformed-gate-report");
+    await writeConfirmedArchitectureBrief(task.worktreePath, task.taskSlug);
+    await writeCompleteArchitecturePlan(task.worktreePath, task.taskSlug, "Complete malformed-report scenario.");
+    await updateGateSettings(env.app, task.taskSlug, { "architecture-plan": true });
+    await startRole(env.app, task.taskSlug, "project-manager");
+    registerPmGateCallback(env, "architecture-plan");
+
+    env.mockRuntime.onPrompt("reviewer", "[VCM GATE REVIEW]", async (ctx) => {
+      await ctx.userPromptSubmit();
+      const request = matchPromptField(ctx.prompt, "Request")!;
+      const report = matchPromptField(ctx.prompt, "Report")!;
+      await ctx.writeAbsoluteFile(report, [
+        "Gate: architecture-plan",
+        `Request: ${request}`,
+        "Decision: request_changes",
+        "Summary: The finding is malformed.",
+        "",
+        ...analysisForGate("architecture-plan"),
+        "## Findings",
+        "",
+        "### high: Missing gap field",
+        "- Evidence: Current evidence is incomplete.",
+        "- Expected: The report names the exact gap.",
+        "- Risk: The workflow could act on an incomplete finding.",
+        ""
+      ].join("\n"));
+      await ctx.stop();
+    });
+
+    expect((await requestGateReview(env.app, task.taskSlug, "architecture-plan")).status).toBe("started");
+    let state: GateReviewIndex | undefined;
+    await waitFor(async () => {
+      state = await getGateState(env.app, task.taskSlug);
+      expect(state.gates["architecture-plan"].status).toBe("failed");
+      expect(state.gates["architecture-plan"].callbackStatus).toBe("sent");
+    }, 3_000);
+    expect(state!.gates["architecture-plan"].error).toContain("field Gap");
+  });
 });
 
 function workflowHistory(
@@ -410,6 +454,8 @@ function analysisForGate(gate: GateReviewGate): string[] {
       "- End-To-End Flow: entry through completion",
       "- Scope Fit: accepted scope inspected",
       "- Code Reality: current implementation inspected",
+      "- Invalidated Assumptions: affected assumptions inspected",
+      "- Existing-Class Completeness: related class members reconstructed",
       "- Ownership: state owner inspected",
       "- Data Flow: producer and consumer inspected",
       "- Lifecycle: completion and retry inspected",

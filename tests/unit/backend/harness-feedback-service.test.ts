@@ -23,15 +23,7 @@ describe("harness-feedback-service", () => {
     await mkdir(path.join(tmpRepo, ".ai/vcm/harness-feedback/pending"), { recursive: true });
     await writeFile(
       path.join(tmpRepo, ".ai/vcm/harness-feedback/pending/2026-01-01-coder-routing.md"),
-      [
-        "# Route message skill is unclear",
-        "",
-        "Reporter role: coder",
-        "Task slug: demo-task",
-        "Summary: vcm-route-message examples miss blocked handoff wording.",
-        "",
-        "Observed problem: coder repeatedly writes an ambiguous blocked report."
-      ].join("\n"),
+      renderFeedback("Route message skill is unclear", "coder"),
       "utf8"
     );
 
@@ -62,12 +54,7 @@ describe("harness-feedback-service", () => {
     await mkdir(path.join(tmpRepo, ".ai/vcm/harness-feedback/pending"), { recursive: true });
     await writeFile(
       path.join(tmpRepo, feedbackPath),
-      [
-        "# Route message skill is unclear",
-        "",
-        "Reporter role: coder",
-        "Task slug: demo-task"
-      ].join("\n"),
+      renderFeedback("Route message skill is unclear", "coder"),
       "utf8"
     );
 
@@ -317,8 +304,8 @@ None.
     );
     const pendingDir = path.join(tmpRepo, ".ai/vcm/harness-feedback/pending");
     await mkdir(pendingDir, { recursive: true });
-    await writeFile(path.join(pendingDir, "02-tester.md"), "# Tester feedback\n", "utf8");
-    await writeFile(path.join(pendingDir, "01-coder.md"), "# Coder feedback\n", "utf8");
+    await writeFile(path.join(pendingDir, "02-tester.md"), renderFeedback("Tester feedback", "tester"), "utf8");
+    await writeFile(path.join(pendingDir, "01-coder.md"), renderFeedback("Coder feedback", "coder"), "utf8");
 
     const writes: string[] = [];
     const service = createHarnessFeedbackService({
@@ -367,7 +354,7 @@ None.
     await mkdir(pendingDir, { recursive: true });
     const assigned = ["01-coder.md", "02-tester.md"];
     for (const name of assigned) {
-      await writeFile(path.join(pendingDir, name), `# ${name}\n`, "utf8");
+      await writeFile(path.join(pendingDir, name), renderFeedback(name, "coder"), "utf8");
     }
     const service = createHarnessFeedbackService({
       fs: createNodeFileSystemAdapter(),
@@ -382,7 +369,7 @@ None.
       handoffDir: ".ai/vcm/handoffs",
       trigger: "manual"
     });
-    await writeFile(path.join(pendingDir, "03-late.md"), "# Late feedback\n", "utf8");
+    await writeFile(path.join(pendingDir, "03-late.md"), renderFeedback("Late feedback", "coder"), "utf8");
     await writeFile(
       path.join(tmpRepo, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.md"),
       renderRetrospectiveReport(assigned.map((name) => path.join(pendingDir, name))),
@@ -419,7 +406,7 @@ None.
     await mkdir(pendingDir, { recursive: true });
     const assigned = ["01-coder.md", "02-tester.md"];
     for (const name of assigned) {
-      await writeFile(path.join(pendingDir, name), `# ${name}\n`, "utf8");
+      await writeFile(path.join(pendingDir, name), renderFeedback(name, "coder"), "utf8");
     }
     const service = createHarnessFeedbackService({
       fs: createNodeFileSystemAdapter(),
@@ -529,6 +516,23 @@ function renderRetrospectiveReport(feedbackPaths: string[]): string {
     "",
     "## VCM Issue Drafts",
     "None.",
+    ""
+  ].join("\n");
+}
+
+function renderFeedback(title: string, role: string): string {
+  return [
+    `# ${title}`,
+    "",
+    `- Reporter role: ${role}`,
+    "- Task slug: demo-task",
+    "- Summary: Reusable harness behavior is unclear.",
+    "- Observed problem: The role produced an ambiguous result.",
+    "- Expected behavior: The harness should make the required behavior explicit.",
+    "- Evidence: Current task route and handoff evidence.",
+    "- Suspected harness area: role definition",
+    "- Impact: The workflow can choose the wrong next action.",
+    "- Urgency: medium",
     ""
   ].join("\n");
 }

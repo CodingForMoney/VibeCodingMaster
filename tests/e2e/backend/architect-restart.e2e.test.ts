@@ -624,6 +624,8 @@ async function writeArchitectureGateReport(
     "- End-To-End Flow: complete",
     "- Scope Fit: complete",
     "- Code Reality: verified",
+    "- Invalidated Assumptions: verified",
+    "- Existing-Class Completeness: verified",
     "- Ownership: verified",
     "- Data Flow: verified",
     "- Lifecycle: verified",

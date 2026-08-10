@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import { createArtifactService } from "../../../src/backend/services/artifact-service.js";
 import {
+  GATE_ANALYSIS_FIELDS,
+  parseGateReviewReportArtifact
+} from "../../../src/backend/services/managed-artifact-validation.js";
+import {
   ARCHITECT_PLANNING_MEMORY_CANDIDATE_PATH,
   architectPlanningCandidateSnapshotPath,
   memoryReviewRoleDraftPath
@@ -173,6 +177,48 @@ describe("createArtifactService", () => {
     })).rejects.toMatchObject({ code: "ARTIFACT_OWNER_MISMATCH" });
   });
 
+  it("owns artifact kind, mode, and path policy in the backend contract", async () => {
+    const service = createArtifactService(createMemoryFs());
+    const base = {
+      repoRoot: "/repo",
+      baseRepoRoot: "/repo",
+      handoffDir: ".ai/vcm/handoffs",
+      taskSlug: "demo-task"
+    };
+
+    await expect(service.submitArtifact({
+      ...base,
+      kind: "unknown-artifact",
+      mode: "final",
+      role: "coder",
+      content: "content\n"
+    })).rejects.toMatchObject({ code: "ARTIFACT_KIND_INVALID" });
+
+    await expect(service.submitArtifact({
+      ...base,
+      kind: "coder-completion",
+      mode: "final",
+      role: "coder",
+      artifactPath: ".ai/vcm/handoffs/alternate.md",
+      content: validCoderCompletion()
+    })).rejects.toMatchObject({
+      code: "ARTIFACT_VALIDATION_FAILED",
+      message: expect.stringContaining("--path is not allowed")
+    });
+
+    await expect(service.submitArtifact({
+      ...base,
+      kind: "route-message",
+      mode: "draft",
+      role: "coder",
+      artifactPath: ".ai/vcm/handoffs/messages/coder-project-manager.md",
+      content: "---\ntype: result\n---\nComplete.\n"
+    })).rejects.toMatchObject({
+      code: "ARTIFACT_VALIDATION_FAILED",
+      message: expect.stringContaining("supports only final mode")
+    });
+  });
+
   it("accepts Docs Update Reports from every Docs-Only role and rejects unrelated roles", async () => {
     const service = createArtifactService(createMemoryFs());
     const content = [
@@ -287,6 +333,55 @@ describe("createArtifactService", () => {
     await expect(fs.readText(`/repo/${workerPath}`)).resolves.toContain("Implementation Result: success");
   });
 
+  it("rejects a gate report the consumer cannot parse and preserves the accepted report", async () => {
+    const fs = createMemoryFs();
+    const service = createArtifactService(fs);
+    const requestId = "request-1";
+    const reportPath = `.ai/vcm/gate-reviews/requests/${requestId}.report.md`;
+    const requestPath = `/repo/.ai/vcm/gate-reviews/requests/${requestId}.json`;
+    const targetPath = `/repo/${reportPath}`;
+    await fs.writeJson(requestPath, {
+      requestId,
+      gate: "architecture-plan",
+      reportPath
+    });
+    await fs.writeText(targetPath, "previous accepted report\n");
+
+    const invalid = validArchitectureGateReport().replace("- Gap: Required behavior is absent.\n", "");
+    await expect(service.submitArtifact({
+      repoRoot: "/repo",
+      baseRepoRoot: "/repo",
+      handoffDir: ".ai/vcm/handoffs",
+      taskSlug: "demo-task",
+      kind: "gate-review-report",
+      mode: "final",
+      role: "reviewer",
+      artifactPath: reportPath,
+      content: invalid
+    })).rejects.toMatchObject({
+      code: "ARTIFACT_VALIDATION_FAILED",
+      message: expect.stringContaining("field Gap")
+    });
+    await expect(fs.readText(targetPath)).resolves.toBe("previous accepted report\n");
+
+    const valid = validArchitectureGateReport();
+    await expect(service.submitArtifact({
+      repoRoot: "/repo",
+      baseRepoRoot: "/repo",
+      handoffDir: ".ai/vcm/handoffs",
+      taskSlug: "demo-task",
+      kind: "gate-review-report",
+      mode: "final",
+      role: "reviewer",
+      artifactPath: reportPath,
+      content: valid
+    })).resolves.toMatchObject({ path: reportPath, status: "accepted" });
+    expect(parseGateReviewReportArtifact(await fs.readText(targetPath), {
+      expectedGate: "architecture-plan",
+      expectedRequestId: requestId
+    }).errors).toEqual([]);
+  });
+
   it("accepts only the Memory Proposal locations assigned to the submitting role", async () => {
     const fs = createMemoryFs();
     const service = createArtifactService(fs);
@@ -367,7 +462,7 @@ describe("createArtifactService", () => {
       role: "translator",
       artifactPath: ".ai/vcm/memory-review/candidates/translator.md",
       content: "# Memory Proposal\n\nDecision: no-change\n\n## Add\nnone\n\n## Update\nnone\n\n## Remove\nnone\n"
-    })).rejects.toMatchObject({ code: "ARTIFACT_VALIDATION_FAILED" });
+    })).rejects.toMatchObject({ code: "ARTIFACT_OWNER_MISMATCH" });
   });
 
 });
@@ -466,6 +561,28 @@ none
 ## Remove
 none
 `;
+}
+
+function validArchitectureGateReport(): string {
+  return [
+    "Gate: architecture-plan",
+    "Request: request-1",
+    "Decision: request_changes",
+    "Summary: A required behavior is missing.",
+    "",
+    "## Architecture Analysis",
+    "",
+    ...GATE_ANALYSIS_FIELDS["architecture-plan"].map((field) => `- ${field}: Verified.`),
+    "",
+    "## Findings",
+    "",
+    "### high: Missing required behavior",
+    "- Evidence: The reviewed scaffold omits the behavior.",
+    "- Expected: The required behavior is present.",
+    "- Gap: Required behavior is absent.",
+    "- Risk: Coder cannot implement the accepted flow.",
+    ""
+  ].join("\n");
 }
 
 function createMemoryFs(): FileSystemAdapter {

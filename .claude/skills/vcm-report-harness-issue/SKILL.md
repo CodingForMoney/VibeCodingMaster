@@ -44,7 +44,7 @@ Use this structure:
 - Evidence: <file paths, command names, logs, or repeated failure pattern>
 - Suspected harness area: <skill, role definition, tool, routing, validation, bootstrap, or managed instruction>
 - Impact: <who is affected and how>
-- Urgency: low | medium | high
+- Urgency: low|medium|high
 ```
 
 ## Constraints

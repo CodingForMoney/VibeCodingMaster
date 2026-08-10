@@ -1,4 +1,9 @@
-import type { ArtifactKind } from "../types/artifact.js";
+import type {
+  ArtifactKind,
+  ArtifactSubmissionMode,
+  DynamicArtifactKind,
+  ManagedArtifactKind
+} from "../types/artifact.js";
 import type { RoleName } from "../types/role.js";
 
 export interface ArtifactDefinition {
@@ -6,6 +11,15 @@ export interface ArtifactDefinition {
   fileName: string;
   owner: RoleName | readonly RoleName[];
   requiredHeadings: readonly string[];
+}
+
+export interface ManagedArtifactDefinition {
+  kind: ManagedArtifactKind;
+  storage: "handoff" | "dynamic";
+  fileName?: string;
+  owner: RoleName | readonly RoleName[];
+  requiredHeadings: readonly string[];
+  allowedModes: readonly ArtifactSubmissionMode[];
 }
 
 export const ARTIFACT_DEFINITIONS: readonly ArtifactDefinition[] = [
@@ -225,7 +239,66 @@ export const ARTIFACT_DEFINITIONS: readonly ArtifactDefinition[] = [
   }
 ] as const;
 
+export const DYNAMIC_ARTIFACT_DEFINITIONS: readonly ManagedArtifactDefinition[] = [
+  {
+    kind: "route-message",
+    storage: "dynamic",
+    owner: ["project-manager", "architect", "coder", "tester"],
+    requiredHeadings: [],
+    allowedModes: ["final"]
+  },
+  {
+    kind: "coder-worker-report",
+    storage: "dynamic",
+    owner: "coder",
+    requiredHeadings: [
+      "Assigned Scope",
+      "Item Dispositions",
+      "Files Changed",
+      "Tests Added Or Updated",
+      "L0/L1 Checks",
+      "Commit",
+      "Skipped Assigned Checks",
+      "Objective Failures"
+    ],
+    allowedModes: ["final"]
+  },
+  {
+    kind: "gate-review-report",
+    storage: "dynamic",
+    owner: "reviewer",
+    requiredHeadings: ["Findings"],
+    allowedModes: ["final"]
+  },
+  {
+    kind: "memory-proposal",
+    storage: "dynamic",
+    owner: ["project-manager", "architect", "coder", "tester", "reviewer"],
+    requiredHeadings: ["Add", "Update", "Remove"],
+    allowedModes: ["final"]
+  },
+  {
+    kind: "harness-feedback",
+    storage: "dynamic",
+    owner: ["project-manager", "architect", "coder", "tester", "reviewer"],
+    requiredHeadings: [],
+    allowedModes: ["final"]
+  }
+] as const;
+
+export const MANAGED_ARTIFACT_DEFINITIONS: readonly ManagedArtifactDefinition[] = [
+  ...ARTIFACT_DEFINITIONS.map((definition): ManagedArtifactDefinition => ({
+    ...definition,
+    storage: "handoff",
+    allowedModes: definition.kind === "workflow-progress" ? ["final"] : ["draft", "final"]
+  })),
+  ...DYNAMIC_ARTIFACT_DEFINITIONS
+] as const;
+
 const DEFINITION_BY_KIND = new Map(ARTIFACT_DEFINITIONS.map((definition) => [definition.kind, definition]));
+const MANAGED_DEFINITION_BY_KIND = new Map(
+  MANAGED_ARTIFACT_DEFINITIONS.map((definition) => [definition.kind, definition])
+);
 
 export function getArtifactDefinition(kind: ArtifactKind): ArtifactDefinition {
   const definition = DEFINITION_BY_KIND.get(kind);
@@ -237,4 +310,20 @@ export function getArtifactDefinition(kind: ArtifactKind): ArtifactDefinition {
 
 export function isArtifactKind(value: string): value is ArtifactKind {
   return DEFINITION_BY_KIND.has(value as ArtifactKind);
+}
+
+export function getManagedArtifactDefinition(kind: ManagedArtifactKind): ManagedArtifactDefinition {
+  const definition = MANAGED_DEFINITION_BY_KIND.get(kind);
+  if (!definition) {
+    throw new Error(`Unknown managed artifact kind: ${kind}`);
+  }
+  return definition;
+}
+
+export function isDynamicArtifactKind(value: string): value is DynamicArtifactKind {
+  return DYNAMIC_ARTIFACT_DEFINITIONS.some((definition) => definition.kind === value);
+}
+
+export function isManagedArtifactKind(value: string): value is ManagedArtifactKind {
+  return MANAGED_DEFINITION_BY_KIND.has(value as ManagedArtifactKind);
 }

@@ -454,10 +454,19 @@ function createHarness(runningRoles: RoleName[], options: {
       activity.set(role, nextActivity);
     },
     writeRoute(fileName: string, content: string) {
-      return fs.writeText(path.posix.join(taskRepoRoot, ".ai/vcm/handoffs/messages", fileName), content);
+      const candidate = content.startsWith("---\n")
+        ? content
+        : [
+            "---",
+            `type: ${fileName.startsWith("project-manager-") ? "task" : "result"}`,
+            "---",
+            content
+          ].join("\n");
+      return fs.writeText(path.posix.join(taskRepoRoot, ".ai/vcm/handoffs/messages", fileName), candidate);
     },
-    readRoute(fileName: string) {
-      return fs.readText(path.posix.join(taskRepoRoot, ".ai/vcm/handoffs/messages", fileName));
+    async readRoute(fileName: string) {
+      const content = await fs.readText(path.posix.join(taskRepoRoot, ".ai/vcm/handoffs/messages", fileName));
+      return content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
     },
     async readMessageSnapshots() {
       const raw = await fs.readText(path.posix.join(options.taskRepoRoot ?? "/repo", ".ai/vcm/messages/demo-task.jsonl"));

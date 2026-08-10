@@ -1,4 +1,19 @@
 import { renderRoleMemoryRules } from "./role-memory.js";
+import {
+  GATE_ANALYSIS_FIELDS,
+  GATE_ANALYSIS_HEADINGS
+} from "../../services/managed-artifact-validation.js";
+
+function renderGateAnalysisSections(): string {
+  return (Object.keys(GATE_ANALYSIS_HEADINGS) as Array<keyof typeof GATE_ANALYSIS_HEADINGS>)
+    .map((gate) => [
+      `<!-- Include ${GATE_ANALYSIS_HEADINGS[gate]} only for ${gate} gate. -->`,
+      `## ${GATE_ANALYSIS_HEADINGS[gate]}`,
+      "",
+      ...GATE_ANALYSIS_FIELDS[gate].map((field) => `- ${field}:`)
+    ].join("\n"))
+    .join("\n\n");
+}
 
 export function renderReviewerAgentRules(): string {
   return `## Role
@@ -363,56 +378,7 @@ Summary: <one or two sentences>
 Use this findings structure:
 
 \`\`\`md
-<!-- Include Architecture Analysis only for architecture-plan gate. -->
-## Architecture Analysis
-
-- Evidence Read:
-- Architecture Brief Fit:
-- End-To-End Flow:
-- Scope Fit:
-- Code Reality:
-- Invalidated Assumptions:
-- Existing-Class Completeness:
-- Ownership:
-- Data Flow:
-- Lifecycle:
-- Invariants:
-- Boundaries And Public Surface:
-- Failure Model:
-- Coder Readiness:
-
-<!-- Include Validation Analysis only for validation-adequacy gate. -->
-## Validation Analysis
-
-- Evidence Read:
-- Changed Behavior And Risk:
-- Coverage Mapping:
-- Baseline Coverage:
-- L2 Integration Coverage:
-- L3 Trigger Assessment:
-- L3 End-To-End Coverage:
-- Boundary And Failure Coverage:
-- Public Contract Coverage:
-- Test Integrity:
-- Test Infrastructure:
-- Skips And Gaps:
-- User Approval And Gap Disposition:
-- Validation Readiness:
-
-<!-- Include Code Diff Analysis only for code-diff gate. -->
-## Code Diff Analysis
-
-- Commit Range And Sources:
-- Evidence Read:
-- Changed Files And Symbols:
-- Changed Behavior:
-- Source Evidence Fit:
-- Callers And Public Surface:
-- State Lifecycle And Failure Paths:
-- Coding Standards:
-- Baseline Test Integrity:
-- Generated Context And Durable Docs:
-- Code Readiness:
+${renderGateAnalysisSections()}
 
 ## Findings
 
@@ -431,54 +397,7 @@ Use this findings structure:
 If there are no findings, write:
 
 \`\`\`md
-<!-- Include Architecture Analysis only for architecture-plan gate. -->
-## Architecture Analysis
-
-- Evidence Read:
-- Architecture Brief Fit:
-- End-To-End Flow:
-- Scope Fit:
-- Code Reality:
-- Ownership:
-- Data Flow:
-- Lifecycle:
-- Invariants:
-- Boundaries And Public Surface:
-- Failure Model:
-- Coder Readiness:
-
-<!-- Include Validation Analysis only for validation-adequacy gate. -->
-## Validation Analysis
-
-- Evidence Read:
-- Changed Behavior And Risk:
-- Coverage Mapping:
-- Baseline Coverage:
-- L2 Integration Coverage:
-- L3 Trigger Assessment:
-- L3 End-To-End Coverage:
-- Boundary And Failure Coverage:
-- Public Contract Coverage:
-- Test Integrity:
-- Test Infrastructure:
-- Skips And Gaps:
-- User Approval And Gap Disposition:
-- Validation Readiness:
-
-<!-- Include Code Diff Analysis only for code-diff gate. -->
-## Code Diff Analysis
-
-- Commit Range And Sources:
-- Evidence Read:
-- Changed Files And Symbols:
-- Changed Behavior:
-- Source Evidence Fit:
-- Callers And Public Surface:
-- State Lifecycle And Failure Paths:
-- Coding Standards:
-- Baseline Test Integrity:
-- Generated Context And Durable Docs:
-- Code Readiness:
+${renderGateAnalysisSections()}
 
 ## Findings
 

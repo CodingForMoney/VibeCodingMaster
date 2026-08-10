@@ -14,6 +14,7 @@ import type { DispatchableRole, RoleName, VcmRoleName } from "../../shared/types
 import { CORE_VCM_ROLE_NAMES } from "../../shared/constants.js";
 import { resolveRepoPath } from "../adapters/filesystem.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
+import { VcmError } from "../errors.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import { renderMessageEnvelope } from "../templates/message-envelope.js";
@@ -21,6 +22,7 @@ import type { TaskService } from "./task-service.js";
 import type { SessionService } from "./session-service.js";
 import type { TaskWorkflowService } from "./task-workflow-service.js";
 import type { WorkflowControlService } from "./workflow-control-service.js";
+import { parseRouteMessageArtifact } from "./managed-artifact-validation.js";
 
 export interface MessageService {
   listMessages(input: ListMessagesInput): Promise<VcmRoleMessage[]>;
@@ -519,6 +521,9 @@ async function listRouteFiles(fs: FileSystemAdapter, input: RouteContext): Promi
     }
     const relativePath = path.posix.join(routeDir, entry);
     const content = await fs.readText(resolveRepoPath(repoRoot, relativePath));
+    if (!content.trim()) {
+      continue;
+    }
     const parsed = parseRouteFileContent(content, route.fromRole, route.toRole);
     routeFiles.push({
       path: relativePath,
@@ -555,77 +560,15 @@ function parseRouteFileContent(content: string, fromRole: VcmRoleName, toRole: V
   body: string;
   artifactRefs: string[];
 } {
-  const { frontmatter, body } = splitFrontmatter(content);
-  const type = parseMessageType(frontmatter.type) ?? getDefaultMessageType(fromRole, toRole);
-  const artifactRefs = parseArtifactRefs(frontmatter);
-  return {
-    type,
-    body: body.trim(),
-    artifactRefs
-  };
-}
-
-function splitFrontmatter(content: string): { frontmatter: Record<string, string>; body: string } {
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
-  if (!match) {
-    return { frontmatter: {}, body: content };
+  const result = parseRouteMessageArtifact(content);
+  if (!result.parsed || result.errors.length > 0) {
+    throw new VcmError({
+      code: "ROUTE_MESSAGE_INVALID",
+      message: `Invalid route message ${fromRole} -> ${toRole}: ${result.errors.join(" ")}`,
+      statusCode: 422
+    });
   }
-
-  const frontmatter: Record<string, string> = {};
-  for (const line of match[1].split(/\r?\n/)) {
-    const delimiter = line.indexOf(":");
-    if (delimiter <= 0) {
-      continue;
-    }
-    const key = line.slice(0, delimiter).trim();
-    const value = line.slice(delimiter + 1).trim();
-    if (key) {
-      frontmatter[key] = value;
-    }
-  }
-
-  return {
-    frontmatter,
-    body: content.slice(match[0].length)
-  };
-}
-
-function parseMessageType(value: string | undefined): VcmMessageType | undefined {
-  const validTypes: VcmMessageType[] = [
-    "user-request",
-    "task",
-    "question",
-    "blocked",
-    "result",
-    "finding",
-    "review-request",
-    "revise",
-    "cancel"
-  ];
-  return value && validTypes.includes(value as VcmMessageType)
-    ? value as VcmMessageType
-    : undefined;
-}
-
-function parseArtifactRefs(frontmatter: Record<string, string>): string[] {
-  const refs = frontmatter.artifact_refs ?? frontmatter.artifactRefs ?? frontmatter.related_artifact;
-  if (!refs) {
-    return [];
-  }
-  return refs
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-}
-
-function getDefaultMessageType(fromRole: VcmRoleName, toRole: VcmRoleName): VcmMessageType {
-  if (fromRole === PM_ROLE && toRole !== PM_ROLE) {
-    return "task";
-  }
-  if (fromRole !== PM_ROLE && toRole === PM_ROLE) {
-    return "result";
-  }
-  return "question";
+  return result.parsed;
 }
 
 function isAllowedRoute(fromRole: VcmRoleName, toRole: VcmRoleName): boolean {

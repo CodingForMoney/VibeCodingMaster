@@ -35,6 +35,7 @@ import type { RoundService } from "./round-service.js";
 import type { SessionService } from "./session-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 import type { WorkflowControlService } from "./workflow-control-service.js";
+import { parseGateReviewReportArtifact } from "./managed-artifact-validation.js";
 
 export interface GateReviewService {
   getState(repoRoot: string, taskSlug: string): Promise<GateReviewIndex>;
@@ -112,50 +113,6 @@ const REVIEWER_ROLE = "reviewer";
 const DEFAULT_REPORT_POLL_INTERVAL_MS = 1000;
 const activeRuns = new Map<string, AbortController>();
 const gateStateLocks = new Map<string, Promise<unknown>>();
-const ARCHITECTURE_ANALYSIS_FIELDS = [
-  "Evidence Read",
-  "Architecture Brief Fit",
-  "End-To-End Flow",
-  "Scope Fit",
-  "Code Reality",
-  "Ownership",
-  "Data Flow",
-  "Lifecycle",
-  "Invariants",
-  "Boundaries And Public Surface",
-  "Failure Model",
-  "Coder Readiness"
-] as const;
-const VALIDATION_ANALYSIS_FIELDS = [
-  "Evidence Read",
-  "Changed Behavior And Risk",
-  "Coverage Mapping",
-  "Baseline Coverage",
-  "L2 Integration Coverage",
-  "L3 Trigger Assessment",
-  "L3 End-To-End Coverage",
-  "Boundary And Failure Coverage",
-  "Public Contract Coverage",
-  "Test Integrity",
-  "Test Infrastructure",
-  "Skips And Gaps",
-  "User Approval And Gap Disposition",
-  "Validation Readiness"
-] as const;
-const CODE_DIFF_ANALYSIS_FIELDS = [
-  "Commit Range And Sources",
-  "Evidence Read",
-  "Changed Files And Symbols",
-  "Changed Behavior",
-  "Source Evidence Fit",
-  "Callers And Public Surface",
-  "State Lifecycle And Failure Paths",
-  "Coding Standards",
-  "Baseline Test Integrity",
-  "Generated Context And Durable Docs",
-  "Code Readiness"
-] as const;
-
 const SOURCE_ARTIFACTS: Record<GateReviewGate, string[]> = {
   "architecture-plan": [
     ".ai/vcm/handoffs/architecture-brief.md",
@@ -1951,123 +1908,52 @@ async function parseGateReport(
   }
 
   const content = await fs.readText(absolutePath);
-  const parsedGate = matchField(content, "Gate");
-  if (parsedGate && parsedGate !== gate) {
+  const validation = parseGateReviewReportArtifact(content, {
+    expectedGate: gate,
+    expectedRequestId: requestId
+  });
+  if (!validation.parsed || validation.errors.length > 0) {
     throw new VcmError({
-      code: "GATE_REVIEW_REPORT_GATE_MISMATCH",
-      message: `Gate review report gate is ${parsedGate}, expected ${gate}.`,
+      code: gateReportErrorCode(validation.errors),
+      message: `Gate review report is invalid: ${validation.errors.join(" ")}`,
       statusCode: 500
     });
-  }
-
-  const parsedRequest = matchField(content, "Request");
-  if (requestId && parsedRequest !== requestId) {
-    throw new VcmError({
-      code: "GATE_REVIEW_REPORT_STALE",
-      message: `Gate review report request is ${parsedRequest ?? "missing"}, expected ${requestId}.`,
-      statusCode: 500
-    });
-  }
-
-  const decision = normalizeDecision(matchField(content, "Decision"));
-  if (!decision) {
-    throw new VcmError({
-      code: "GATE_REVIEW_DECISION_MISSING",
-      message: `Gate review report must contain Decision: approve or Decision: request_changes.`,
-      statusCode: 500
-    });
-  }
-
-  const findings = extractFindings(content);
-  if (gate === "architecture-plan") {
-    validateArchitectureAnalysis(content);
   }
   if (gate === "validation-adequacy") {
-    validateValidationAnalysis(content);
-    if (decision === "approve") {
+    if (validation.parsed.decision === "approve") {
       await validateValidationApprovalInput(fs, taskRepoRoot);
-    }
-  }
-  if (gate === "code-diff") {
-    validateCodeDiffAnalysis(content);
-  }
-  if (decision === "request_changes") {
-    validateRequestChangeFindings(findings);
-    if (gate === "code-diff") {
-      validateCodeDiffFindings(findings);
     }
   }
 
   return {
     gate,
-    requestId: parsedRequest,
-    decision,
-    summary: extractSummary(content),
-    findings,
+    requestId: validation.parsed.requestId,
+    decision: validation.parsed.decision,
+    summary: validation.parsed.summary,
+    findings: validation.parsed.findings,
     reportPath,
     content,
     parsedAt: timestamp
   };
 }
 
-function validateArchitectureAnalysis(content: string): void {
-  const section = extractMarkdownSection(content, "Architecture Analysis");
-  if (!section) {
-    throw new VcmError({
-      code: "GATE_REVIEW_ARCHITECTURE_ANALYSIS_MISSING",
-      message: "Architecture-plan review must contain a non-empty Architecture Analysis section.",
-      statusCode: 500
-    });
+function gateReportErrorCode(errors: string[]): string {
+  const message = errors.join(" ");
+  if (/Architecture Analysis must appear exactly once/.test(message)) return "GATE_REVIEW_ARCHITECTURE_ANALYSIS_MISSING";
+  if (/Architecture Analysis field/.test(message)) return "GATE_REVIEW_ARCHITECTURE_ANALYSIS_INCOMPLETE";
+  if (/Validation Analysis must appear exactly once/.test(message)) return "GATE_REVIEW_VALIDATION_ANALYSIS_MISSING";
+  if (/Validation Analysis field/.test(message)) return "GATE_REVIEW_VALIDATION_ANALYSIS_INCOMPLETE";
+  if (/Code Diff Analysis must appear exactly once/.test(message)) return "GATE_REVIEW_CODE_DIFF_ANALYSIS_MISSING";
+  if (/Code Diff Analysis field/.test(message)) return "GATE_REVIEW_CODE_DIFF_ANALYSIS_INCOMPLETE";
+  if (/Finding Scope|field File|field Line Or Symbol/.test(message)) {
+    return "GATE_REVIEW_CODE_DIFF_FINDING_LOCATION_MISSING";
   }
-
-  const missingFields = ARCHITECTURE_ANALYSIS_FIELDS.filter((field) => !matchField(section, field));
-  if (missingFields.length > 0) {
-    throw new VcmError({
-      code: "GATE_REVIEW_ARCHITECTURE_ANALYSIS_INCOMPLETE",
-      message: `Architecture Analysis is missing required evidence: ${missingFields.join(", ")}.`,
-      statusCode: 500
-    });
-  }
-}
-
-function validateValidationAnalysis(content: string): void {
-  const section = extractMarkdownSection(content, "Validation Analysis");
-  if (!section) {
-    throw new VcmError({
-      code: "GATE_REVIEW_VALIDATION_ANALYSIS_MISSING",
-      message: "Validation-adequacy review must contain a non-empty Validation Analysis section.",
-      statusCode: 500
-    });
-  }
-
-  const missingFields = VALIDATION_ANALYSIS_FIELDS.filter((field) => !matchField(section, field));
-  if (missingFields.length > 0) {
-    throw new VcmError({
-      code: "GATE_REVIEW_VALIDATION_ANALYSIS_INCOMPLETE",
-      message: `Validation Analysis is missing required evidence: ${missingFields.join(", ")}.`,
-      statusCode: 500
-    });
-  }
-}
-
-function validateCodeDiffAnalysis(content: string): void {
-  const section = extractMarkdownSection(content, "Code Diff Analysis");
-  if (!section) {
-    throw new VcmError({
-      code: "GATE_REVIEW_CODE_DIFF_ANALYSIS_MISSING",
-      message: "Code-diff review must contain a non-empty Code Diff Analysis section.",
-      statusCode: 500
-    });
-  }
-
-  const missingFields = CODE_DIFF_ANALYSIS_FIELDS.filter((field) => !matchField(section, field));
-  if (missingFields.length > 0) {
-    throw new VcmError({
-      code: "GATE_REVIEW_CODE_DIFF_ANALYSIS_INCOMPLETE",
-      message: `Code Diff Analysis is missing required evidence: ${missingFields.join(", ")}.`,
-      statusCode: 500
-    });
-  }
+  if (/field Evidence|field Expected|field Gap|field Risk/.test(message)) return "GATE_REVIEW_FINDING_INCOMPLETE";
+  if (/requires at least one structured finding/.test(message)) return "GATE_REVIEW_FINDINGS_MISSING";
+  if (/Decision must/.test(message)) return "GATE_REVIEW_DECISION_MISSING";
+  if (/Gate must/.test(message)) return "GATE_REVIEW_REPORT_GATE_MISMATCH";
+  if (/Request must/.test(message)) return "GATE_REVIEW_REPORT_STALE";
+  return "GATE_REVIEW_REPORT_INVALID";
 }
 
 async function validateValidationApprovalInput(
@@ -2119,44 +2005,6 @@ function formatArtifactCheckFailure(check: ArtifactCheckResult): string {
 
 function renderFoundValue(value: string | undefined): string {
   return value && value.trim().length > 0 ? JSON.stringify(value.trim()) : "<missing>";
-}
-
-function validateRequestChangeFindings(findings: GateReviewFinding[]): void {
-  if (findings.length === 0) {
-    throw new VcmError({
-      code: "GATE_REVIEW_FINDINGS_MISSING",
-      message: "A request_changes decision must contain at least one structured finding.",
-      statusCode: 500
-    });
-  }
-  const incomplete = findings.find((finding) => (
-    !finding.evidence.trim()
-    || !finding.expected.trim()
-    || !finding.gap.trim()
-    || !finding.risk.trim()
-  ));
-  if (incomplete) {
-    throw new VcmError({
-      code: "GATE_REVIEW_FINDING_INCOMPLETE",
-      message: `Finding ${incomplete.title} must contain Evidence, Expected, Gap, and Risk.`,
-      statusCode: 500
-    });
-  }
-}
-
-function validateCodeDiffFindings(findings: GateReviewFinding[]): void {
-  const incomplete = findings.find((finding) => (
-    !finding.file?.trim()
-    || !finding.location?.trim()
-    || !finding.scope
-  ));
-  if (incomplete) {
-    throw new VcmError({
-      code: "GATE_REVIEW_CODE_DIFF_FINDING_LOCATION_MISSING",
-      message: `Code-diff finding ${incomplete.title} must contain File, Line Or Symbol, and Finding Scope.`,
-      statusCode: 500
-    });
-  }
 }
 
 function extractMarkdownSection(content: string, heading: string): string | undefined {
@@ -2248,41 +2096,6 @@ async function readJsonOrNull<T>(fs: FileSystemAdapter, targetPath: string): Pro
 function matchField(content: string, field: string): string | undefined {
   const match = content.match(new RegExp(`^\\s*(?:[-*]\\s*)?${escapeRegex(field)}\\s*:\\s*(.+?)\\s*$`, "mi"));
   return match?.[1]?.trim();
-}
-
-function extractSummary(content: string): string | undefined {
-  const field = matchField(content, "Summary");
-  if (field) {
-    return field;
-  }
-  const section = content.match(/^##\s+Summary\s*\n([\s\S]*?)(?=\n##\s+|\s*$)/im);
-  return section?.[1]?.trim() || undefined;
-}
-
-function extractFindings(content: string): GateReviewFinding[] {
-  const findings: GateReviewFinding[] = [];
-  const blocks = content.split(/\n(?=#{2,4}\s+|-+\s*severity\s*:|severity\s*:)/i);
-  for (const block of blocks) {
-    const heading = block.match(/^#{2,4}\s+(critical|high|medium|low)\s*:\s*(.+)$/im);
-    const severity = normalizeSeverity(matchField(block, "severity") ?? heading?.[1]);
-    const title = matchField(block, "title") ?? heading?.[2]?.trim() ?? block.match(/^#{2,4}\s+(.+)$/m)?.[1]?.trim();
-    if (!severity || !title) {
-      continue;
-    }
-    findings.push({
-      severity,
-      title,
-      file: matchField(block, "file"),
-      line: parsePositiveInteger(matchField(block, "line")),
-      location: matchField(block, "line or symbol"),
-      scope: normalizeCodeDiffFindingScope(matchField(block, "finding scope")),
-      evidence: matchField(block, "evidence") ?? "",
-      expected: matchField(block, "expected") ?? "",
-      gap: matchField(block, "gap") ?? "",
-      risk: matchField(block, "risk") ?? ""
-    });
-  }
-  return findings;
 }
 
 function getSourceArtifacts(gate: GateReviewGate, codeDiffSources?: CodeDiffSource[]): string[] {
@@ -2418,14 +2231,6 @@ function isString(value: unknown): value is string {
   return typeof value === "string";
 }
 
-function parsePositiveInteger(value: string | undefined): number | undefined {
-  if (!value) {
-    return undefined;
-  }
-  const parsed = Number.parseInt(value, 10);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
-}
-
 function assertExceptionReason(reason: string | undefined): void {
   if (!reason?.trim()) {
     throw new VcmError({
@@ -2505,16 +2310,7 @@ function errorMessage(error: unknown): string {
 }
 
 function isPendingReportError(error: unknown): boolean {
-  return error instanceof VcmError && [
-    "GATE_REVIEW_DECISION_MISSING",
-    "GATE_REVIEW_ARCHITECTURE_ANALYSIS_MISSING",
-    "GATE_REVIEW_ARCHITECTURE_ANALYSIS_INCOMPLETE",
-    "GATE_REVIEW_FINDINGS_MISSING",
-    "GATE_REVIEW_FINDING_INCOMPLETE",
-    "GATE_REVIEW_REPORT_GATE_MISMATCH",
-    "GATE_REVIEW_REPORT_MISSING",
-    "GATE_REVIEW_REPORT_STALE"
-  ].includes(error.code);
+  return error instanceof VcmError && error.code === "GATE_REVIEW_REPORT_MISSING";
 }
 
 function delay(ms: number): Promise<void> {

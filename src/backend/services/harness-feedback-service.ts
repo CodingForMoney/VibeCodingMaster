@@ -17,6 +17,7 @@ import type {
   AutoMemoryService,
   TaskRetrospectiveMemoryReviewContext
 } from "./auto-memory-service.js";
+import { parseHarnessFeedbackArtifact } from "./managed-artifact-validation.js";
 import type { SessionService } from "./session-service.js";
 
 export interface HarnessFeedbackService {
@@ -378,19 +379,22 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
 
   function parseFeedbackItem(relativePath: string, content: string): HarnessFeedbackQueueItem {
     const id = sanitizeFeedbackId(path.posix.basename(relativePath, ".md"));
-    const metadata = parseSimpleMetadata(content);
-    const title = firstHeading(content)
-      ?? metadata.summary
-      ?? metadata["observed problem"]
-      ?? id;
+    const validation = parseHarnessFeedbackArtifact(content);
+    if (!validation.parsed || validation.errors.length > 0) {
+      throw new VcmError({
+        code: "HARNESS_FEEDBACK_INVALID",
+        message: `Invalid Harness Feedback ${relativePath}: ${validation.errors.join(" ")}`,
+        statusCode: 422
+      });
+    }
     return {
       id,
-      title: compactLine(title),
+      title: compactLine(validation.parsed.title),
       path: relativePath,
       source: "role-feedback",
-      reporterRole: metadata["reporter role"] ?? metadata.reporter,
-      taskSlug: metadata["task slug"] ?? metadata.task,
-      summary: metadata.summary
+      reporterRole: validation.parsed.reporterRole,
+      taskSlug: validation.parsed.taskSlug,
+      summary: validation.parsed.summary
     };
   }
 
@@ -630,23 +634,6 @@ function getRetrospectiveReportErrors(content: string): string[] {
     }
   }
   return errors;
-}
-
-function parseSimpleMetadata(content: string): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const line of content.split(/\r?\n/).slice(0, 80)) {
-    const match = /^[-*]?\s*([A-Za-z][A-Za-z -]{1,40})\s*:\s*(.+)$/.exec(line.trim());
-    if (!match) {
-      continue;
-    }
-    result[match[1].trim().toLowerCase()] = match[2].trim();
-  }
-  return result;
-}
-
-function firstHeading(content: string): string | undefined {
-  const heading = content.split(/\r?\n/).find((line) => /^#{1,3}\s+\S/.test(line));
-  return heading?.replace(/^#{1,3}\s+/, "").trim();
 }
 
 function compactLine(value: string): string {

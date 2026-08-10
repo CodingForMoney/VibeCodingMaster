@@ -1,8 +1,8 @@
 import path from "node:path";
-import { DISPATCHABLE_ROLES, VCM_ROLE_NAMES } from "../../shared/constants.js";
+import { DISPATCHABLE_ROLES } from "../../shared/constants.js";
 import type {
-  ArtifactCheckResult,
   ArtifactKind,
+  ManagedArtifactKind,
   ArtifactSubmissionMode,
   ArtifactSubmissionResult,
   ArtifactSummary,
@@ -10,7 +10,11 @@ import type {
 } from "../../shared/types/artifact.js";
 import type { DispatchableRole, RoleName, VcmRoleName } from "../../shared/types/role.js";
 import { checkMarkdownArtifact } from "../../shared/validation/artifact-check.js";
-import { getArtifactDefinition, isArtifactKind } from "../../shared/validation/artifact-registry.js";
+import {
+  getManagedArtifactDefinition,
+  isArtifactKind,
+  isManagedArtifactKind
+} from "../../shared/validation/artifact-registry.js";
 import { VcmError } from "../errors.js";
 import {
   resolveRepoPath,
@@ -33,8 +37,8 @@ import {
   renderWorkflowProgressTemplate
 } from "../templates/handoff.js";
 import { renderRoleCommandTemplate } from "../templates/role-command.js";
-import { validateMemoryProposal } from "./memory-proposal-validation.js";
 import { isMemoryProposalSubmissionPath } from "./memory-review-paths.js";
+import { validateManagedArtifactContent } from "./managed-artifact-validation.js";
 import type { WorkflowControlService } from "./workflow-control-service.js";
 
 export interface ArtifactService {
@@ -295,21 +299,35 @@ export function createArtifactService(fs: FileSystemAdapter, deps: ArtifactServi
         throw artifactRejected(input.kind, ["Artifact content is empty."]);
       }
 
+      if (!isManagedArtifactKind(input.kind)) {
+        throw new VcmError({
+          code: "ARTIFACT_KIND_INVALID",
+          message: `Unknown managed artifact kind: ${input.kind}`,
+          statusCode: 400
+        });
+      }
+
+      const definition = getManagedArtifactDefinition(input.kind);
+      const owners = Array.isArray(definition.owner) ? definition.owner : [definition.owner];
+      if (!owners.includes(input.role)) {
+        throw new VcmError({
+          code: "ARTIFACT_OWNER_MISMATCH",
+          message: `${input.kind} is owned by ${owners.join("|")}, not ${input.role}.`,
+          statusCode: 403
+        });
+      }
+
       if (isArtifactKind(input.kind)) {
-        const definition = getArtifactDefinition(input.kind);
-        const owners = Array.isArray(definition.owner) ? definition.owner : [definition.owner];
-        if (!owners.includes(input.role)) {
-          throw new VcmError({
-            code: "ARTIFACT_OWNER_MISMATCH",
-            message: `${input.kind} is owned by ${owners.join("|")}, not ${input.role}.`,
-            statusCode: 403
-          });
+        if (input.artifactPath?.trim()) {
+          throw artifactRejected(input.kind, ["--path is not allowed for fixed artifact kinds."]);
         }
-        const artifactPath = path.posix.join(input.handoffDir, definition.fileName);
-        const check = checkMarkdownArtifact(input.kind, artifactPath, normalized, { mode: input.mode });
-        const errors = artifactCheckErrors(check, input.mode);
-        if (errors.length > 0) {
-          throw artifactRejected(input.kind, errors);
+        const artifactPath = path.posix.join(input.handoffDir, definition.fileName ?? "");
+        const validation = validateManagedArtifactContent(input.kind, normalized, {
+          path: artifactPath,
+          mode: input.mode
+        });
+        if (validation.errors.length > 0) {
+          throw artifactRejected(input.kind, validation.errors);
         }
         if (input.kind === "workflow-progress") {
           if (input.mode !== "final") {
@@ -342,7 +360,7 @@ export function createArtifactService(fs: FileSystemAdapter, deps: ArtifactServi
           kind: input.kind,
           mode: input.mode,
           path: artifactPath,
-          status: check.status
+          status: validation.status
         };
       }
 
@@ -357,17 +375,6 @@ export function createArtifactService(fs: FileSystemAdapter, deps: ArtifactServi
       };
     }
   };
-}
-
-function artifactCheckErrors(check: ArtifactCheckResult, mode: ArtifactSubmissionMode): string[] {
-  const errors = [
-    ...check.missingHeadings.map((heading) => `Missing required heading: ${heading}.`),
-    ...check.invalidFields
-  ];
-  if (mode === "final" && check.hasPlaceholder) {
-    errors.push("Final artifacts must not contain TBD, draft, or not-run placeholders.");
-  }
-  return errors;
 }
 
 function artifactRejected(kind: string, errors: string[]): VcmError {
@@ -385,9 +392,6 @@ async function validateDynamicArtifact(
   content: string,
   workflowControlService?: Pick<WorkflowControlService, "assertRouteAuthorized">
 ): Promise<{ kind: "route-message" | "coder-worker-report" | "gate-review-report" | "memory-proposal" | "harness-feedback"; root: string; path: string }> {
-  if (input.mode !== "final") {
-    throw artifactRejected(input.kind, ["Dynamic artifacts must be submitted in final mode."]);
-  }
   const artifactPath = normalizeRelativeArtifactPath(input.artifactPath);
   if (input.kind === "route-message") {
     const route = DEFAULT_MESSAGE_ROUTES.find(([fromRole, toRole]) =>
@@ -396,7 +400,7 @@ async function validateDynamicArtifact(
     if (!route || route[0] !== input.role) {
       throw artifactRejected(input.kind, ["Route-message path must name the submitting role as the sender."]);
     }
-    validateRouteMessage(content);
+    assertManagedArtifactContent(input.kind, content, artifactPath, input.mode);
     if (input.role === "project-manager") {
       if (!workflowControlService) {
         throw new VcmError({
@@ -417,40 +421,46 @@ async function validateDynamicArtifact(
     return { kind: input.kind, root: input.repoRoot, path: artifactPath };
   }
   if (input.kind === "coder-worker-report") {
-    if (input.role !== "coder" || !/^\.ai\/vcm\/coder-workers\/reports\/[A-Za-z0-9._-]+\.md$/.test(artifactPath)) {
+    if (!/^\.ai\/vcm\/coder-workers\/reports\/[A-Za-z0-9._-]+\.md$/.test(artifactPath)) {
       throw artifactRejected(input.kind, ["Coder Worker reports must use the assigned .ai/vcm/coder-workers/reports/<worker-id>.md path."]);
     }
-    validateCoderWorkerReport(content);
+    assertManagedArtifactContent(input.kind, content, artifactPath, input.mode);
     return { kind: input.kind, root: input.repoRoot, path: artifactPath };
   }
   if (input.kind === "gate-review-report") {
-    if (input.role !== "reviewer" || !/^\.ai\/vcm\/gate-reviews\/requests\/[A-Za-z0-9._-]+\.report\.md$/.test(artifactPath)) {
+    if (!/^\.ai\/vcm\/gate-reviews\/requests\/[A-Za-z0-9._-]+\.report\.md$/.test(artifactPath)) {
       throw artifactRejected(input.kind, ["Reviewer must submit the assigned request report path."]);
     }
-    await validateGateReviewReport(fs, input.repoRoot, artifactPath, content);
+    const requestId = path.posix.basename(artifactPath, ".report.md");
+    const requestPath = path.posix.join(".ai/vcm/gate-reviews/requests", `${requestId}.json`);
+    const absoluteRequestPath = resolveRepoPath(input.repoRoot, requestPath);
+    if (!(await fs.pathExists(absoluteRequestPath))) {
+      throw artifactRejected(input.kind, [`Gate request does not exist: ${requestPath}.`]);
+    }
+    const request = await fs.readJson<{ requestId?: string; gate?: string; reportPath?: string }>(absoluteRequestPath);
+    if (request.reportPath !== artifactPath) {
+      throw artifactRejected(input.kind, [
+        `Report path must match the assigned request path ${request.reportPath ?? "<missing>"}.`
+      ]);
+    }
+    assertManagedArtifactContent(input.kind, content, artifactPath, input.mode, {
+      expectedGate: request.gate,
+      expectedRequestId: request.requestId ?? requestId
+    });
     return { kind: input.kind, root: input.repoRoot, path: artifactPath };
   }
   if (input.kind === "memory-proposal") {
-    if (!VCM_ROLE_NAMES.includes(input.role as typeof VCM_ROLE_NAMES[number])) {
-      throw artifactRejected(input.kind, ["Only a VCM workflow role may submit a Memory Proposal."]);
-    }
     if (!isMemoryProposalSubmissionPath(artifactPath, input.role as VcmRoleName)) {
       throw artifactRejected(input.kind, ["Memory proposal path is not assigned to the submitting role."]);
     }
-    const memoryError = validateMemoryProposal(content);
-    if (memoryError) {
-      throw artifactRejected(input.kind, [`Memory proposal ${memoryError}.`]);
-    }
+    assertManagedArtifactContent(input.kind, content, artifactPath, input.mode);
     return { kind: input.kind, root: input.repoRoot, path: artifactPath };
   }
   if (input.kind === "harness-feedback") {
-    if (!VCM_ROLE_NAMES.includes(input.role as typeof VCM_ROLE_NAMES[number])) {
-      throw artifactRejected(input.kind, ["Only a VCM workflow role may submit Harness Feedback."]);
-    }
     if (!/^\.ai\/vcm\/harness-feedback\/pending\/[A-Za-z0-9._-]+\.md$/.test(artifactPath)) {
       throw artifactRejected(input.kind, ["Harness Feedback path must be under .ai/vcm/harness-feedback/pending/. "]);
     }
-    validateHarnessFeedback(content);
+    assertManagedArtifactContent(input.kind, content, artifactPath, input.mode);
     return { kind: input.kind, root: input.baseRepoRoot, path: artifactPath };
   }
   throw new VcmError({
@@ -460,90 +470,22 @@ async function validateDynamicArtifact(
   });
 }
 
-function validateCoderWorkerReport(content: string): void {
-  const errors: string[] = [];
-  if (!/^# Coder Worker Report:\s*\S.+$/m.test(content)) {
-    errors.push("Coder Worker report requires '# Coder Worker Report: <worker-id>'.");
-  }
-  if (!/^Worker State:\s*completed\s*$/m.test(content)) {
-    errors.push("Worker State must be completed.");
-  }
-  if (!/^Implementation Result:\s*(success|has_failed_items)\s*$/m.test(content)) {
-    errors.push("Implementation Result must be success|has_failed_items.");
-  }
-  for (const heading of [
-    "Assigned Scope", "Item Dispositions", "Files Changed", "Tests Added Or Updated",
-    "L0/L1 Checks", "Commit", "Skipped Assigned Checks", "Objective Failures"
-  ]) {
-    if (!new RegExp(`^## ${escapeRegExp(heading)}\\s*$`, "m").test(content)) {
-      errors.push(`Missing required section: ${heading}.`);
-    }
-  }
-  if (errors.length > 0) throw artifactRejected("coder-worker-report", errors);
-}
-
-function validateRouteMessage(content: string): void {
-  const type = /^type:\s*(\S+)\s*$/m.exec(content)?.[1];
-  const allowed = new Set(["task", "question", "revise", "cancel", "result", "blocked", "finding"]);
-  if (!type || !allowed.has(type)) {
-    throw artifactRejected("route-message", ["Frontmatter type must be one of task|question|revise|cancel|result|blocked|finding."]);
-  }
-  if (!content.startsWith("---\n") || !/\n---\n/.test(content) || !content.split(/\n---\n/, 2)[1]?.trim()) {
-    throw artifactRejected("route-message", ["Route message requires frontmatter and a non-empty body."]);
-  }
-}
-
-async function validateGateReviewReport(
-  fs: FileSystemAdapter,
-  repoRoot: string,
+function assertManagedArtifactContent(
+  kind: ManagedArtifactKind,
+  content: string,
   artifactPath: string,
-  content: string
-): Promise<void> {
-  const requestId = path.posix.basename(artifactPath, ".report.md");
-  const requestPath = path.posix.join(".ai/vcm/gate-reviews/requests", `${requestId}.json`);
-  const absoluteRequestPath = resolveRepoPath(repoRoot, requestPath);
-  if (!(await fs.pathExists(absoluteRequestPath))) {
-    throw artifactRejected("gate-review-report", [`Gate request does not exist: ${requestPath}.`]);
+  mode: ArtifactSubmissionMode,
+  expected: { expectedGate?: string; expectedRequestId?: string } = {}
+): void {
+  const validation = validateManagedArtifactContent(kind, content, {
+    path: artifactPath,
+    mode,
+    expectedGate: expected.expectedGate as Parameters<typeof validateManagedArtifactContent>[2]["expectedGate"],
+    expectedRequestId: expected.expectedRequestId
+  });
+  if (validation.errors.length > 0) {
+    throw artifactRejected(kind, validation.errors);
   }
-  const request = await fs.readJson<{ requestId?: string; gate?: string; reportPath?: string }>(absoluteRequestPath);
-  const fields = Object.fromEntries(
-    ["Gate", "Request", "Decision", "Summary"].map((field) => [
-      field,
-      new RegExp(`^${field}:\\s*(.+?)\\s*$`, "mi").exec(content)?.[1]?.trim()
-    ])
-  );
-  const errors: string[] = [];
-  if (fields.Gate !== request.gate) errors.push(`Gate must be ${request.gate ?? "the requested gate"}.`);
-  if (fields.Request !== request.requestId) errors.push(`Request must be ${request.requestId ?? requestId}.`);
-  if (fields.Decision !== "approve" && fields.Decision !== "request_changes") errors.push("Decision must be approve|request_changes.");
-  if (!fields.Summary) errors.push("Summary is required.");
-  const requiredSection = request.gate === "architecture-plan"
-    ? "Architecture Analysis"
-    : request.gate === "validation-adequacy"
-      ? "Validation Analysis"
-      : "Code Diff Analysis";
-  if (!new RegExp(`^## ${escapeRegExp(requiredSection)}\\s*$`, "m").test(content)) {
-    errors.push(`Missing required section: ${requiredSection}.`);
-  }
-  if (!/^## Findings\s*$/m.test(content)) errors.push("Missing required section: Findings.");
-  if (errors.length > 0) throw artifactRejected("gate-review-report", errors);
-}
-
-function validateHarnessFeedback(content: string): void {
-  const errors: string[] = [];
-  if (!/^#\s+\S.+$/m.test(content)) errors.push("Harness Feedback requires a title.");
-  for (const field of [
-    "Reporter role", "Task slug", "Summary", "Observed problem", "Expected behavior",
-    "Evidence", "Suspected harness area", "Impact", "Urgency"
-  ]) {
-    if (!new RegExp(`^- ${escapeRegExp(field)}:\\s*\\S`, "m").test(content)) {
-      errors.push(`Harness Feedback is missing ${field}.`);
-    }
-  }
-  if (!/^- Urgency:\s*(low|medium|high)\s*$/m.test(content)) {
-    errors.push("Urgency must be low|medium|high.");
-  }
-  if (errors.length > 0) throw artifactRejected("harness-feedback", errors);
 }
 
 function normalizeRelativeArtifactPath(value: string | undefined): string {
@@ -564,10 +506,6 @@ async function writeAtomic(fs: FileSystemAdapter, absolutePath: string, content:
     return;
   }
   await fs.writeText(absolutePath, content);
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function getLegacyRoleCommandPath(roleCommandsDir: string, role: DispatchableRole): string {

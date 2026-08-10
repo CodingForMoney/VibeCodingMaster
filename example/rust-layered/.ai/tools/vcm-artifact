@@ -10,40 +10,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-KINDS = (
-    "architecture-brief",
-    "architecture-evidence",
-    "planning-progress",
-    "architecture-plan",
-    "known-issues",
-    "coder-completion",
-    "architect-debug",
-    "architecture-diagnosis",
-    "test-report",
-    "docs-update-report",
-    "docs-sync-report",
-    "workflow-progress",
-    "final-acceptance",
-    "route-message",
-    "coder-worker-report",
-    "gate-review-report",
-    "memory-proposal",
-    "harness-feedback",
-)
-DYNAMIC_KINDS = {
-    "route-message",
-    "coder-worker-report",
-    "gate-review-report",
-    "memory-proposal",
-    "harness-feedback",
-}
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Validate and atomically write a VCM-managed artifact."
     )
-    parser.add_argument("kind", choices=KINDS)
+    parser.add_argument("kind", help="VCM-managed artifact kind.")
     parser.add_argument("--file", required=True, help="Candidate Markdown file.")
     parser.add_argument("--mode", choices=("draft", "final"), default="final")
     parser.add_argument(
@@ -89,10 +60,6 @@ def error_text(raw: str) -> str:
 
 def main() -> int:
     args = parse_args()
-    if args.kind in DYNAMIC_KINDS and not args.path:
-        fail(f"--path is required for {args.kind}.")
-    if args.kind not in DYNAMIC_KINDS and args.path:
-        fail(f"--path is not allowed for fixed artifact kind {args.kind}.")
 
     candidate = Path(args.file).expanduser()
     if not candidate.is_file():

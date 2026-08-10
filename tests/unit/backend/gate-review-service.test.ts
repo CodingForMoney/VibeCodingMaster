@@ -467,7 +467,7 @@ describe("gate-review-service", () => {
     await mkdir(reportDir, { recursive: true });
     await writeFile(
       path.join(reportDir, "architecture-plan-review.md"),
-      "Gate: architecture-plan\nDecision: approve\nSummary: Format only.\n",
+      "Gate: architecture-plan\nRequest: manual-request\nDecision: approve\nSummary: Format only.\n\n## Findings\n\nNone.\n",
       "utf8"
     );
     const service = createGateReviewService({
@@ -495,7 +495,7 @@ describe("gate-review-service", () => {
     await mkdir(reportDir, { recursive: true });
     await writeFile(
       path.join(reportDir, "validation-adequacy-review.md"),
-      "Gate: validation-adequacy\nDecision: approve\nSummary: Test report says pass.\n",
+      "Gate: validation-adequacy\nRequest: manual-request\nDecision: approve\nSummary: Test report says pass.\n\n## Findings\n\nNone.\n",
       "utf8"
     );
     const service = createGateReviewService({
@@ -521,7 +521,7 @@ describe("gate-review-service", () => {
     await mkdir(reportDir, { recursive: true });
     await writeFile(
       path.join(reportDir, "code-diff-review.md"),
-      "Gate: code-diff\nDecision: approve\nSummary: Diff looks good.\n",
+      "Gate: code-diff\nRequest: manual-request\nDecision: approve\nSummary: Diff looks good.\n\n## Findings\n\nNone.\n",
       "utf8"
     );
     const service = createGateReviewService({
@@ -549,6 +549,7 @@ describe("gate-review-service", () => {
       path.join(reportDir, "code-diff-review.md"),
       [
         "Gate: code-diff",
+        "Request: manual-request",
         "Decision: request_changes",
         "Summary: A code issue was found.",
         "",
@@ -590,6 +591,7 @@ describe("gate-review-service", () => {
       path.join(reportDir, "code-diff-review.md"),
       [
         "Gate: code-diff",
+        "Request: manual-request",
         "Decision: request_changes",
         "Summary: A code issue was found.",
         "",
@@ -639,6 +641,7 @@ describe("gate-review-service", () => {
       path.join(reportDir, "validation-adequacy-review.md"),
       [
         "Gate: validation-adequacy",
+        "Request: manual-request",
         "Decision: approve",
         "Summary: The incomplete report claims pass.",
         "",
@@ -681,6 +684,7 @@ describe("gate-review-service", () => {
       path.join(reportDir, "validation-adequacy-review.md"),
       [
         "Gate: validation-adequacy",
+        "Request: manual-request",
         "Decision: approve",
         "Summary: The failed result and exact user-approved gap are fully recorded.",
         "",
@@ -1541,6 +1545,8 @@ function createRuntime(
             "- End-To-End Flow: entry to owner to completion",
             "- Scope Fit: accepted scope is covered",
             "- Code Reality: plan was compared with current code",
+            "- Invalidated Assumptions: touched assumptions were checked",
+            "- Existing-Class Completeness: related class members were reconstructed",
             "- Ownership: state ownership was checked",
             "- Data Flow: data flow was traced",
             "- Lifecycle: completion and failure were checked",

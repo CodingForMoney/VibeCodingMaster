@@ -162,8 +162,8 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
       path.join(pendingDir, "02-tester-validation.md")
     ];
     await fs.mkdir(pendingDir, { recursive: true });
-    await fs.writeFile(pendingFeedback[0], "# Coder routing feedback\n", "utf8");
-    await fs.writeFile(pendingFeedback[1], "# Tester validation feedback\n", "utf8");
+    await fs.writeFile(pendingFeedback[0], renderHarnessFeedback("Coder routing feedback", "coder"), "utf8");
+    await fs.writeFile(pendingFeedback[1], renderHarnessFeedback("Tester validation feedback", "tester"), "utf8");
 
     env.mockRuntime.onPrompt("project-manager", "Complete task without memory", async (ctx) => {
       await ctx.userPromptSubmit();
@@ -501,6 +501,23 @@ function matchPendingFeedbackPaths(prompt: string): string[] {
     .split("\n")
     .map((line) => line.match(/^-\s+(.+)$/)?.[1]?.trim())
     .filter((feedbackPath): feedbackPath is string => Boolean(feedbackPath));
+}
+
+function renderHarnessFeedback(title: string, role: string): string {
+  return [
+    `# ${title}`,
+    "",
+    `- Reporter role: ${role}`,
+    "- Task slug: mock-retrospective-no-memory",
+    "- Summary: A reusable harness behavior needs review.",
+    "- Observed problem: The role produced an ambiguous result.",
+    "- Expected behavior: The harness should make the required behavior explicit.",
+    "- Evidence: Current task handoff evidence.",
+    "- Suspected harness area: role definition",
+    "- Impact: The workflow can choose the wrong next action.",
+    "- Urgency: medium",
+    ""
+  ].join("\n");
 }
 
 function matchPromptList(prompt: string, startLabel: string, endLabel: string): string[] {

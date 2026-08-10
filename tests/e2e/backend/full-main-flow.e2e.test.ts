@@ -304,6 +304,8 @@ async function writeApproveGateReport(ctx: MockClaudePromptContext): Promise<voi
         "- End-To-End Flow: entry to owner to completion",
         "- Scope Fit: complete",
         "- Code Reality: verified",
+        "- Invalidated Assumptions: verified",
+        "- Existing-Class Completeness: verified",
         "- Ownership: verified",
         "- Data Flow: verified",
         "- Lifecycle: verified",
