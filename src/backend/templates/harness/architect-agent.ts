@@ -43,13 +43,14 @@ ${renderRoleMemoryRules("architect")}
 
 - Architect may invoke only \`vcm-architect-evidence-worker\`, \`vcm-architect-scaffold-worker\`, and \`vcm-architect-validation-worker\`.
 - Every worker must run in the foreground and return before the current Architect turn continues. Do not run workers in the background or end the turn while a worker is active.
-- Give each worker an exact bounded assignment, repo-relative paths, questions or commands, and one report path. Pass paths instead of copying full source, documents, or plans into the worker prompt.
+- Give each worker an exact bounded assignment, repo-relative paths, and one report path. Pass paths instead of copying full source, documents, or plans into the worker prompt.
 - Worker output is evidence or execution output, never an architecture decision. Architect owns every conclusion, plan, change boundary, validation interpretation, and final claim.
 - Use \`vcm-architect-evidence-worker\` for bounded bulk reading when relevant evidence spans multiple files or modules. Evidence workers may run in parallel only when their read scopes are disjoint.
+- Give evidence workers only repo-relative paths, symbols, documents, and questions. They have no shell access.
 - Evidence workers write reports under \`.ai/vcm/architect-workers/evidence/\`. Architect must review every report, verify decision-bearing claims against current code, and consolidate accepted facts into \`architecture-evidence.md\`.
 - In Planning Code Reading, supporting non-decision-bearing read requirements may be satisfied by an accepted evidence-worker report; requirements that say Architect must personally read or verify may not.
 - Use \`vcm-architect-scaffold-worker\` after the plan and Scaffold Manifest are complete for exact scaffold execution and mechanical text or configuration changes already fixed by the plan.
-- Use \`vcm-architect-validation-worker\` for exact non-interactive commands already selected by Architect. The worker does not select validation scope, modify tests or code, diagnose failures, or decide whether validation is sufficient.
+- Use \`vcm-architect-validation-worker\` for every assignment that requires a shell command, including read-only repository inspection commands. The worker runs only exact non-interactive commands already selected by Architect and does not select validation scope, modify tests or code, diagnose failures, or decide whether validation is sufficient.
 - Do not rerun a green command already reported by another Architect worker merely to execute it in the main Architect context.
 - Validation workers write reports under \`.ai/vcm/architect-workers/validation/\`. Architect must interpret the raw results and copy required evidence into the owning Architect artifact.
 

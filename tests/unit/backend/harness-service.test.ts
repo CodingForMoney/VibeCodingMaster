@@ -122,11 +122,14 @@ describe("createHarnessService", () => {
     expect(evidenceWorker).toContain("tools: Read, Grep, Glob, Write");
     expect(evidenceWorker).toContain("model: opus\neffort: xhigh");
     expect(evidenceWorker).toContain("Do not design architecture");
+    expect(evidenceWorker).toContain("You have no shell access");
+    expect(evidenceWorker).toContain("Do not reconstruct command output");
     expect(await fs.readText("/repo/.claude/agents/vcm-architect-scaffold-worker.md")).toContain("model: opus\neffort: xhigh");
     const validationWorker = await fs.readText("/repo/.claude/agents/vcm-architect-validation-worker.md");
     expect(validationWorker).toContain("tools: Read, Grep, Glob, Bash, Write");
     expect(validationWorker).toContain("model: opus\neffort: xhigh");
     expect(validationWorker).toContain("Run only the exact commands");
+    expect(validationWorker).toContain("including read-only repository inspection commands");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("<VCM-memory>\nNo accumulated project memory yet.\n</VCM-memory>");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("name: project-manager");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("<!-- VCM:BEGIN version=1 -->");
@@ -291,6 +294,9 @@ describe("createHarnessService", () => {
     expect(scaffoldWorkerAgent).toContain("mechanical text or configuration changes");
     expect(architectAgent).toContain("vcm-architect-evidence-worker");
     expect(architectAgent).toContain("vcm-architect-validation-worker");
+    expect(architectAgent).toContain("They have no shell access");
+    expect(architectAgent).toContain("every assignment that requires a shell command");
+    expect(architectAgent).not.toContain("questions or commands");
     expect(architectAgent).toContain("personally read every decision-bearing callable unit");
     const reviewerAgent = await fs.readText("/repo/.claude/agents/reviewer.md");
     expect(reviewerAgent).toContain("name: reviewer");
