@@ -1,5 +1,6 @@
 import type { ArtifactCheckResult, ArtifactKind } from "../types/artifact.js";
 import {
+  ARCHITECT_DEBUG_DISPOSITIONS,
   ARCHITECT_DEBUG_STATUSES,
   ARCHITECTURE_BRIEF_STATUSES,
   ARCHITECTURE_DIAGNOSIS_DISPOSITIONS,
@@ -159,13 +160,24 @@ function validateArtifactFields(
   }
 
   if (kind === "architect-debug") {
-    return validateLifecycleField(
+    const invalidFields = validateLifecycleField(
       content,
       "Status",
       ARCHITECT_DEBUG_STATUSES,
       "completed",
       mode
     );
+    if (mode === "final") {
+      const disposition = readArtifactSectionContent(content, "Final Disposition")?.trim().toLowerCase();
+      if (!isAllowedValue(disposition, ARCHITECT_DEBUG_DISPOSITIONS)) {
+        invalidFields.push(renderExactSectionError(
+          "Final Disposition",
+          ARCHITECT_DEBUG_DISPOSITIONS.join("|"),
+          disposition
+        ));
+      }
+    }
+    return invalidFields;
   }
 
   if (kind === "architecture-diagnosis") {

@@ -473,6 +473,27 @@ describe("workflow control service", () => {
     expect((await readProgress(fs, context)).status).toBe("completed");
   });
 
+  it("starts a fresh Code-Change plan when a Debug Branch requires normal planning", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await enterCodeChangeTester(service, fs, context);
+    await writeTestReport(fs, context, "fail", "none", "code-change validation failure");
+
+    await advance(service, fs, context, "architect", "architect-debug", "Tester failed");
+    await writeArchitectDebug(fs, context, "repair requires broader planning", "normal architecture plan required");
+    await advance(service, fs, context, "architect", "code-change", "normal architecture plan required");
+
+    expect((await service.getState(context)).flowRun).toEqual({
+      rootFlow: "code-change",
+      startedAtSequence: 5
+    });
+    expect((await readProgress(fs, context)).history.at(-1)).toMatchObject({
+      sequence: 5,
+      flow: "code-change",
+      targetRole: "architect"
+    });
+  });
+
   it("preserves the parent Code-Change run when an override adds Tester at Debug Branch exit", async () => {
     const { context, fs } = await createContext(roots);
     const service = createWorkflowControlService({
@@ -1014,10 +1035,15 @@ async function writeArchitectureDiagnosis(
 async function writeArchitectDebug(
   fs: FileSystemAdapter,
   context: WorkflowControlContext,
-  rootCause: string
+  rootCause: string,
+  disposition: "local fix completed" | "normal architecture plan required" | "user clarification required" = "local fix completed"
 ): Promise<void> {
   await writeFinalArtifact(fs, context, "architect-debug.md", renderArchitectDebugTemplate(context.taskSlug), [
     ["Status: pending|completed", "Status: completed"],
+    [
+      "local fix completed|normal architecture plan required|user clarification required",
+      disposition
+    ],
     ["## Confirmed Root Cause\n\nTBD", `## Confirmed Root Cause\n\n${rootCause}`]
   ]);
 }

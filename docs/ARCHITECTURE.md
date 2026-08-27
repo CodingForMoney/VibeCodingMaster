@@ -284,6 +284,10 @@ unchanged and returns exact validation errors to the role. Draft mode permits
 explicitly incomplete lifecycle values; final mode requires a terminal,
 placeholder-free artifact. A malformed Gate Review report written outside the
 submission boundary fails its request instead of leaving the gate running.
+Machine-consumed option values are defined once in `artifact-contract.ts` and
+shared by generated templates, final-submission validation, and workflow
+consumers. Architect Debug `Final Disposition` therefore accepts only its exact
+listed value in final mode; explanatory prose cannot become workflow state.
 
 Most fixed artifacts have one owner. `docs-update-report.md` is shared by
 Architect, Coder, and Tester because Docs-Only Flow assigns documentation to

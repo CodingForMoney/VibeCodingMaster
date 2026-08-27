@@ -10,6 +10,12 @@ export const ARCHITECTURE_PLAN_RESULTS = [
 ] as const;
 export const CODER_COMPLETION_DECISIONS = ["ready_for_review", "incomplete", "failed"] as const;
 export const ARCHITECT_DEBUG_STATUSES = ["pending", "completed"] as const;
+export const ARCHITECT_DEBUG_NORMAL_PLAN_DISPOSITION = "normal architecture plan required";
+export const ARCHITECT_DEBUG_DISPOSITIONS = [
+  "local fix completed",
+  ARCHITECT_DEBUG_NORMAL_PLAN_DISPOSITION,
+  "user clarification required"
+] as const;
 export const ARCHITECTURE_DIAGNOSIS_DISPOSITIONS = [
   "analysis completed",
   "diagnosis implementation completed",

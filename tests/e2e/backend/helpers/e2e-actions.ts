@@ -216,7 +216,12 @@ export async function writeCompletedArchitectDebug(
       "",
       "Status: completed",
       "",
-      ...sections.flatMap((section) => [`## ${section}`, "", "Completed E2E debug evidence.", ""])
+      ...sections.flatMap((section) => [
+        `## ${section}`,
+        "",
+        section === "Final Disposition" ? "local fix completed" : "Completed E2E debug evidence.",
+        ""
+      ])
     ].join("\n"),
     "utf8"
   );

@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   renderArchitectureBriefTemplate,
   renderArchitecturePlanTemplate,
+  renderArchitectDebugTemplate,
   renderDocsUpdateReportTemplate,
   renderDocsSyncReportTemplate,
   renderFinalAcceptanceTemplate,
   renderTestReportTemplate
 } from "../../../src/backend/templates/handoff.js";
 import { checkMarkdownArtifact } from "../../../src/shared/validation/artifact-check.js";
+import { ARCHITECT_DEBUG_DISPOSITIONS } from "../../../src/shared/validation/artifact-contract.js";
 
 describe("checkMarkdownArtifact", () => {
   it("reports missing artifacts", () => {
@@ -190,6 +192,26 @@ Implement the manifest.
 
     expect(result.status).toBe("ok");
     expect(result.invalidFields).toEqual([]);
+  });
+
+  it.each(ARCHITECT_DEBUG_DISPOSITIONS)("accepts exact Architect Debug disposition %s", (disposition) => {
+    const content = completeTemplate("architect-debug", renderArchitectDebugTemplate("demo"))
+      .replace("local fix completed", disposition);
+    const result = checkMarkdownArtifact("architect-debug", "architect-debug.md", content);
+
+    expect(result.status).toBe("ok");
+    expect(result.invalidFields).toEqual([]);
+  });
+
+  it("rejects explanations appended to an Architect Debug disposition", () => {
+    const content = completeTemplate("architect-debug", renderArchitectDebugTemplate("demo"))
+      .replace("local fix completed", "normal architecture plan required\n\nA normal plan is needed.");
+    const result = checkMarkdownArtifact("architect-debug", "architect-debug.md", content);
+
+    expect(result.status).toBe("incomplete");
+    expect(result.invalidFields).toContain(
+      "Final Disposition must contain exactly \"local fix completed|normal architecture plan required|user clarification required\"; found \"normal architecture plan required a normal plan is needed.\"."
+    );
   });
 
   it.each([
@@ -652,6 +674,7 @@ looks-good
   it("keeps generated artifact templates aligned with required headings", () => {
     const templates = [
       ["architecture-brief", renderArchitectureBriefTemplate("demo")],
+      ["architect-debug", renderArchitectDebugTemplate("demo")],
       ["architecture-plan", renderArchitecturePlanTemplate("demo")],
       ["test-report", renderTestReportTemplate("demo")],
       ["docs-update-report", renderDocsUpdateReportTemplate("demo")],
@@ -673,6 +696,9 @@ looks-good
     );
     expect(renderArchitecturePlanTemplate("demo")).toContain(
       "Planning Result: complete|incomplete|user clarification required"
+    );
+    expect(renderArchitectDebugTemplate("demo")).toContain(
+      "## Final Disposition\n\nlocal fix completed|normal architecture plan required|user clarification required"
     );
     expect(renderArchitecturePlanTemplate("demo")).toContain(
       "| <ID> | <create|change|delete> | `<repo-relative-file>` |"
@@ -739,7 +765,7 @@ looks-good
 });
 
 function completeTemplate(
-  kind: "architecture-brief" | "architecture-plan" | "test-report" | "docs-update-report" | "docs-sync-report" | "final-acceptance",
+  kind: "architecture-brief" | "architect-debug" | "architecture-plan" | "test-report" | "docs-update-report" | "docs-sync-report" | "final-acceptance",
   content: string
 ): string {
   const completed = content.replaceAll("TBD", "None.");
@@ -752,6 +778,14 @@ function completeTemplate(
   if (kind === "test-report") {
     return completeL3NotRequired(completed)
       .replace("Test Result: pass|fail|incomplete", "Test Result: pass");
+  }
+  if (kind === "architect-debug") {
+    return completed
+      .replace("Status: pending|completed", "Status: completed")
+      .replace(
+        "local fix completed|normal architecture plan required|user clarification required",
+        "local fix completed"
+      );
   }
   if (kind === "final-acceptance") {
     return completed.replace(

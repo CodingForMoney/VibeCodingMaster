@@ -23,6 +23,7 @@ import {
   WORKFLOW_FLOWS
 } from "../../shared/types/workflow.js";
 import { checkMarkdownArtifact, readArtifactSectionContent } from "../../shared/validation/artifact-check.js";
+import { ARCHITECT_DEBUG_NORMAL_PLAN_DISPOSITION } from "../../shared/validation/artifact-contract.js";
 import { renderWorkflowProgressTemplate } from "../templates/handoff.js";
 
 export interface WorkflowControlContext {
@@ -715,7 +716,7 @@ async function allowedArchitectFix(
     if (!evidenceIsFresh(state, source, "architect", artifactName, artifact.hash)) {
       return [`${source}/architect`];
     }
-    if (source === "architect-debug" && artifact.disposition === "normal architecture plan required") {
+    if (source === "architect-debug" && artifact.disposition === ARCHITECT_DEBUG_NORMAL_PLAN_DISPOSITION) {
       return ["code-change/architect"];
     }
     return artifact.complete ? [`${source}/tester`] : [`${source}/architect`];
@@ -908,7 +909,7 @@ async function advanceFlowRun(
   if (run.activeBranch === current.flow && effectiveFlow === run.rootFlow) {
     if (current.flow === "architect-debug" && effectiveFlow === "code-change") {
       const debug = await artifactState(fs, input, "architect-debug.md", "architect-debug");
-      if (debug.disposition === "normal architecture plan required") {
+      if (debug.disposition === ARCHITECT_DEBUG_NORMAL_PLAN_DISPOSITION) {
         return newFlowRun("code-change", nextSequence);
       }
     }

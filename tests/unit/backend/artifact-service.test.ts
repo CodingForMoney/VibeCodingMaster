@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import { createArtifactService } from "../../../src/backend/services/artifact-service.js";
+import { renderArchitectDebugTemplate } from "../../../src/backend/templates/handoff.js";
 import {
   GATE_ANALYSIS_FIELDS,
   parseGateReviewReportArtifact
@@ -160,6 +161,35 @@ describe("createArtifactService", () => {
       status: "ok"
     });
     await expect(fs.readText(target)).resolves.toBe(validCoderCompletion());
+  });
+
+  it("rejects an explanatory Architect Debug disposition without replacing accepted evidence", async () => {
+    const fs = createMemoryFs();
+    const service = createArtifactService(fs);
+    const target = "/repo/.ai/vcm/handoffs/architect-debug.md";
+    await fs.writeText(target, "previous accepted debug evidence\n");
+    const content = renderArchitectDebugTemplate("demo-task")
+      .replace("Status: pending|completed", "Status: completed")
+      .replace(
+        "local fix completed|normal architecture plan required|user clarification required",
+        "normal architecture plan required\n\nThe repair needs a normal plan."
+      )
+      .replaceAll("TBD", "Verified debug evidence.");
+
+    await expect(service.submitArtifact({
+      repoRoot: "/repo",
+      baseRepoRoot: "/repo",
+      handoffDir: ".ai/vcm/handoffs",
+      taskSlug: "demo-task",
+      kind: "architect-debug",
+      mode: "final",
+      role: "architect",
+      content
+    })).rejects.toMatchObject({
+      code: "ARTIFACT_VALIDATION_FAILED",
+      message: expect.stringContaining("Final Disposition must contain exactly")
+    });
+    await expect(fs.readText(target)).resolves.toBe("previous accepted debug evidence\n");
   });
 
   it("rejects a submission from a role that does not own the artifact", async () => {
