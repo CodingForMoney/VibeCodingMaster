@@ -1368,8 +1368,9 @@ function asksUserQuestion(message: string): boolean {
     .map((line) => line.trim())
     .filter(Boolean);
   return lines.some((line) =>
-    /[?？]["')\]}】”’]*$/.test(line)
+    /[?？]/.test(line)
     || /^(?:please\s+(?:answer|choose|confirm|decide|provide|select|tell)|(?:can|could|do|does|is|are|should|will|would)\s+you\b)/i.test(line)
-    || /^(?:请(?:回答|选择|确认|决定|提供|告知)|你(?:是否|能否|要不要|可否)|是否需要你|需要你(?:选择|确认|决定|提供|告知))/.test(line)
+    || /\b(?:please\s+(?:reply|respond|choose|confirm|decide|provide|select|tell|give)|i\s+need\s+your\s+(?:decision|choice|confirmation|answer)|let\s+me\s+know|your\s+(?:decision|choice|confirmation|answer)\s+is\s+required|waiting\s+for\s+your)\b/i.test(line)
+    || /(?:请(?:回答|回复|选择|确认|决定|提供|告知|给出|说明)|你(?:是否|能否|要不要|可否)|是否需要你|需要你(?:选择|确认|决定|提供|告知)|需要您的(?:选择|确认|决定|回复)|等待您的(?:选择|确认|决定|回复)|告诉我|告知我)/.test(line)
   );
 }

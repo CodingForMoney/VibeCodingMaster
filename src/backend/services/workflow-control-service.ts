@@ -55,7 +55,9 @@ export interface WorkflowControlService {
   assertRouteAuthorized(input: WorkflowRouteAuthorizationInput): Promise<void>;
   claimDispatch(input: Required<WorkflowRouteAuthorizationInput>): Promise<void>;
   releaseDispatch(input: WorkflowControlContext, messageId: string): Promise<void>;
+  cancelPendingDispatch(input: WorkflowControlContext): Promise<void>;
   confirmDispatch(input: WorkflowControlContext, messageId: string): Promise<void>;
+  recoverTask(input: WorkflowControlContext): Promise<boolean>;
 }
 
 export interface WorkflowControlServiceDeps {
@@ -69,7 +71,7 @@ const HISTORY_SEPARATOR = "| --- | --- | --- | --- | --- | --- | --- |";
 const LEGACY_HISTORY_HEADER = "| Sequence | Flow | Target Role | Evidence | Override Authorization | Confirmed At |";
 const LEGACY_HISTORY_SEPARATOR = "| --- | --- | --- | --- | --- | --- |";
 const TARGET_ROLES = new Set<DispatchableRole>(["architect", "coder", "tester"]);
-const FINAL_GATE_STATUSES = new Set(["disabled", "not_required", "skipped", "overridden"]);
+const FRESH_EXCEPTION_GATE_STATUSES = new Set(["not_required", "skipped", "overridden"]);
 const MISSING_EVIDENCE_HASH = "<missing>";
 const DOCS_ONLY_ROLE_TRANSITIONS = [
   "docs-only/architect",
@@ -81,6 +83,15 @@ const DOCS_ONLY_EXIT_TRANSITIONS = [
   "validation-only/tester"
 ] as const;
 
+interface WorkflowCommitJournal {
+  version: 1;
+  taskSlug: string;
+  status: "pending" | "committed";
+  progressContent: string;
+  state: WorkflowControlState;
+  createdAt: string;
+}
+
 export function createWorkflowControlService(deps: WorkflowControlServiceDeps): WorkflowControlService {
   const now = deps.now ?? (() => new Date().toISOString());
   const id = deps.id ?? (() => `wfauth_${randomUUID()}`);
@@ -88,17 +99,49 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
 
   async function getState(input: WorkflowControlContext): Promise<WorkflowControlState> {
     try {
-      const progressWarning = await ensureProgressFile(deps.fs, input);
-      if (!(await deps.fs.pathExists(statePath(input)))) {
-        const state = emptyState(input.taskSlug, now());
-        return progressWarning ? { ...state, warnings: [progressWarning] } : state;
+      await recoverCommitJournal(input);
+      const hasProgress = await deps.fs.pathExists(progressPath(input));
+      const hasState = await deps.fs.pathExists(statePath(input));
+      if (!hasProgress && !hasState) {
+        await writeAtomic(deps.fs, progressPath(input), renderWorkflowProgressTemplate(input.taskSlug));
+        return emptyState(input.taskSlug, now());
+      }
+      if (!hasProgress) {
+        const state = hasState
+          ? normalizeState(await deps.fs.readJson<unknown>(statePath(input)), input.taskSlug, now())
+          : emptyState(input.taskSlug, now());
+        return {
+          ...state,
+          warnings: [...state.warnings, "Workflow Progress is missing while workflow runtime state still exists. Restore workflow-progress.md before continuing."]
+        };
+      }
+      const progress = parseWorkflowProgress(await deps.fs.readText(progressPath(input)), input.taskSlug);
+      if (!hasState) {
+        if (progress.revision === 0 && progress.status === "not-started" && progress.history.length === 0 && !progress.proposal) {
+          return emptyState(input.taskSlug, now());
+        }
+        if (!progress.proposal && progress.history.length > 0) {
+          const recovered = await reconstructStateFromProgress(input, progress);
+          await saveState(input, recovered);
+          return recovered;
+        }
+        return {
+          ...emptyState(input.taskSlug, now()),
+          warnings: ["Workflow runtime state is missing for an active Workflow Progress record. Restore workflow-control.json before continuing."]
+        };
       }
       const state = normalizeState(await deps.fs.readJson<unknown>(statePath(input)), input.taskSlug, now());
-      return progressWarning ? { ...state, warnings: [...state.warnings, progressWarning] } : state;
+      return {
+        ...state,
+        warnings: [...state.warnings, ...stateProgressConsistencyWarnings(state, progress)]
+      };
     } catch (error) {
+      const message = errorMessage(error);
       return {
         ...emptyState(input.taskSlug, now()),
-        warnings: [`Workflow control state could not be read: ${errorMessage(error)}`]
+        warnings: [message.startsWith("Workflow Progress validation failed:")
+          ? `Workflow Progress is invalid and was preserved unchanged: ${message}`
+          : `Workflow control state could not be read: ${message}`]
       };
     }
   }
@@ -185,13 +228,6 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
             "Use the normal allowed transition, or ask the user only when optional Tester-owned work is proposed after validation is fully green."
           );
         }
-        if (state.userApprovedFollowUps.some((entry) => entry.approvalText === followUpApprovalText)) {
-          throw workflowError(
-            "WORKFLOW_FOLLOW_UP_APPROVAL_REUSED",
-            "This user-approved follow-up has already been recorded for another workflow transition.",
-            "Ask the user for a new explicit approval for this exact additional work."
-          );
-        }
         userApprovedFollowUp = createUserApprovedFollowUp(
           id(), current, candidate, effectiveFlow, baseHistoryHash, followUpApprovalText, now()
         );
@@ -213,13 +249,6 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
             "WORKFLOW_USER_AUTHORIZATION_INVALID",
             `User authorization must include the exact authorization text and exact violated rule: ${verdict.reason}`,
             "Ask the user directly, then copy the user's authorization verbatim into Authorization Text and the rejection reason verbatim into Violated Rule."
-          );
-        }
-        if (state.userAuthorizations.some((entry) => entry.authorizationText === authorizationText)) {
-          throw workflowError(
-            "WORKFLOW_USER_AUTHORIZATION_REUSED",
-            "This user authorization has already been recorded for another workflow transition.",
-            "Ask the user for a new explicit authorization for this exact transition."
           );
         }
         userAuthorization = createUserAuthorization(
@@ -254,8 +283,7 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
         proposal: candidate.proposal
       };
       const normalized = renderWorkflowProgress(accepted);
-      await writeAtomic(deps.fs, progressPath(input), normalized);
-      await saveState(input, {
+      await commitStateAndProgress(input, normalized, {
         ...state,
         pendingDispatch,
         userAuthorizations: userAuthorization
@@ -337,6 +365,25 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
     });
   }
 
+  async function cancelPendingDispatch(input: WorkflowControlContext): Promise<void> {
+    await withLock(statePath(input), async () => {
+      const state = await getState(input);
+      const pending = state.pendingDispatch;
+      if (!pending) return;
+      const progress = await readProgress(deps.fs, input);
+      await commitStateAndProgress(input, renderWorkflowProgress({
+        ...progress,
+        proposal: undefined
+      }), {
+        ...state,
+        pendingDispatch: null,
+        userAuthorizations: state.userAuthorizations.filter((entry) => entry.id !== pending.overrideAuthorizationId),
+        userApprovedFollowUps: state.userApprovedFollowUps.filter((entry) => entry.id !== pending.followUpApprovalId),
+        updatedAt: now()
+      });
+    });
+  }
+
   async function confirmDispatch(input: WorkflowControlContext, messageId: string): Promise<void> {
     await withLock(statePath(input), async () => {
       const state = await getState(input);
@@ -401,8 +448,7 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
           ? { ...entry, status: "consumed" as const, consumedAt: timestamp }
           : entry
       );
-      await writeAtomic(deps.fs, progressPath(input), renderWorkflowProgress(completed));
-      await saveState(input, {
+      await commitStateAndProgress(input, renderWorkflowProgress(completed), {
         ...state,
         pendingDispatch: null,
         activeDispatch,
@@ -414,16 +460,41 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
     });
   }
 
+  async function recoverTask(input: WorkflowControlContext): Promise<boolean> {
+    return withLock(statePath(input), async () => {
+      await recoverCommitJournal(input);
+      const state = await getState(input);
+      if (state.warnings.length > 0 || state.pendingDispatch?.status !== "dispatching") return false;
+      await saveState(input, {
+        ...state,
+        pendingDispatch: {
+          ...state.pendingDispatch,
+          status: "pending",
+          routeContentHash: undefined,
+          messageId: undefined,
+          updatedAt: now()
+        },
+        updatedAt: now()
+      });
+      return true;
+    });
+  }
+
   return {
     getState,
-    getProgress: (input) => readProgress(deps.fs, input),
+    getProgress: async (input) => {
+      await getState(input);
+      return readProgress(deps.fs, input);
+    },
     requestUserInput,
     resolveUserInput,
     submitProgress,
     assertRouteAuthorized,
     claimDispatch,
     releaseDispatch,
-    confirmDispatch
+    cancelPendingDispatch,
+    confirmDispatch,
+    recoverTask
   };
 
   async function requestUserInput(
@@ -432,6 +503,14 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
   ): Promise<WorkflowControlState> {
     return withLock(statePath(input), async () => {
       const state = await getState(input);
+      failOnStateWarnings(state);
+      if (state.pendingDispatch?.status === "dispatching") {
+        throw workflowError(
+          "WORKFLOW_DISPATCH_PENDING",
+          "A role dispatch is already being submitted and cannot be canceled by a user question.",
+          "Wait for the target UserPromptSubmit confirmation or recover the dispatch before asking the user."
+        );
+      }
       const normalizedQuestion = question.trim();
       if (!normalizedQuestion) {
         throw workflowError(
@@ -440,6 +519,7 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
         );
       }
       const timestamp = now();
+      const pending = state.pendingDispatch;
       const next: WorkflowControlState = {
         ...state,
         awaitingUser: {
@@ -447,9 +527,19 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
           requestedAt: timestamp
         },
         pendingDispatch: null,
+        userAuthorizations: state.userAuthorizations.filter((entry) => entry.id !== pending?.overrideAuthorizationId),
+        userApprovedFollowUps: state.userApprovedFollowUps.filter((entry) => entry.id !== pending?.followUpApprovalId),
         updatedAt: timestamp
       };
-      await saveState(input, next);
+      if (pending) {
+        const progress = await readProgress(deps.fs, input);
+        await commitStateAndProgress(input, renderWorkflowProgress({
+          ...progress,
+          proposal: undefined
+        }), next);
+      } else {
+        await saveState(input, next);
+      }
       return next;
     });
   }
@@ -457,6 +547,7 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
   async function resolveUserInput(input: WorkflowControlContext): Promise<WorkflowControlState> {
     return withLock(statePath(input), async () => {
       const state = await getState(input);
+      failOnStateWarnings(state);
       if (!state.awaitingUser) return state;
       const next: WorkflowControlState = {
         ...state,
@@ -470,6 +561,74 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
 
   async function saveState(input: WorkflowControlContext, state: WorkflowControlState): Promise<void> {
     await deps.fs.writeJsonAtomic(statePath(input), state);
+  }
+
+  async function commitStateAndProgress(
+    input: WorkflowControlContext,
+    progressContent: string,
+    state: WorkflowControlState
+  ): Promise<void> {
+    const journal: WorkflowCommitJournal = {
+      version: 1,
+      taskSlug: input.taskSlug,
+      status: "pending",
+      progressContent,
+      state,
+      createdAt: now()
+    };
+    await deps.fs.writeJsonAtomic(transactionPath(input), journal);
+    await writeAtomic(deps.fs, progressPath(input), progressContent);
+    await saveState(input, state);
+    await deps.fs.writeJsonAtomic(transactionPath(input), { ...journal, status: "committed" });
+    await removeTransactionJournal(transactionPath(input));
+  }
+
+  async function recoverCommitJournal(input: WorkflowControlContext): Promise<void> {
+    const target = transactionPath(input);
+    if (!(await deps.fs.pathExists(target))) return;
+    const journal = await deps.fs.readJson<WorkflowCommitJournal>(target);
+    if (journal.version !== 1 || journal.taskSlug !== input.taskSlug) {
+      throw new Error("Workflow commit journal does not match the active task.");
+    }
+    if (journal.status === "pending") {
+      parseWorkflowProgress(journal.progressContent, input.taskSlug);
+      const state = normalizeState(journal.state, input.taskSlug, now());
+      failOnStateWarnings(state);
+      await writeAtomic(deps.fs, progressPath(input), journal.progressContent);
+      await saveState(input, state);
+      await deps.fs.writeJsonAtomic(target, { ...journal, status: "committed" });
+    }
+    await removeTransactionJournal(target);
+  }
+
+  async function removeTransactionJournal(target: string): Promise<void> {
+    try {
+      await deps.fs.removePath?.(target, { force: true });
+    } catch {
+      // A committed journal is safe to replay or remove on the next state read.
+    }
+  }
+
+  async function reconstructStateFromProgress(
+    input: WorkflowControlContext,
+    progress: WorkflowProgressDocument
+  ): Promise<WorkflowControlState> {
+    const timestamp = now();
+    const last = progress.history.at(-1)!;
+    const activeDispatch = await captureEvidenceBaseline(
+      deps.fs,
+      input,
+      last.sequence,
+      last.flow,
+      last.targetRole,
+      last.confirmedAt ?? timestamp
+    );
+    return {
+      ...emptyState(input.taskSlug, timestamp),
+      activeDispatch,
+      flowRun: resolveFlowRun(null, progress),
+      updatedAt: timestamp
+    };
   }
 
   async function withLock<T>(key: string, operation: () => Promise<T>): Promise<T> {
@@ -826,6 +985,9 @@ async function allowedArchitectFix(
     if (source === "architect-debug" && artifact.disposition === ARCHITECT_DEBUG_NORMAL_PLAN_DISPOSITION) {
       return ["code-change/architect"];
     }
+    if (source === "architecture-diagnosis" && artifact.disposition === "analysis completed") {
+      return parentFlow ? [`${parentFlow}/architect`] : [];
+    }
     return artifact.complete ? [`${source}/tester`] : [`${source}/architect`];
   }
   if (architectIndex > testerIndex) {
@@ -975,7 +1137,7 @@ async function artifactState(
     : undefined;
   return {
     complete: check.status === "ok",
-    hash: contentHash(content),
+    hash: await artifactFingerprint(fs, absolute, content),
     value,
     infrastructure,
     disposition,
@@ -1010,7 +1172,9 @@ async function captureEvidenceBaseline(
 ): Promise<WorkflowDispatchEvidenceBaseline> {
   const artifactEntries = await Promise.all(WORKFLOW_EVIDENCE_ARTIFACTS.map(async (fileName) => {
     const target = resolveRepoPath(input.taskRepoRoot, path.posix.join(input.handoffDir, fileName));
-    const hash = await fs.pathExists(target) ? contentHash(await fs.readText(target)) : MISSING_EVIDENCE_HASH;
+    const hash = await fs.pathExists(target)
+      ? await artifactFingerprint(fs, target, await fs.readText(target))
+      : MISSING_EVIDENCE_HASH;
     return [fileName, hash] as const;
   }));
   const gateEntries = await Promise.all(WORKFLOW_EVIDENCE_GATES.map(async (gate) => [
@@ -1177,9 +1341,23 @@ function gatePassedForDispatch(
   record: GateReviewGateRecord | undefined
 ): boolean {
   if (!record) return false;
-  if (FINAL_GATE_STATUSES.has(record.status)) return true;
+  if (record.status === "disabled") return true;
+  if (FRESH_EXCEPTION_GATE_STATUSES.has(record.status)) {
+    return gateRecordIsFresh(state, flow, targetRole, gate, record);
+  }
   return freshGateDecision(state, flow, targetRole, gate, record) === "approve"
     && record.status === "completed";
+}
+
+function gateRecordIsFresh(
+  state: WorkflowControlState,
+  flow: WorkflowFlow,
+  targetRole: DispatchableRole,
+  gate: WorkflowEvidenceGate,
+  record: GateReviewGateRecord
+): boolean {
+  const baseline = matchingEvidenceBaseline(state, flow, targetRole);
+  return !baseline || baseline.gateFingerprints[gate] !== gateFingerprint(record);
 }
 
 function matchingEvidenceBaseline(
@@ -1201,7 +1379,8 @@ function gateFingerprint(record: GateReviewGateRecord | undefined): string {
     codeDiffSource: record.codeDiffSource,
     codeDiffSources: record.codeDiffSources,
     findings: record.findings,
-    completedAt: record.completedAt
+    completedAt: record.completedAt,
+    updatedAt: record.updatedAt
   }));
 }
 
@@ -1371,6 +1550,37 @@ function validateCandidateAgainstCurrent(current: WorkflowProgressDocument, cand
   if (errors.length > 0) throw progressValidationError(errors);
 }
 
+function stateProgressConsistencyWarnings(
+  state: WorkflowControlState,
+  progress: WorkflowProgressDocument
+): string[] {
+  const warnings: string[] = [];
+  const pending = state.pendingDispatch;
+  if (!pending && progress.proposal) {
+    warnings.push("Workflow Progress contains a dispatch proposal without a runtime approval.");
+  }
+  if (pending && (
+    pending.revision !== progress.revision
+    || pending.baseHistoryHash !== historyHash(progress.history)
+    || progress.proposal?.requestedFlow !== pending.requestedFlow
+    || progress.proposal?.targetRole !== pending.targetRole
+    || progress.proposal?.evidence !== pending.evidence
+  )) {
+    warnings.push("Workflow runtime approval does not match workflow-progress.md.");
+  }
+  const last = progress.history.at(-1);
+  if (last && (!state.activeDispatch
+    || state.activeDispatch.sequence !== last.sequence
+    || state.activeDispatch.flow !== last.flow
+    || state.activeDispatch.targetRole !== last.targetRole)) {
+    warnings.push("Workflow active dispatch does not match the latest Workflow Progress history entry.");
+  }
+  if (!last && state.activeDispatch) {
+    warnings.push("Workflow active dispatch exists without a Workflow Progress history entry.");
+  }
+  return warnings;
+}
+
 function createUserAuthorization(
   authorizationId: string,
   current: WorkflowProgressDocument,
@@ -1426,23 +1636,6 @@ async function readProgress(fs: FileSystemAdapter, input: WorkflowControlContext
   const target = progressPath(input);
   if (!(await fs.pathExists(target))) return parseWorkflowProgress(renderWorkflowProgressTemplate(input.taskSlug), input.taskSlug);
   return parseWorkflowProgress(await fs.readText(target), input.taskSlug);
-}
-
-async function ensureProgressFile(
-  fs: FileSystemAdapter,
-  input: WorkflowControlContext
-): Promise<string | undefined> {
-  const target = progressPath(input);
-  if (!(await fs.pathExists(target))) {
-    await writeAtomic(fs, target, renderWorkflowProgressTemplate(input.taskSlug));
-    return undefined;
-  }
-  try {
-    parseWorkflowProgress(await fs.readText(target), input.taskSlug);
-    return undefined;
-  } catch (error) {
-    return `Workflow Progress is invalid and was preserved unchanged: ${errorMessage(error)}`;
-  }
 }
 
 function parseHistory(value: string | undefined, errors: string[]): WorkflowDispatchHistoryEntry[] {
@@ -1563,6 +1756,10 @@ function statePath(input: WorkflowControlContext): string {
   return path.join(input.taskRepoRoot, input.stateRoot, "workflow-control.json");
 }
 
+function transactionPath(input: WorkflowControlContext): string {
+  return path.join(input.taskRepoRoot, input.stateRoot, "workflow-control-transaction.json");
+}
+
 function relativeProgressPath(input: WorkflowControlContext): string {
   return path.posix.join(input.handoffDir, "workflow-progress.md");
 }
@@ -1577,6 +1774,12 @@ function historyHash(history: WorkflowDispatchHistoryEntry[]): string {
 
 function contentHash(content: string): string {
   return createHash("sha256").update(content).digest("hex");
+}
+
+async function artifactFingerprint(fs: FileSystemAdapter, target: string, content: string): Promise<string> {
+  const contentDigest = contentHash(content);
+  if (!fs.fileVersion) return contentDigest;
+  return contentHash(`${contentDigest}:${await fs.fileVersion(target)}`);
 }
 
 function field(content: string, name: string): string | undefined {

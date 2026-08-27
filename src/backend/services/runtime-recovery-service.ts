@@ -11,6 +11,7 @@ import { getTaskRuntimeRepoRoot } from "./task-service.js";
 import type { TranslationWorkerService } from "./translation-worker-service.js";
 import type { ArchitectRestartService } from "./architect-restart-service.js";
 import type { RoleContextRestartService } from "./role-context-restart-service.js";
+import type { WorkflowControlService } from "./workflow-control-service.js";
 
 export interface RuntimeRecoveryService {
   recoverProject(repoRoot: string): Promise<ProjectRuntimeRecoveryReport>;
@@ -31,6 +32,7 @@ export interface RuntimeRecoveryServiceDeps {
   translationWorkerService?: Pick<TranslationWorkerService, "cleanupStartupRuntime">;
   architectRestartService?: Pick<ArchitectRestartService, "recoverTask">;
   roleContextRestartService?: Pick<RoleContextRestartService, "recoverTask">;
+  workflowControlService?: Pick<WorkflowControlService, "recoverTask">;
   now?: () => string;
 }
 
@@ -119,6 +121,15 @@ export function createRuntimeRecoveryService(deps: RuntimeRecoveryServiceDeps): 
           await recoverTaskSessions(taskRepoRoot, config.stateRoot, task.taskSlug, recoveredAt, context);
           const roundRecovered = await recoverRound(taskRepoRoot, config.stateRoot, task.taskSlug, recoveredAt, context);
           await recoverMessages(taskRepoRoot, config.stateRoot, task.taskSlug, recoveredAt, context);
+          const workflowRecovered = await deps.workflowControlService?.recoverTask({
+            taskRepoRoot,
+            stateRoot: config.stateRoot,
+            handoffDir: task.handoffDir,
+            taskSlug: task.taskSlug
+          });
+          if (workflowRecovered) {
+            context.changedPaths.add(path.join(config.stateRoot, "workflow-control.json"));
+          }
           await recoverGateReview(taskRepoRoot, recoveredAt, context);
           await recoverCoderWorkers(taskRepoRoot, task.taskSlug, context);
           await deps.architectRestartService?.recoverTask(repoRoot, task.taskSlug);

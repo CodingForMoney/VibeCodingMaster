@@ -994,6 +994,43 @@ describe("gate-review-service", () => {
     expect(result.message).toContain("current validation-adequacy approval");
   });
 
+  it("binds a skipped validation Gate to the current Tester evidence", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-code-diff-stale-skip-"));
+    await writeHarnessFiles(tmpRepo);
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo, [], {
+        "rev-parse HEAD": ({ cwd }) => cwd === tmpRepo ? "base-sha" : "head-sha",
+        "merge-base --is-ancestor base-sha head-sha": "",
+        "log --oneline --reverse base-sha..head-sha": "abc1234 implement route",
+        "show --format= --name-only --find-renames abc1234": "src/feature.ts",
+        "show --format= --stat --find-renames abc1234": " src/feature.ts | 4 ++",
+        "show --format= --binary --find-renames abc1234": "diff --git a/src/feature.ts b/src/feature.ts\n"
+      }),
+      runtime: createRuntime(tmpRepo, [], "approve"),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["validation-adequacy", "code-diff"]),
+      sessionService: createSessionService(),
+      roundService: createRoundService()
+    });
+
+    await service.skipReviewGate(tmpRepo, "demo-task", "validation-adequacy", {
+      reason: "User explicitly accepted this exact validation evidence."
+    });
+    await writeFile(
+      path.join(taskWorktree(tmpRepo), ".ai/vcm/handoffs/test-report.md"),
+      validTestReport().replace("npm test -- feature.test.ts: pass.", "npm test -- feature.test.ts --runInBand: pass."),
+      "utf8"
+    );
+
+    const result = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", {
+      codeDiffSource: "coder"
+    });
+    expect(result.status).toBe("failed_to_start");
+    expect(result.message).toContain("current validation-adequacy approval");
+  });
+
   it("fails code-diff start when the worktree has uncommitted changes", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-code-diff-dirty-"));
     await writeHarnessFiles(tmpRepo);

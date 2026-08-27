@@ -202,6 +202,7 @@ describe("backend E2E with mock Claude Code", () => {
       awaitingUser: { question: "Which behavior should be authoritative?" },
       pendingDispatch: null
     });
+    expect((await env.deps.workflowControlService!.getProgress(context)).proposal).toBeUndefined();
     expect(architectReceivedRoute).toBe(false);
 
     env.mockRuntime.write(pmSession!.id, "Use the documented behavior");

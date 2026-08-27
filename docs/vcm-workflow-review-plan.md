@@ -1,6 +1,6 @@
 # VCM Workflow Control
 
-Last updated: 2026-08-06
+Last updated: 2026-08-28
 
 Status: implemented
 
@@ -12,8 +12,9 @@ artifact. VCM accepts only transitions allowed by the fixed task flows and the
 task's confirmed dispatch history.
 
 Workflow Control does not choose the next role for Project Manager and does not
-review PM-only activity, user waiting, Final Acceptance, task close, or PR
-preparation.
+review PM-only activity, Final Acceptance, task close, or PR preparation. It
+does own the hard wait after PM asks the user a question, because no role route
+may continue until a direct user reply clears that wait.
 
 ## Managed Workflow Progress
 
@@ -89,6 +90,12 @@ Dispatch uses this lifecycle:
 5. Confirmation atomically appends one Dispatch History row and clears the
    approval.
 
+Submitting or confirming a dispatch updates Workflow Progress and runtime state
+through `.ai/vcm/workflow-control-transaction.json`. An interrupted paired write
+is replayed before state is read. Project startup recovers message state first,
+then changes an unconfirmed `dispatching` approval back to `pending` so it can
+be delivered again without creating a second history row.
+
 Automatic delivery matches the generated VCM message ID. In manual
 orchestration, VCM accepts only a target `UserPromptSubmit` whose text exactly
 matches the unique pending PM route body; it does not use transcript inference
@@ -115,7 +122,9 @@ workflow transition rule; it does not bypass role ownership, routing,
 filesystem, artifact, Gate, or runtime safety rules. Consuming an authorization
 does not restart the active flow run. A return from a Debug or Diagnosis Branch
 retains the parent run and its completed implementation history; a switch to an
-independent flow starts a fresh run.
+independent flow starts a fresh run. Reusing the same wording for a later user
+decision is allowed because identity and one-time consumption are determined by
+the bound transition rather than global text uniqueness.
 
 User-approved post-validation work is a separate one-time record. It permits
 only a Tester dispatch after a fresh passing Test Report and successful
@@ -137,7 +146,10 @@ The Architecture Plan Gate must approve the real plan before Coder. The
 Validation Adequacy and Code Diff Gates must approve after Tester before docs
 sync. Gate Review is controlled by its existing request service rather than a
 PM route message, so Gate events are read from the Gate index and are not rows
-in Workflow Progress.
+in Workflow Progress. Disabled Gates remain pass-through configuration.
+Not-required, skipped, and overridden states satisfy a checkpoint only when the
+Gate record changed after the active role dispatch; an exception from an older
+dispatch cannot bypass fresh review requirements.
 
 Allowed branches include:
 
@@ -229,8 +241,11 @@ flow has the same name.
 Workflow Progress is the append-only durable task record. Pending dispatches
 and override decisions live in task runtime state and survive a VCM restart
 while the task worktree exists. Malformed runtime state fails closed and is
-reported through project runtime state. Route failure before target acceptance
-does not create false history.
+reported through project runtime state. Missing or inconsistent members of the
+Workflow Progress/runtime-state pair fail closed. When only runtime state is
+missing from a confirmed history, VCM reconstructs a conservative baseline so
+existing artifacts and Gate records must be produced again before advancing.
+Route failure before target acceptance does not create false history.
 
 An active task created by an older VCM version receives the revision-zero
 Workflow Progress template when the file is absent. An existing malformed file
@@ -253,6 +268,10 @@ Unit and backend E2E coverage verifies:
 - route denial without approval and target mismatch rejection
 - claim before terminal submission, release on failure, and confirmation only
   from the matching target `UserPromptSubmit`
-- persistence across service restart
+- transaction replay after interrupted proposal or confirmation writes
+- restart recovery of unconfirmed dispatches without duplicate history
+- missing/inconsistent state fail-closed and conservative baseline reconstruction
+- fresh exception Gate enforcement and identical-content artifact resubmission
+- repeated user wording bound independently to separate transitions
 - end-to-end PM approval, route delivery, Hook confirmation, history append,
   and approval cleanup

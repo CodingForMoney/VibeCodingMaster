@@ -30,7 +30,7 @@ export interface MessageService {
   scanAndDispatchPendingRouteFiles(input: ScanPendingRouteFilesInput): Promise<VcmRouteFileDispatchResult[]>;
   confirmPromptSubmitted(input: ConfirmPromptSubmittedInput): Promise<VcmRoleMessage | undefined>;
   markAllDone(input: MarkAllDoneInput): Promise<MarkAllMessagesDoneResult>;
-  deleteMessageHistory(input: ListMessagesInput): Promise<DeleteMessageHistoryResult>;
+  deleteMessageHistory(input: ListRouteFilesInput): Promise<DeleteMessageHistoryResult>;
   getOrchestrationState(input: OrchestrationStateInput): Promise<VcmOrchestrationState>;
   updateOrchestrationState(input: UpdateOrchestrationStateInput): Promise<VcmOrchestrationState>;
 }
@@ -77,7 +77,8 @@ export interface MessageServiceDeps {
   sessionService: SessionService;
   taskService: Pick<TaskService, "loadTask">;
   taskWorkflowService?: Pick<TaskWorkflowService, "recordPmDispatch">;
-  workflowControlService?: Pick<WorkflowControlService, "claimDispatch" | "releaseDispatch" | "confirmDispatch">;
+  workflowControlService?: Pick<WorkflowControlService,
+    "claimDispatch" | "releaseDispatch" | "cancelPendingDispatch" | "confirmDispatch" | "getState">;
   now?: () => string;
   id?: () => string;
   preDispatchSwitchDelayMs?: number;
@@ -322,6 +323,7 @@ export function createMessageService(deps: MessageServiceDeps): MessageService {
         let clearedCount = 0;
 
         if (input.clearRouteFiles) {
+          await deps.workflowControlService?.cancelPendingDispatch(toWorkflowContext(input));
           for (const routeFile of await listPendingRouteFiles(input)) {
             await deps.fs.writeText(resolveRepoPath(input.taskRepoRoot ?? input.repoRoot, routeFile.path), "");
             clearedCount += 1;
@@ -337,6 +339,15 @@ export function createMessageService(deps: MessageServiceDeps): MessageService {
     },
     async deleteMessageHistory(input) {
       return withTaskLock(taskLocks, getMessagesPath(getStateRepoRoot(input), input.stateRoot, input.taskSlug), async () => {
+        const workflowState = await deps.workflowControlService?.getState(toWorkflowContext(input));
+        if (workflowState?.pendingDispatch?.status === "dispatching") {
+          throw new VcmError({
+            code: "MESSAGE_HISTORY_DISPATCHING",
+            message: "Message history cannot be deleted while a PM workflow dispatch is awaiting target confirmation.",
+            statusCode: 409,
+            hint: "Wait for confirmation or use Mark All Done to cancel the pending route first."
+          });
+        }
         const messagesPath = getMessagesPath(getStateRepoRoot(input), input.stateRoot, input.taskSlug);
         const messages = await readLatestMessages(deps.fs, messagesPath);
         await writeMessageSnapshots(deps.fs, messagesPath, []);

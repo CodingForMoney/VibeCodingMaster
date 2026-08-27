@@ -320,10 +320,17 @@ against the fixed flow policy plus current accepted artifacts and Gate state.
 An accepted revision grants one pending PM route. `message-service` claims that
 approval before terminal submission and confirms it only from the target
 role's matching `UserPromptSubmit`; confirmation appends the history row and
-clears the approval. Exact user overrides are recorded by the backend and are
-bound to one rejected transition. An override changes only that transition's
-permission; flow relationships still determine whether the existing run is
-preserved or a genuinely independent flow run starts. A separate one-time
+clears the approval. Paired Workflow Progress and runtime approval updates use
+a task-local write-ahead transaction record; the next state read replays an
+interrupted commit before exposing either file. Project recovery also returns
+an unconfirmed `dispatching` approval to `pending` after recovering message
+state, so the approved route can be submitted again instead of remaining
+stuck. Exact user overrides are recorded by the backend and are bound to one
+rejected transition. The same user wording may be used again, but each record
+is consumable only by its own revision, history, flow, target, and evidence. An
+override changes only that transition's permission; flow relationships still
+determine whether the existing run is preserved or a genuinely independent
+flow run starts. A separate one-time
 post-validation approval permits only explicitly approved Tester-owned work
 after a fresh passing Test Report and successful validation-adequacy and
 code-diff Gates. It is consumed by the matching Tester dispatch, invalidates
@@ -334,7 +341,11 @@ the parent implementation history even when the authorized return dispatch
 adds another Tester round before docs sync. Those fields isolate repeated and
 switched flows from older history. Completion requires evidence produced after
 the current role dispatch; an active branch cannot consume parent Final
-Acceptance or complete independently.
+Acceptance or complete independently. Artifact freshness includes both content
+and the concrete file version, so a role may intentionally reproduce identical
+accepted content after a new dispatch. Disabled Gates remain global; skipped,
+overridden, and not-required Gate states must be produced after the active
+dispatch before they satisfy that checkpoint.
 
 Docs-Only Flow may dispatch Architect, Coder, or Tester, including multiple
 sequential documentation assignments. Each dispatch must replace
@@ -344,8 +355,9 @@ latest assigned role permits completion; code or validation work discovered
 during documentation may switch to the matching full flow.
 
 User-question waiting is owned by the same workflow-control record. The
-`vcm-ask-user` tool writes the exact question and clears `pendingDispatch` in
-one locked state update. While `awaitingUser` exists, Workflow Progress
+`vcm-ask-user` tool writes the exact question and clears both `pendingDispatch`
+and its unconsumed Workflow Progress proposal in one recoverable transaction.
+While `awaitingUser` exists, Workflow Progress
 submission and route authorization fail closed. PM Stop processing records the
 turn end without route dispatch or Round settle scanning. A PM
 `UserPromptSubmit` clears the wait only when its prompt is a direct user message
@@ -616,8 +628,12 @@ This state is recovery and display context only. Dispatch authorization is
 owned separately by `workflow-control-service`, the managed
 `workflow-progress.md` history, and `.ai/vcm/workflow-control.json`. The latter
 stores the pending one-time dispatch, hard user-question wait, and exact user
-override evidence in the active task worktree. The frontend only renders this
-backend-owned state.
+override evidence in the active task worktree. A temporary
+`.ai/vcm/workflow-control-transaction.json` exists only while a paired progress
+and state update is being committed. Missing or inconsistent members of this
+authoritative pair fail closed; an active history with a missing runtime file is
+reconstructed with a conservative evidence baseline that requires fresh role
+and Gate output. The frontend only renders this backend-owned state.
 
 ## Task Creation Ownership
 

@@ -480,7 +480,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     taskService,
     translationWorkerService,
     architectRestartService,
-    roleContextRestartService
+    roleContextRestartService,
+    workflowControlService
   });
   const claudeHookService = createClaudeHookService({
     projectService,

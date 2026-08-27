@@ -236,6 +236,48 @@ describe("createClaudeHookService", () => {
     expect(calls).toEqual([]);
   });
 
+  it.each([
+    "Please give your decision on option A or option B.",
+    "I need your confirmation before continuing.",
+    "请给出下一步选择。",
+    "等待您的确认后继续。"
+  ])("blocks a PM Stop with an unregistered user request: %s", async (lastAssistantMessage) => {
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      sessionService: {
+        getRoleSession: boundRoleSession,
+        async recordClaudeHookEvent() {
+          return undefined;
+        }
+      } as unknown as SessionService,
+      messageService: {} as MessageService,
+      roundService: {} as RoundService,
+      translationService: {} as Pick<TranslationService, "recordConversationBoundary">,
+      appSettings: createAppSettingsStub(),
+      workflowControlService: {
+        async getState() {
+          return { awaitingUser: null } as never;
+        },
+        async resolveUserInput() {
+          return {} as never;
+        }
+      }
+    });
+
+    const result = await service.handleStopHook({
+      taskSlug: "demo-task",
+      role: "project-manager",
+      event: {
+        hook_event_name: "Stop",
+        session_id: "claude_pm",
+        last_assistant_message: lastAssistantMessage
+      }
+    });
+
+    expect(result.stopDecision).toMatchObject({ behavior: "block" });
+  });
+
   it("ends an awaiting PM turn without settling or dispatching route files", async () => {
     const calls: string[] = [];
     const service = createClaudeHookService({

@@ -204,7 +204,7 @@ describe("createMessageService", () => {
   });
 
   it("clears pending route files without mutating message history", async () => {
-    const harness = createHarness(["coder"]);
+    const harness = createHarness(["coder"], { workflowControl: "allow" });
     await harness.service.updateOrchestrationState({
       ...harness.base,
       mode: "manual"
@@ -219,6 +219,7 @@ describe("createMessageService", () => {
 
     expect(marked.updatedCount).toBe(1);
     expect(marked.messages).toEqual([]);
+    expect(harness.workflowControlCancellations).toBe(1);
     await expect(harness.readRoute("project-manager-coder.md")).resolves.toBe("");
   });
 
@@ -238,6 +239,17 @@ describe("createMessageService", () => {
     expect(result.messages).toEqual([]);
     await expect(harness.service.listMessages(harness.base)).resolves.toEqual([]);
     await expect(harness.readRoute("project-manager-coder.md")).resolves.toBe("Still pending.");
+  });
+
+  it("does not delete the confirmation record for an in-flight PM dispatch", async () => {
+    const harness = createHarness(["coder"], {
+      workflowControl: "allow",
+      workflowDispatching: true
+    });
+
+    await expect(harness.service.deleteMessageHistory(harness.base)).rejects.toMatchObject({
+      code: "MESSAGE_HISTORY_DISPATCHING"
+    });
   });
 
   it("delivers route files regardless of message type", async () => {
@@ -385,6 +397,7 @@ function createHarness(runningRoles: RoleName[], options: {
   dispatchConfirmationFailureDelayMs?: number;
   workflowRecordThrows?: boolean;
   workflowControl?: "allow" | "deny";
+  workflowDispatching?: boolean;
 } = {}) {
   const fs = createMemoryFs();
   const writes: string[] = [];
@@ -392,6 +405,7 @@ function createHarness(runningRoles: RoleName[], options: {
   const workflowUpdates: Array<Record<string, unknown>> = [];
   const workflowControlClaims: Array<Record<string, unknown>> = [];
   const workflowControlConfirmations: string[] = [];
+  let workflowControlCancellations = 0;
   const activity = new Map<RoleName, RoleSessionRecord["activityStatus"]>();
   let nextId = 1;
   const service = createMessageService({
@@ -428,8 +442,16 @@ function createHarness(runningRoles: RoleName[], options: {
         if (options.workflowControl === "deny") throw new Error("workflow route denied");
       },
       async releaseDispatch() {},
+      async cancelPendingDispatch() {
+        workflowControlCancellations += 1;
+      },
       async confirmDispatch(_input, messageId) {
         workflowControlConfirmations.push(messageId);
+      },
+      async getState() {
+        return {
+          pendingDispatch: options.workflowDispatching ? { status: "dispatching" } : null
+        } as never;
       }
     } : undefined,
     now: () => "2026-05-29T00:00:00.000Z",
@@ -450,6 +472,9 @@ function createHarness(runningRoles: RoleName[], options: {
     workflowUpdates,
     workflowControlClaims,
     workflowControlConfirmations,
+    get workflowControlCancellations() {
+      return workflowControlCancellations;
+    },
     setActivity(role: RoleName, nextActivity: RoleSessionRecord["activityStatus"]) {
       activity.set(role, nextActivity);
     },

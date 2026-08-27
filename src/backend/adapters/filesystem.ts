@@ -8,6 +8,7 @@ export interface FileSystemAdapter {
   readDir(path: string): Promise<string[]>;
   readText(path: string): Promise<string>;
   readTextTail?(path: string, maxBytes: number): Promise<string>;
+  fileVersion?(path: string): Promise<string>;
   writeText(path: string, content: string): Promise<void>;
   writeTextAtomic?(path: string, content: string): Promise<void>;
   appendText(path: string, content: string): Promise<void>;
@@ -65,6 +66,12 @@ export function createNodeFileSystemAdapter(): FileSystemAdapter {
         } finally {
           await handle.close();
         }
+      });
+    },
+    async fileVersion(targetPath) {
+      return runFileOperation(async () => {
+        const stat = await fs.stat(targetPath, { bigint: true });
+        return `${stat.mtimeNs}:${stat.size}`;
       });
     },
     async writeText(targetPath, content) {

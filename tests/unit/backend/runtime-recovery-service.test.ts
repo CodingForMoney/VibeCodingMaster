@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createNodeFileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import { createRuntimeRecoveryService } from "../../../src/backend/services/runtime-recovery-service.js";
+import { createWorkflowControlService, renderWorkflowProgress } from "../../../src/backend/services/workflow-control-service.js";
 import { GATE_REVIEW_GATES, type GateReviewIndex } from "../../../src/shared/types/gate-review.js";
 import type { RoleName } from "../../../src/shared/types/role.js";
 import type { TerminalRuntime, TerminalSession } from "../../../src/backend/runtime/terminal-runtime.js";
@@ -105,6 +106,36 @@ describe("createRuntimeRecoveryService", () => {
       "utf8"
     );
 
+    const workflowFs = createNodeFileSystemAdapter();
+    const workflowContext = {
+      taskRepoRoot,
+      stateRoot: ".ai/vcm",
+      handoffDir: ".ai/vcm/handoffs",
+      taskSlug: "demo-task"
+    };
+    const workflowControl = createWorkflowControlService({
+      fs: workflowFs,
+      now: () => "2026-06-26T23:59:01.000Z"
+    });
+    await workflowControl.submitProgress(workflowContext, renderWorkflowProgress({
+      taskSlug: "demo-task",
+      revision: 1,
+      status: "not-started",
+      history: [],
+      proposal: {
+        requestedFlow: "code-change",
+        targetRole: "architect",
+        evidence: "accepted task"
+      }
+    }));
+    await workflowControl.claimDispatch({
+      ...workflowContext,
+      routePath: ".ai/vcm/handoffs/messages/project-manager-architect.md",
+      targetRole: "architect",
+      routeContentHash: "route-hash",
+      messageId: "msg_1"
+    });
+
     const statusUpdates: string[] = [];
     const service = createService(repoRoot, taskRepoRoot, [], statusUpdates);
 
@@ -135,6 +166,13 @@ describe("createRuntimeRecoveryService", () => {
     expect(message.dispatchingAt).toBeUndefined();
     expect(message.deliveredAt).toBeUndefined();
     expect(message.failureReason).toContain("VCM restarted");
+
+    const workflowState = await readJson(path.join(taskRepoRoot, ".ai/vcm/workflow-control.json"));
+    expect(workflowState.pendingDispatch).toMatchObject({
+      status: "pending",
+      targetRole: "architect"
+    });
+    expect(workflowState.pendingDispatch.messageId).toBeUndefined();
 
     const gate = await readJson(path.join(taskRepoRoot, ".ai/vcm/gate-reviews/index.json"));
     expect(gate.activeGate).toBeNull();
@@ -336,8 +374,9 @@ function createService(
   sessions: TerminalSession[],
   statusUpdates: string[]
 ) {
+  const fs = createNodeFileSystemAdapter();
   return createRuntimeRecoveryService({
-    fs: createNodeFileSystemAdapter(),
+    fs,
     runtime: createRuntime(sessions),
     projectService: {
       async loadConfig() {
@@ -380,6 +419,7 @@ function createService(
         await rm(path.join(inputRepoRoot, ".ai/vcm/translations/runtime"), { recursive: true, force: true });
       }
     },
+    workflowControlService: createWorkflowControlService({ fs }),
     now: () => TIMESTAMP
   });
 }

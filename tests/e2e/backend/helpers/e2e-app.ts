@@ -306,7 +306,8 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     taskService,
     translationWorkerService,
     architectRestartService,
-    roleContextRestartService
+    roleContextRestartService,
+    workflowControlService
   });
   const claudeHookService = createClaudeHookService({
     projectService,

@@ -1082,6 +1082,9 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     async skipReviewGate(repoRoot, taskSlug, gate, input) {
       const context = await getContext(repoRoot, taskSlug);
       assertExceptionReason(input.reason);
+      const exceptionInputHash = gate === "code-diff"
+        ? undefined
+        : await tryComputeInputHash(deps, context.taskRepoRoot, gate);
       const index = await withGateStateLock(context, async () => {
         const timestamp = now();
         const current = await loadIndex(deps.fs, context, timestamp);
@@ -1096,6 +1099,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         const next = applyGateState(current, gate, {
           status: "skipped",
           decision: undefined,
+          inputHash: exceptionInputHash ?? current.gates[gate].inputHash,
           exceptionReason: input.reason,
           error: undefined,
           completedAt: timestamp,
@@ -1113,6 +1117,9 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     async overrideReviewGate(repoRoot, taskSlug, gate, input) {
       const context = await getContext(repoRoot, taskSlug);
       assertExceptionReason(input.reason);
+      const exceptionInputHash = gate === "code-diff"
+        ? undefined
+        : await tryComputeInputHash(deps, context.taskRepoRoot, gate);
       const index = await withGateStateLock(context, async () => {
         const timestamp = now();
         const current = await loadIndex(deps.fs, context, timestamp);
@@ -1127,6 +1134,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         const next = applyGateState(current, gate, {
           status: "overridden",
           decision: "approve",
+          inputHash: exceptionInputHash ?? current.gates[gate].inputHash,
           exceptionReason: input.reason,
           error: undefined,
           completedAt: timestamp,
@@ -1680,8 +1688,11 @@ async function readCodeDiffValidationGateError(
   index: GateReviewIndex
 ): Promise<string | undefined> {
   const validationGate = index.gates["validation-adequacy"];
-  if (validationGate.required && validationGate.status !== "skipped" && validationGate.status !== "overridden") {
-    if (validationGate.status !== "completed" || validationGate.decision !== "approve") {
+  if (validationGate.required) {
+    const passed = (validationGate.status === "completed" && validationGate.decision === "approve")
+      || validationGate.status === "skipped"
+      || validationGate.status === "overridden";
+    if (!passed) {
       return "code-diff requires the validation-adequacy Gate to complete successfully for the current Tester evidence.";
     }
 
@@ -1696,6 +1707,18 @@ async function readCodeDiffValidationGateError(
   }
 
   return undefined;
+}
+
+async function tryComputeInputHash(
+  deps: Pick<GateReviewServiceDeps, "fs" | "runner">,
+  taskRepoRoot: string,
+  gate: GateReviewGate
+): Promise<string | undefined> {
+  try {
+    return await computeInputHash(deps, taskRepoRoot, gate);
+  } catch {
+    return undefined;
+  }
 }
 
 async function readArchitectureEvidenceError(

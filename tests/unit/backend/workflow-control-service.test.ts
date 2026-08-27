@@ -65,6 +65,48 @@ describe("workflow control service", () => {
     expect((await service.getState(context)).pendingDispatch).toBeNull();
   });
 
+  it("replays an interrupted Workflow Progress commit before exposing state", async () => {
+    const { context, fs: baseFs } = await createContext(roots);
+    const failure = failureInjectingFs(baseFs);
+    const service = createWorkflowControlService({ fs: failure.fs, now: sequenceClock() });
+    failure.failNextJsonWrite("workflow-control.json");
+
+    await expect(service.submitProgress(context, renderWorkflowProgress(initialProposal("architect"))))
+      .rejects.toThrow("injected workflow state write failure");
+
+    const restored = createWorkflowControlService({ fs: baseFs, now: sequenceClock() });
+    expect((await restored.getState(context)).pendingDispatch).toMatchObject({
+      status: "pending",
+      targetRole: "architect"
+    });
+    await expect(baseFs.pathExists(path.join(context.taskRepoRoot, context.stateRoot, "workflow-control-transaction.json")))
+      .resolves.toBe(false);
+  });
+
+  it("replays an interrupted dispatch confirmation without duplicating history", async () => {
+    const { context, fs: baseFs } = await createContext(roots);
+    const failure = failureInjectingFs(baseFs);
+    const service = createWorkflowControlService({ fs: failure.fs, now: sequenceClock() });
+    await service.submitProgress(context, renderWorkflowProgress(initialProposal("architect")));
+    await service.claimDispatch({
+      ...context,
+      routePath: routePath("architect"),
+      targetRole: "architect",
+      routeContentHash: "route-hash",
+      messageId: "message-1"
+    });
+    failure.failNextJsonWrite("workflow-control.json");
+
+    await expect(service.confirmDispatch(context, "message-1"))
+      .rejects.toThrow("injected workflow state write failure");
+
+    const restored = createWorkflowControlService({ fs: baseFs, now: sequenceClock() });
+    expect((await restored.getState(context)).pendingDispatch).toBeNull();
+    expect((await restored.getProgress(context)).history).toEqual([
+      expect.objectContaining({ sequence: 1, targetRole: "architect" })
+    ]);
+  });
+
   it("reads a pre-upgrade workflow progress document without a follow-up section", () => {
     const legacy = renderWorkflowProgress(initialProposal("architect"))
       .replace("\n## User-Approved Follow-Up\n\nApproval Text: none\n", "\n");
@@ -101,6 +143,7 @@ describe("workflow control service", () => {
     })).rejects.toMatchObject({ code: "WORKFLOW_AWAITING_USER" });
 
     expect((await restored.resolveUserInput(context)).awaitingUser).toBeNull();
+    expect((await restored.getProgress(context)).proposal).toBeUndefined();
     await expect(restored.assertRouteAuthorized({
       ...context,
       routePath: routePath("architect"),
@@ -108,9 +151,34 @@ describe("workflow control service", () => {
     })).rejects.toMatchObject({ code: "WORKFLOW_ROUTE_NOT_APPROVED" });
   });
 
-  it("denies skipping directly to Coder and accepts exact direct user authorization once", async () => {
+  it("does not cancel a dispatch that is already awaiting target confirmation", async () => {
     const { context, fs } = await createContext(roots);
-    const service = createWorkflowControlService({ fs, now: sequenceClock(), id: () => "authorization-1" });
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await service.submitProgress(context, renderWorkflowProgress(initialProposal("architect")));
+    await service.claimDispatch({
+      ...context,
+      routePath: routePath("architect"),
+      targetRole: "architect",
+      routeContentHash: "route-hash",
+      messageId: "message-1"
+    });
+
+    await expect(service.requestUserInput(context, "Choose one option."))
+      .rejects.toMatchObject({ code: "WORKFLOW_DISPATCH_PENDING" });
+    expect((await service.getState(context)).pendingDispatch).toMatchObject({
+      status: "dispatching",
+      messageId: "message-1"
+    });
+  });
+
+  it("binds each direct user authorization to one transition while allowing repeated wording", async () => {
+    const { context, fs } = await createContext(roots);
+    let authorizationSequence = 0;
+    const service = createWorkflowControlService({
+      fs,
+      now: sequenceClock(),
+      id: () => `authorization-${++authorizationSequence}`
+    });
     const deniedReason = "Transition code-change/coder is not legal after the confirmed Workflow Progress history.";
     const proposal = initialProposal("coder");
 
@@ -141,6 +209,16 @@ describe("workflow control service", () => {
       routePath: routePath("coder"),
       targetRole: "coder"
     })).rejects.toMatchObject({ code: "WORKFLOW_ROUTE_NOT_APPROVED" });
+
+    await advanceWithOverride(
+      service,
+      fs,
+      context,
+      "architect",
+      "user-authorized architecture check",
+      "Allow Coder to start before Architect for this dispatch only."
+    );
+    expect((await service.getState(context)).userAuthorizations).toHaveLength(2);
   });
 
   it("rejects incomplete or mismatched direct user authorization", async () => {
@@ -210,6 +288,80 @@ describe("workflow control service", () => {
       code: "WORKFLOW_STATE_INVALID"
     });
     await expect(fs.readText(progressPath)).resolves.toBe("# broken workflow record\n");
+  });
+
+  it("fails closed when Workflow Progress disappears while runtime state exists", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await service.submitProgress(context, renderWorkflowProgress(initialProposal("architect")));
+    const progressPath = path.join(context.taskRepoRoot, context.handoffDir, "workflow-progress.md");
+
+    await fs.removePath?.(progressPath, { force: true });
+
+    const state = await service.getState(context);
+    expect(state.warnings).toContain(
+      "Workflow Progress is missing while workflow runtime state still exists. Restore workflow-progress.md before continuing."
+    );
+    await expect(fs.pathExists(progressPath)).resolves.toBe(false);
+    await expect(service.submitProgress(context, renderWorkflowProgress(initialProposal("architect"))))
+      .rejects.toMatchObject({ code: "WORKFLOW_STATE_INVALID" });
+  });
+
+  it("fails closed when Workflow Progress no longer matches its runtime approval", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await service.submitProgress(context, renderWorkflowProgress(initialProposal("architect")));
+    const progressPath = path.join(context.taskRepoRoot, context.handoffDir, "workflow-progress.md");
+    await fs.writeText(progressPath, renderWorkflowProgress({
+      ...initialProposal("coder"),
+      proposal: {
+        requestedFlow: "code-change",
+        targetRole: "coder",
+        evidence: "tampered target"
+      }
+    }));
+
+    expect((await service.getState(context)).warnings).toContain(
+      "Workflow runtime approval does not match workflow-progress.md."
+    );
+    await expect(service.assertRouteAuthorized({
+      ...context,
+      routePath: routePath("architect"),
+      targetRole: "architect"
+    })).rejects.toMatchObject({ code: "WORKFLOW_STATE_INVALID" });
+  });
+
+  it("reconstructs a conservative evidence baseline when active runtime state is missing", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await advance(service, fs, context, "architect", "code-change", "accepted task");
+    await writeArchitecturePlan(fs, context);
+    await writeGateIndex(fs, context, { architecture: "approve" });
+    await fs.removePath?.(path.join(context.taskRepoRoot, context.stateRoot, "workflow-control.json"), { force: true });
+
+    const recovered = await service.getState(context);
+    expect(recovered.warnings).toEqual([]);
+    expect(recovered.activeDispatch).toMatchObject({
+      sequence: 1,
+      flow: "code-change",
+      targetRole: "architect"
+    });
+
+    const current = await service.getProgress(context);
+    await expect(service.submitProgress(context, renderWorkflowProgress({
+      ...current,
+      revision: current.revision + 1,
+      proposal: { targetRole: "coder", evidence: "stale plan and Gate" }
+    }))).rejects.toMatchObject({ code: "WORKFLOW_TRANSITION_DENIED" });
+
+    await writeArchitecturePlan(fs, context, "reproduced after runtime recovery");
+    await writeGateIndex(fs, context, { architecture: "approve" }, "2026-08-06T00:00:40.000Z");
+    await service.submitProgress(context, renderWorkflowProgress({
+      ...current,
+      revision: current.revision + 1,
+      proposal: { targetRole: "coder", evidence: "fresh plan and Gate" }
+    }));
+    expect((await service.getState(context)).pendingDispatch).toMatchObject({ targetRole: "coder" });
   });
 
   it("does not allow Coder after Architect until the real plan and architecture Gate exist", async () => {
@@ -392,9 +544,14 @@ describe("workflow control service", () => {
     });
   });
 
-  it("records one user-approved green Tester follow-up and invalidates the previous Gates", async () => {
+  it("allows the same user approval text for separate bound follow-ups and invalidates prior Gates", async () => {
     const { context, fs } = await createContext(roots);
-    const service = createWorkflowControlService({ fs, now: sequenceClock(), id: () => "follow-up-1" });
+    let approvalSequence = 0;
+    const service = createWorkflowControlService({
+      fs,
+      now: sequenceClock(),
+      id: () => `follow-up-${++approvalSequence}`
+    });
     await enterCodeChangeTester(service, fs, context);
     await writeTestReport(fs, context, "pass");
     await expect(advanceWithFollowUpApproval(
@@ -443,13 +600,20 @@ describe("workflow control service", () => {
       validation: "approve",
       codeDiff: "approve"
     }, "2026-08-06T00:00:50.000Z");
-    await expect(advanceWithFollowUpApproval(
+    await advanceWithFollowUpApproval(
       service,
       fs,
       context,
       "repeat approved work",
       "Add the regression coverage in this task."
-    )).rejects.toMatchObject({ code: "WORKFLOW_FOLLOW_UP_APPROVAL_REUSED" });
+    );
+    expect((await service.getState(context)).userApprovedFollowUps).toHaveLength(2);
+    await writeTestReport(fs, context, "pass", "none", "repeated approved follow-up validation");
+    await writeGateIndex(fs, context, {
+      architecture: "approve",
+      validation: "approve",
+      codeDiff: "approve"
+    }, "2026-08-06T00:01:10.000Z");
     await advance(service, fs, context, "architect", undefined, "fresh validation and code-diff Gates");
   });
 
@@ -925,6 +1089,45 @@ describe("workflow control service", () => {
     expect((await readProgress(fs, context))).toMatchObject({ flow: "architect-debug", status: "completed" });
   });
 
+  it("returns an analysis-only Diagnosis Branch directly to its parent flow", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await enterCodeChangeTester(service, fs, context);
+    await writeTestReport(fs, context, "fail");
+    await advance(service, fs, context, "architect", "architect-debug", "Tester failed");
+    await writeArchitectDebug(fs, context, "debug repair");
+    await advance(service, fs, context, "tester", undefined, "validate debug repair");
+    await writeTestReport(fs, context, "fail", "none", "debug validation failed");
+    await advance(service, fs, context, "architect", "architecture-diagnosis", "debug repair failed");
+    await writeArchitectureDiagnosis(fs, context, "architecture analysis only", "analysis completed");
+
+    await advance(service, fs, context, "architect", "code-change", "resume parent planning");
+
+    expect((await service.getState(context)).flowRun).toMatchObject({
+      rootFlow: "code-change",
+      resumedFromBranch: "architecture-diagnosis"
+    });
+    expect((await readProgress(fs, context)).history.at(-1)).toMatchObject({
+      flow: "code-change",
+      targetRole: "architect"
+    });
+  });
+
+  it("completes a standalone analysis-only Architecture Diagnosis without Tester", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await advance(service, fs, context, "architect", "architecture-diagnosis", "analyze the architecture");
+    await writeArchitectureDiagnosis(fs, context, "architecture analysis only", "analysis completed");
+
+    await completeFlow(service, fs, context);
+
+    expect((await readProgress(fs, context))).toMatchObject({
+      flow: "architecture-diagnosis",
+      status: "completed",
+      history: [expect.objectContaining({ targetRole: "architect" })]
+    });
+  });
+
   it.each([
     ["code-change", "architect", "docs-only", "architect"],
     ["code-change", "architect", "validation-only", "tester"],
@@ -1081,6 +1284,43 @@ describe("workflow control service", () => {
     });
   });
 
+  it("accepts an identical report that was freshly rewritten by the latest assigned role", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await advance(service, fs, context, "architect", "docs-only", "review current documentation");
+    const reportPath = path.join(context.taskRepoRoot, context.handoffDir, "docs-update-report.md");
+    const content = renderDocsUpdateReportTemplate(context.taskSlug)
+      .replace("synced|unchanged|blocked", "unchanged")
+      .replaceAll("TBD", "Verified task evidence.");
+    await fs.writeText(reportPath, content);
+    await advance(service, fs, context, "coder", undefined, "verify the same documentation state");
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    await fs.writeText(reportPath, content);
+
+    await completeFlow(service, fs, context);
+
+    expect((await readProgress(fs, context)).status).toBe("completed");
+  });
+
+  it.each(["not_required", "skipped", "overridden"] as const)(
+    "requires a fresh %s Architecture Gate exception after another Architect dispatch",
+    async (status) => {
+      const { context, fs } = await createContext(roots);
+      const service = createWorkflowControlService({ fs, now: sequenceClock() });
+      await advance(service, fs, context, "architect", "code-change", "initial planning");
+      await writeGateStatus(fs, context, "architecture-plan", status, "2026-08-06T00:00:10.000Z");
+      await advance(service, fs, context, "architect", undefined, "complete missing plan");
+      await writeArchitecturePlan(fs, context, "complete architecture plan");
+
+      await expect(propose(service, fs, context, "coder", undefined, "stale Gate exception"))
+        .rejects.toMatchObject({ code: "WORKFLOW_TRANSITION_DENIED" });
+
+      await writeGateStatus(fs, context, "architecture-plan", status, "2026-08-06T00:00:20.000Z");
+      await propose(service, fs, context, "coder", undefined, "fresh Gate exception");
+      expect((await service.getState(context)).pendingDispatch).toMatchObject({ targetRole: "coder" });
+    }
+  );
+
   it("requires a fresh Architecture Gate after Final Acceptance sends an Architect follow-up", async () => {
     const { context, fs } = await createContext(roots);
     const service = createWorkflowControlService({ fs, now: sequenceClock() });
@@ -1124,6 +1364,7 @@ describe("workflow control service", () => {
       code: "WORKFLOW_TRANSITION_DENIED"
     });
 
+    await writeArchitecturePlan(fs, context, "revised architecture follow-up");
     await writeGateIndex(fs, context, { architecture: "approve" }, "2026-08-06T00:00:06.000Z");
     await service.submitProgress(context, renderWorkflowProgress(coderProposal));
     expect((await service.getState(context)).pendingDispatch).toMatchObject({ targetRole: "coder" });
@@ -1271,7 +1512,8 @@ async function advanceWithFollowUpApproval(
 async function writeArchitectureDiagnosis(
   fs: FileSystemAdapter,
   context: WorkflowControlContext,
-  assessment: string
+  assessment: string,
+  disposition: "analysis completed" | "diagnosis implementation completed" | "user clarification required" = "diagnosis implementation completed"
 ): Promise<void> {
   await writeFinalArtifact(
     fs,
@@ -1280,7 +1522,7 @@ async function writeArchitectureDiagnosis(
     renderArchitectureDiagnosisTemplate(context.taskSlug),
     [
       ["## Architecture Assessment\n\nTBD", `## Architecture Assessment\n\n${assessment}`],
-      ["analysis completed|diagnosis implementation completed|user clarification required", "diagnosis implementation completed"]
+      ["analysis completed|diagnosis implementation completed|user clarification required", disposition]
     ]
   );
 }
@@ -1477,6 +1719,48 @@ async function writeGateIndex(
     },
     updatedAt
   });
+}
+
+async function writeGateStatus(
+  fs: FileSystemAdapter,
+  context: WorkflowControlContext,
+  gate: "architecture-plan" | "validation-adequacy" | "code-diff",
+  status: "not_required" | "skipped" | "overridden",
+  updatedAt: string
+): Promise<void> {
+  await writeGateIndex(fs, context, {}, updatedAt);
+  const indexPath = path.join(context.taskRepoRoot, ".ai/vcm/gate-reviews/index.json");
+  const index = await fs.readJson<Record<string, any>>(indexPath);
+  index.gates[gate] = {
+    ...index.gates[gate],
+    status,
+    decision: status === "overridden" ? "approve" : undefined,
+    exceptionReason: status === "not_required" ? undefined : "explicit test exception",
+    updatedAt
+  };
+  await fs.writeJsonAtomic(indexPath, index);
+}
+
+function failureInjectingFs(base: FileSystemAdapter): {
+  fs: FileSystemAdapter;
+  failNextJsonWrite(suffix: string): void;
+} {
+  let failureSuffix: string | undefined;
+  return {
+    fs: {
+      ...base,
+      async writeJsonAtomic(target, value) {
+        if (failureSuffix && target.endsWith(failureSuffix)) {
+          failureSuffix = undefined;
+          throw new Error("injected workflow state write failure");
+        }
+        await base.writeJsonAtomic(target, value);
+      }
+    },
+    failNextJsonWrite(suffix) {
+      failureSuffix = suffix;
+    }
+  };
 }
 
 function historyEntry(

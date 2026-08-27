@@ -182,25 +182,6 @@ describe("backend E2E Gate Review correction loops", () => {
       workflowProgress,
       "utf8"
     );
-    await fs.writeFile(
-      path.join(task.worktreePath, ".ai/vcm/workflow-control.json"),
-      JSON.stringify({
-        version: 1,
-        taskSlug: task.taskSlug,
-        awaitingUser: null,
-        pendingDispatch: null,
-        activeDispatch: null,
-        flowRun: {
-          rootFlow: "code-change",
-          activeBranch: "architect-debug",
-          startedAtSequence: 1
-        },
-        userAuthorizations: [],
-        warnings: [],
-        updatedAt: timestamp
-      }, null, 2) + "\n",
-      "utf8"
-    );
 
     expect((await requestGateReview(env.app, task.taskSlug, "code-diff", {
       codeDiffSource: "architect-debug"
