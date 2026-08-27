@@ -1251,11 +1251,7 @@ async function validateCompletion(
     );
   }
   if (candidate.flow === "code-change" || candidate.flow === "architect-debug") {
-    const acceptance = await artifactState(fs, input, "final-acceptance.md", "final-acceptance");
-    if (!evidenceProducedAfterActiveDispatch(state, candidate.flow, "architect", "final-acceptance.md", acceptance.hash)
-      || (acceptance.value !== "accepted" && acceptance.value !== "accepted-with-known-risks")) {
-      throw workflowError("WORKFLOW_COMPLETION_INVALID", "Final Acceptance is not accepted for this complete delivery flow.");
-    }
+    await validateCompleteDeliveryEvidence(fs, input, state, candidate.flow);
     return;
   }
   if (candidate.flow === "architecture-diagnosis") {
@@ -1268,11 +1264,7 @@ async function validateCompletion(
         "architecture-diagnosis.md",
         diagnosis.hash
       )) return;
-    const acceptance = await artifactState(fs, input, "final-acceptance.md", "final-acceptance");
-    if (!evidenceProducedAfterActiveDispatch(state, candidate.flow, "architect", "final-acceptance.md", acceptance.hash)
-      || (acceptance.value !== "accepted" && acceptance.value !== "accepted-with-known-risks")) {
-      throw workflowError("WORKFLOW_COMPLETION_INVALID", "Implemented Architecture Diagnosis requires accepted Final Acceptance evidence.");
-    }
+    await validateCompleteDeliveryEvidence(fs, input, state, candidate.flow);
     return;
   }
   if (candidate.flow === "docs-only") {
@@ -1295,6 +1287,67 @@ async function validateCompletion(
       || !gatePassedForDispatch(state, candidate.flow, "tester", "validation-adequacy", gate)) {
       throw workflowError("WORKFLOW_COMPLETION_INVALID", "Validation-only completion requires a terminal Test Report and a passed Validation Adequacy Gate.");
     }
+  }
+}
+
+async function validateCompleteDeliveryEvidence(
+  fs: FileSystemAdapter,
+  input: WorkflowControlContext,
+  state: WorkflowControlState,
+  flow: "code-change" | "architect-debug" | "architecture-diagnosis"
+): Promise<void> {
+  const baseline = state.activeDispatch;
+  if (!baseline || baseline.flow !== flow) {
+    throw workflowError(
+      "WORKFLOW_COMPLETION_INVALID",
+      `The latest confirmed dispatch does not belong to the active ${flow} flow.`
+    );
+  }
+  if (baseline.targetRole !== "architect") {
+    throw workflowError(
+      "WORKFLOW_COMPLETION_INVALID",
+      `The latest ${flow} dispatch is to ${baseline.targetRole}. Complete every required downstream validation and Gate step, then route Architect for docs sync before completing the flow.`
+    );
+  }
+
+  const docs = await artifactState(fs, input, "docs-sync-report.md", "docs-sync-report");
+  if (!docs.complete) {
+    throw workflowError(
+      "WORKFLOW_COMPLETION_INVALID",
+      "Docs Sync Report is missing or malformed for this complete delivery flow."
+    );
+  }
+  if (baseline.artifactHashes["docs-sync-report.md"] === docs.hash) {
+    throw workflowError(
+      "WORKFLOW_COMPLETION_INVALID",
+      "Docs Sync Report was not produced after the final Architect dispatch."
+    );
+  }
+  if (docs.value !== "synced" && docs.value !== "unchanged") {
+    throw workflowError(
+      "WORKFLOW_COMPLETION_INVALID",
+      `Docs Sync Report Decision must be synced or unchanged before completion; found ${docs.value ?? "missing"}.`
+    );
+  }
+
+  const acceptance = await artifactState(fs, input, "final-acceptance.md", "final-acceptance");
+  if (!acceptance.complete) {
+    throw workflowError(
+      "WORKFLOW_COMPLETION_INVALID",
+      "Final Acceptance is missing or malformed for this complete delivery flow."
+    );
+  }
+  if (acceptance.value !== "accepted" && acceptance.value !== "accepted-with-known-risks") {
+    throw workflowError(
+      "WORKFLOW_COMPLETION_INVALID",
+      `Final Acceptance Decision must be accepted or accepted-with-known-risks; found ${acceptance.value ?? "missing"}.`
+    );
+  }
+  if (baseline.artifactHashes["final-acceptance.md"] === acceptance.hash) {
+    throw workflowError(
+      "WORKFLOW_COMPLETION_INVALID",
+      "Final Acceptance was not produced after the final Architect dispatch."
+    );
   }
 }
 

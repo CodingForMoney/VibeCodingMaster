@@ -294,6 +294,104 @@ describe("workflow control service", () => {
     ]);
   });
 
+  it("accepts accepted-with-known-risks after fresh Architect docs sync", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+
+    await enterCodeChangeFinalArchitect(service, fs, context);
+    await writeDocsSyncReport(fs, context, "unchanged", "no durable documentation changes");
+    await writeFinalAcceptance(fs, context, "accepted-with-known-risks");
+    await completeFlow(service, fs, context);
+
+    expect((await readProgress(fs, context)).status).toBe("completed");
+  });
+
+  it.each(["coder", "tester"] as const)(
+    "rejects completion when a user-authorized late %s dispatch bypasses final Architect docs sync",
+    async (targetRole) => {
+      const { context, fs } = await createContext(roots);
+      const service = createWorkflowControlService({
+        fs,
+        now: sequenceClock(),
+        id: () => `late-${targetRole}-override`
+      });
+
+      await enterCodeChangeFinalArchitect(service, fs, context);
+      await writeDocsSyncReport(fs, context, "synced", "initial docs sync");
+      await writeFinalAcceptance(fs, context);
+      await advanceWithOverride(
+        service,
+        fs,
+        context,
+        targetRole,
+        `user-authorized late ${targetRole} correction`,
+        `Route ${targetRole} once for the exact late correction.`
+      );
+      await writeFinalAcceptance(fs, context);
+
+      await expect(completeFlow(service, fs, context)).rejects.toMatchObject({
+        code: "WORKFLOW_COMPLETION_INVALID",
+        message: expect.stringContaining(`latest code-change dispatch is to ${targetRole}`)
+      });
+    }
+  );
+
+  it("rejects a stale Docs Sync Report after the final Architect dispatch", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+
+    await enterCodeChangeTester(service, fs, context);
+    await writeTestReport(fs, context, "pass");
+    await writeGateIndex(fs, context, {
+      validation: "approve",
+      codeDiff: "approve",
+      codeDiffSource: "coder"
+    });
+    await writeDocsSyncReport(fs, context, "synced", "stale pre-dispatch report");
+    await advance(service, fs, context, "architect", undefined, "perform final docs sync");
+    await writeFinalAcceptance(fs, context);
+
+    await expect(completeFlow(service, fs, context)).rejects.toMatchObject({
+      code: "WORKFLOW_COMPLETION_INVALID",
+      message: expect.stringContaining("Docs Sync Report was not produced after")
+    });
+  });
+
+  it("reports a non-accepted Final Acceptance decision separately from freshness", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+
+    await enterCodeChangeFinalArchitect(service, fs, context);
+    await writeDocsSyncReport(fs, context, "synced", "final docs sync");
+    await writeFinalAcceptance(fs, context, "needs-docs-sync");
+
+    await expect(completeFlow(service, fs, context)).rejects.toMatchObject({
+      code: "WORKFLOW_COMPLETION_INVALID",
+      message: expect.stringContaining("Final Acceptance Decision must be accepted or accepted-with-known-risks")
+    });
+  });
+
+  it("rejects Final Acceptance that predates the final Architect dispatch", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+
+    await enterCodeChangeTester(service, fs, context);
+    await writeTestReport(fs, context, "pass");
+    await writeGateIndex(fs, context, {
+      validation: "approve",
+      codeDiff: "approve",
+      codeDiffSource: "coder"
+    });
+    await writeFinalAcceptance(fs, context);
+    await advance(service, fs, context, "architect", undefined, "perform final docs sync");
+    await writeDocsSyncReport(fs, context, "synced", "final docs sync");
+
+    await expect(completeFlow(service, fs, context)).rejects.toMatchObject({
+      code: "WORKFLOW_COMPLETION_INVALID",
+      message: expect.stringContaining("Final Acceptance was not produced after")
+    });
+  });
+
   it("records one user-approved green Tester follow-up and invalidates the previous Gates", async () => {
     const { context, fs } = await createContext(roots);
     const service = createWorkflowControlService({ fs, now: sequenceClock(), id: () => "follow-up-1" });
@@ -1253,10 +1351,14 @@ async function writeDocsUpdateReport(
   ]);
 }
 
-async function writeFinalAcceptance(fs: FileSystemAdapter, context: WorkflowControlContext): Promise<void> {
+async function writeFinalAcceptance(
+  fs: FileSystemAdapter,
+  context: WorkflowControlContext,
+  decision: "accepted" | "accepted-with-known-risks" | "needs-docs-sync" = "accepted"
+): Promise<void> {
   await writeFinalArtifact(fs, context, "final-acceptance.md", renderFinalAcceptanceTemplate(context.taskSlug), [[
     "accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|needs-docs-sync|blocked-by-user-decision",
-    "accepted"
+    decision
   ]]);
 }
 
@@ -1288,6 +1390,21 @@ async function enterCodeChangeTester(
     ["Decision: ready_for_review|incomplete|failed", "Decision: ready_for_review"]
   ]);
   await advance(service, fs, context, "tester", undefined, "completed Coder implementation");
+}
+
+async function enterCodeChangeFinalArchitect(
+  service: WorkflowControlService,
+  fs: FileSystemAdapter,
+  context: WorkflowControlContext
+): Promise<void> {
+  await enterCodeChangeTester(service, fs, context);
+  await writeTestReport(fs, context, "pass");
+  await writeGateIndex(fs, context, {
+    validation: "approve",
+    codeDiff: "approve",
+    codeDiffSource: "coder"
+  });
+  await advance(service, fs, context, "architect", undefined, "perform final docs sync");
 }
 
 async function readProgress(fs: FileSystemAdapter, context: WorkflowControlContext): Promise<WorkflowProgressDocument> {
