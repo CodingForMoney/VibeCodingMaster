@@ -11,10 +11,10 @@ interface GuardPayload {
   tool_input: Record<string, unknown>;
 }
 
-async function runGuard(payload: GuardPayload, role?: string): Promise<string | undefined> {
+async function runGuard(payload: GuardPayload, role = "coder"): Promise<string | undefined> {
   const reason = await new Promise<string>((resolve, reject) => {
     const child = execFile("python3", [guardPath], {
-      env: role ? { ...process.env, VCM_ROLE: role } : process.env
+      env: { ...process.env, VCM_ROLE: role }
     }, (error, stdout) => {
       if (error) {
         reject(error);
@@ -40,6 +40,28 @@ function bash(command: string, extra: Record<string, unknown> = {}): GuardPayloa
 }
 
 describe("vcm-bash-guard", () => {
+  describe("tool-role exemption", () => {
+    for (const role of ["translator", "harness-engineer"]) {
+      it(`bypasses every guard restriction for ${role}`, async () => {
+        const payloads = [
+          bash("sleep 100 &", { run_in_background: true }),
+          bash("rm .ai/vcm/harness-feedback/pending/confirmed.md"),
+          {
+            tool_name: "Write",
+            tool_input: { file_path: ".ai/vcm/handoffs/test-report.md", content: "tool output" }
+          },
+          {
+            tool_name: "Edit",
+            tool_input: { file_path: ".ai/vcm/gate-reviews/requests/request.report.md" }
+          }
+        ];
+        for (const payload of payloads) {
+          await expect(runGuard(payload, role)).resolves.toBeUndefined();
+        }
+      });
+    }
+  });
+
   const denied: Array<[string, GuardPayload]> = [
     ["run_in_background", bash("cargo test", { run_in_background: true })],
     ["trailing &", bash("sleep 100 &")],
@@ -308,11 +330,11 @@ describe("vcm-bash-guard", () => {
       }
     });
 
-    it("does not let Harness Engineer delete pending feedback directly", async () => {
+    it("allows Harness Engineer to delete pending feedback directly", async () => {
       await expect(runGuard(
         bash("rm .ai/vcm/harness-feedback/pending/confirmed.md"),
         "harness-engineer"
-      )).resolves.toContain("vcm-artifact");
+      )).resolves.toBeUndefined();
     });
   });
 });

@@ -719,7 +719,7 @@ Long-running validation uses `vcm-long-running-validation` backed by:
 .ai/tools/watch-job
 ```
 
-VCM roles must not run background Bash. `vcm-bash-guard` denies
+VCM workflow roles must not run background Bash. `vcm-bash-guard` denies
 `run_in_background`, `nohup`, `setsid`, `disown`, and trailing `&`.
 `run-long-check` accepts the validation executable and arguments directly and
 rejects shell command-string wrappers whose pipeline or trailing command could

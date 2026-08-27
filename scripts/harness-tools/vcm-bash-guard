@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""VCM PreToolUse guard for supervised tools inside VCM role sessions.
+"""VCM PreToolUse guard for supervised tools inside VCM workflow-role sessions.
 
 Reads the Claude Code PreToolUse hook payload on stdin. It enforces supervised
-Bash execution for every VCM role.
+Bash execution and managed-artifact writes for VCM workflow roles. Tool roles
+are outside the workflow and bypass this guard.
 
 Quoted payloads of `sh -c` / `bash -lc` style invocations are executable
 shell code, so they are scanned recursively. `.ai/tools/run-long-check` is the
@@ -11,9 +12,12 @@ supervised foreground process group.
 """
 import ast
 import json
+import os
 import re
 import shlex
 import sys
+
+WORKFLOW_ROLES = {"project-manager", "architect", "coder", "tester", "reviewer"}
 
 SKILL_HINT = (
     "Use the vcm-long-running-validation skill instead: "
@@ -554,6 +558,9 @@ def guard_reasons(tool_input: dict) -> list[str]:
 
 def main() -> int:
     raw = sys.stdin.read()
+    if os.environ.get("VCM_ROLE", "").strip() not in WORKFLOW_ROLES:
+        return 0
+
     try:
         payload = json.loads(raw) if raw.strip() else {}
     except ValueError:

@@ -22,7 +22,7 @@ No accumulated project memory yet.
 - `vcm-route-message` is the only channel for PM-hub dispatch and reporting among project-manager, architect, coder, and tester. Gate Review and tool-role work use their dedicated VCM skills and controllers. Follow the route skill's write-then-stop rule.
 - Before every PM dispatch to Architect, Coder, or Tester, project-manager must use `vcm-workflow-review`. Only an accepted Workflow Progress transition grants the next route.
 - `vcm-task-state` is recoverable context only. Workflow permission comes only from accepted `workflow-progress.md` submissions.
-- Use `vcm-long-running-validation` for long-running validation. Follow the background job limits below.
+- Workflow roles use `vcm-long-running-validation` for long-running validation and follow the background job limits below.
 - Use `vcm-report-harness-issue` when you notice a reusable VCM harness problem. Record feedback; do not contact Harness Engineer directly.
 - The root `<VCM-memory>` block is shared project memory. Treat every `<VCM-memory>` block as read-only and use `vcm-propose-memory` only when VCM assigns an exact memory proposal or candidate path.
 - Only the user may approve scope reduction, skipped required validation, Gate Review skip or override, skipped required docs sync, accepted unresolved task-scope risk, or weakening of baseline Harness rules. PM may record and route the user's approval but cannot grant it.
@@ -30,7 +30,7 @@ No accumulated project memory yet.
 
 ## VCM Managed Artifacts
 
-- VCM-managed Markdown under `.ai/vcm/handoffs/`, Coder Worker reports, request-scoped Gate Review reports, route messages, memory proposals, and Harness Feedback must be submitted with `.ai/tools/vcm-artifact`; never write or edit the authoritative path directly.
+- Workflow roles must submit VCM-managed Markdown under `.ai/vcm/handoffs/`, Coder Worker reports, request-scoped Gate Review reports, route messages, memory proposals, and Harness Feedback with `.ai/tools/vcm-artifact`; never write or edit the authoritative path directly.
 - Write the candidate outside `.ai/vcm/`, then run `.ai/tools/vcm-artifact <kind> --file <candidate> --mode <draft|final>`. Dynamic artifacts also require the exact VCM-assigned `--path`.
 - Use `draft` while an allowed lifecycle remains incomplete. Use `final` before routing or consuming a terminal artifact. A failed submission leaves the authoritative artifact unchanged; correct every reported violation and submit again.
 - Do not route, review, or rely on a candidate file. Only the VCM-written authoritative path is workflow evidence.
@@ -43,7 +43,7 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 
 ## VCM Background Jobs
 
-- Never run the Bash tool with `run_in_background: true`. Never detach a process with `nohup`, `setsid`, `disown`, or a trailing `&`. VCM denies these calls.
+- Workflow roles never run the Bash tool with `run_in_background: true` or detach a process with `nohup`, `setsid`, `disown`, or a trailing `&`. VCM denies these calls for workflow roles.
 - The only sanctioned long-running mechanism is the `vcm-long-running-validation` skill: `.ai/tools/run-long-check` plus `.ai/tools/watch-job`. Only one job may run at a time.
 - The moment a command might run longer than 2 minutes, switch to that skill instead of running the command directly.
 - While a job is running, stay in the current turn and keep calling `.ai/tools/watch-job` until it reports a terminal result; VCM blocks turn-end while a job is running, and a job without a live watcher is killed automatically.
