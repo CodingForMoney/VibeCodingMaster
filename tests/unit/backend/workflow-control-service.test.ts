@@ -882,6 +882,32 @@ describe("workflow control service", () => {
     });
   });
 
+  it.each([
+    ["architect-debug", "architect-debug.md"],
+    ["architecture-diagnosis", "architecture-diagnosis.md"]
+  ] as const)("returns %s to Architect after user clarification", async (flow, artifactName) => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+
+    await advance(service, fs, context, "architect", flow, "investigate the reported failure");
+    if (flow === "architect-debug") {
+      await writeArchitectDebug(fs, context, "user intent is required", "user clarification required");
+    } else {
+      await writeArchitectureDiagnosis(fs, context, "user intent is required", "user clarification required");
+    }
+
+    await service.requestUserInput(context, "Which behavior should be authoritative?");
+    await service.resolveUserInput(context);
+    await advance(service, fs, context, "architect", undefined, "continue with the user's answer");
+
+    expect((await readProgress(fs, context)).history).toEqual([
+      expect.objectContaining({ sequence: 1, flow, targetRole: "architect" }),
+      expect.objectContaining({ sequence: 2, flow, targetRole: "architect" })
+    ]);
+    expect(await fs.readText(path.join(context.taskRepoRoot, context.handoffDir, artifactName)))
+      .toContain("user clarification required");
+  });
+
   it("preserves the parent Code-Change run when an override adds Tester at Debug Branch exit", async () => {
     const { context, fs } = await createContext(roots);
     const service = createWorkflowControlService({

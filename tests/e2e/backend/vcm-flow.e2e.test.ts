@@ -9,10 +9,13 @@ import {
   renderTestReportTemplate
 } from "../../../src/backend/templates/handoff.js";
 import type { DispatchableRole } from "../../../src/shared/types/role.js";
+import type { WorkflowFlow } from "../../../src/shared/types/workflow.js";
 import { createMockClaudeE2eApp } from "./helpers/e2e-app.js";
 import { createE2eRepo, git } from "./helpers/e2e-repo.js";
 import {
+  closeTask,
   connectAndCreateTask,
+  createTask,
   getWorkspaceState,
   nextTick,
   sleep,
@@ -127,7 +130,7 @@ describe("backend E2E with mock Claude Code", () => {
     expect(savedProgress).toContain("| 1 | code-change | architect |");
   });
 
-  it("pauses every PM question, cancels old approval, and requires a direct user reply", async () => {
+  it("pauses for a user answer, cancels old approval, and resumes Architect with fresh approval", async () => {
     const env = await createMockClaudeE2eApp({ workflowControl: true });
     cleanups.push(() => env.close());
     const repo = await createE2eRepo();
@@ -156,10 +159,26 @@ describe("backend E2E with mock Claude Code", () => {
       await ctx.userPromptSubmit();
       await ctx.stop({ last_assistant_message: "Acknowledged." });
     });
+    env.mockRuntime.onPrompt("project-manager", "Resume Architect with the user answer", async (ctx) => {
+      await ctx.userPromptSubmit();
+      await ctx.writeFile(".ai/vcm/handoffs/messages/project-manager-architect.md", [
+        "---",
+        "type: task",
+        "---",
+        "Continue using the documented behavior confirmed by the user.",
+        ""
+      ].join("\n"));
+      await ctx.stop();
+    });
     env.mockRuntime.onPrompt("architect", "This stale route must not be dispatched", async (ctx) => {
       architectReceivedRoute = true;
       await ctx.userPromptSubmit();
       await ctx.stop();
+    });
+    env.mockRuntime.onPrompt("architect", "Continue using the documented behavior confirmed by the user", async (ctx) => {
+      architectReceivedRoute = true;
+      await ctx.userPromptSubmit();
+      await ctx.stop({ last_assistant_message: "Continuing with the confirmed behavior." });
     });
 
     const pm = await startRole(env.app, task.taskSlug, "project-manager");
@@ -209,6 +228,38 @@ describe("backend E2E with mock Claude Code", () => {
     await env.mockRuntime.waitForIdle();
     expect((await env.deps.workflowControlService!.getState(context)).awaitingUser).toBeNull();
     expect(architectReceivedRoute).toBe(false);
+
+    const resumed = parseWorkflowProgress(await fs.readFile(
+      path.join(task.worktreePath, ".ai/vcm/handoffs/workflow-progress.md"),
+      "utf8"
+    ), task.taskSlug);
+    const freshApproval = await env.app.inject({
+      method: "POST",
+      url: `/api/tasks/${task.taskSlug}/artifacts/submit`,
+      payload: {
+        kind: "workflow-progress",
+        mode: "final",
+        role: "project-manager",
+        runtimeSessionToken: pm.runtimeSessionToken,
+        content: renderWorkflowProgress({
+          ...resumed,
+          revision: resumed.revision + 1,
+          proposal: {
+            requestedFlow: "code-change",
+            targetRole: "architect",
+            evidence: "the user confirmed the documented behavior"
+          }
+        })
+      }
+    });
+    expect(freshApproval.statusCode, freshApproval.body).toBe(200);
+
+    env.mockRuntime.write(pmSession!.id, "Resume Architect with the user answer");
+    await env.mockRuntime.waitForIdle();
+    expect(architectReceivedRoute).toBe(true);
+    expect((await env.deps.workflowControlService!.getProgress(context)).history).toEqual([
+      expect.objectContaining({ flow: "code-change", targetRole: "architect" })
+    ]);
   });
 
   it("routes a PM turn to Architect and back through real hooks, messages, and round state", async () => {
@@ -302,7 +353,7 @@ describe("backend E2E with mock Claude Code", () => {
     );
   });
 
-  it("completes Docs-Only Flow from a Tester documentation update without entering Validation-Only", async () => {
+  it("completes Docs-Only Flow before starting an explicit Validation-Only Flow", async () => {
     const env = await createMockClaudeE2eApp({ workflowControl: true });
     cleanups.push(() => env.close());
     const repo = await createE2eRepo();
@@ -342,6 +393,23 @@ describe("backend E2E with mock Claude Code", () => {
     });
 
     env.mockRuntime.onPrompt("project-manager", "Docs-only update complete.", async (ctx) => {
+      await ctx.userPromptSubmit();
+      await ctx.stop();
+    });
+    env.mockRuntime.onPrompt("project-manager", "Start the accepted validation flow", async (ctx) => {
+      await ctx.userPromptSubmit();
+      await ctx.writeFile(".ai/vcm/handoffs/messages/project-manager-tester.md", [
+        "---",
+        "type: task",
+        "---",
+        "Run the newly accepted validation-only request.",
+        ""
+      ].join("\n"));
+      await ctx.stop();
+    });
+    let testerReceivedNewFlow = false;
+    env.mockRuntime.onPrompt("tester", "Run the newly accepted validation-only request", async (ctx) => {
+      testerReceivedNewFlow = true;
       await ctx.userPromptSubmit();
       await ctx.stop();
     });
@@ -452,6 +520,66 @@ describe("backend E2E with mock Claude Code", () => {
         targetRole: "tester"
       }
     });
+
+    env.mockRuntime.write(pmSession!.id, "Start the accepted validation flow");
+    await env.mockRuntime.waitForIdle();
+    expect(testerReceivedNewFlow).toBe(true);
+    const continued = parseWorkflowProgress(await fs.readFile(progressPath, "utf8"), task.taskSlug);
+    expect(continued.status).toBe("active");
+    expect(continued.history.at(-1)).toMatchObject({
+      flow: "validation-only",
+      targetRole: "tester"
+    });
+  });
+
+  it("starts a fresh workflow in a new task after the previous task flow completed", async () => {
+    const env = await createMockClaudeE2eApp({ workflowControl: true });
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const firstTask = await connectAndCreateTask(env.app, repo, "completed-workflow-task");
+    const service = env.deps.workflowControlService!;
+    const firstContext = {
+      taskRepoRoot: firstTask.worktreePath,
+      stateRoot: ".ai/vcm",
+      handoffDir: ".ai/vcm/handoffs",
+      taskSlug: firstTask.taskSlug
+    };
+
+    await advanceWorkflow(service, firstContext, "architect", "docs-only", "complete the first task docs flow");
+    await fs.writeFile(
+      path.join(firstTask.worktreePath, ".ai/vcm/handoffs/docs-update-report.md"),
+      completeDocsUpdateReport(firstTask.taskSlug, "unchanged"),
+      "utf8"
+    );
+    const firstProgress = await service.getProgress(firstContext);
+    await service.submitProgress(firstContext, renderWorkflowProgress({
+      ...firstProgress,
+      revision: firstProgress.revision + 1,
+      status: "completed",
+      proposal: undefined
+    }));
+    expect((await service.getProgress(firstContext)).status).toBe("completed");
+
+    await closeTask(env.app, firstTask.taskSlug);
+    const secondTask = await createTask(env.app, "fresh-workflow-task");
+    const secondContext = {
+      taskRepoRoot: secondTask.worktreePath,
+      stateRoot: ".ai/vcm",
+      handoffDir: ".ai/vcm/handoffs",
+      taskSlug: secondTask.taskSlug
+    };
+    expect(await service.getProgress(secondContext)).toMatchObject({
+      taskSlug: secondTask.taskSlug,
+      revision: 0,
+      status: "not-started",
+      history: []
+    });
+
+    await advanceWorkflow(service, secondContext, "architect", "code-change", "start the new task flow");
+    expect((await service.getProgress(secondContext)).history).toEqual([
+      expect.objectContaining({ sequence: 1, flow: "code-change", targetRole: "architect" })
+    ]);
   });
 
   it("accepts one explicit Tester follow-up after green Gates and invalidates the old evidence", async () => {
@@ -762,7 +890,7 @@ async function advanceWorkflow(
   service: NonNullable<Awaited<ReturnType<typeof createMockClaudeE2eApp>>["deps"]["workflowControlService"]>,
   context: { taskRepoRoot: string; stateRoot: string; handoffDir: string; taskSlug: string },
   targetRole: DispatchableRole,
-  requestedFlow: "code-change" | undefined,
+  requestedFlow: WorkflowFlow | undefined,
   evidence: string
 ): Promise<void> {
   const progressPath = path.join(context.taskRepoRoot, context.handoffDir, "workflow-progress.md");

@@ -988,6 +988,9 @@ async function allowedArchitectFix(
     if (source === "architecture-diagnosis" && artifact.disposition === "analysis completed") {
       return parentFlow ? [`${parentFlow}/architect`] : [];
     }
+    if (artifact.disposition === "user clarification required") {
+      return [`${source}/architect`];
+    }
     return artifact.complete ? [`${source}/tester`] : [`${source}/architect`];
   }
   if (architectIndex > testerIndex) {
@@ -995,6 +998,10 @@ async function allowedArchitectFix(
     const artifact = source === "architect-debug"
       ? await artifactState(fs, input, artifactName, "architect-debug")
       : await artifactState(fs, input, artifactName, "architecture-diagnosis");
+    if (evidenceIsFresh(state, source, "architect", artifactName, artifact.hash)
+      && artifact.disposition === "user clarification required") {
+      return [`${source}/architect`];
+    }
     if (evidenceIsFresh(state, source, "architect", artifactName, artifact.hash) && artifact.complete) {
       return [`${source}/tester`];
     }
