@@ -14,6 +14,7 @@ import type {
   WorkflowFlow,
   WorkflowFlowRun,
   WorkflowUserAuthorization,
+  WorkflowUserApprovedFollowUp,
   WorkflowPendingDispatch,
   WorkflowProgressDocument
 } from "../../shared/types/workflow.js";
@@ -63,8 +64,10 @@ export interface WorkflowControlServiceDeps {
   id?: () => string;
 }
 
-const HISTORY_HEADER = "| Sequence | Flow | Target Role | Evidence | Override Authorization | Confirmed At |";
-const HISTORY_SEPARATOR = "| --- | --- | --- | --- | --- | --- |";
+const HISTORY_HEADER = "| Sequence | Flow | Target Role | Evidence | Override Authorization | Follow-Up Approval | Confirmed At |";
+const HISTORY_SEPARATOR = "| --- | --- | --- | --- | --- | --- | --- |";
+const LEGACY_HISTORY_HEADER = "| Sequence | Flow | Target Role | Evidence | Override Authorization | Confirmed At |";
+const LEGACY_HISTORY_SEPARATOR = "| --- | --- | --- | --- | --- | --- |";
 const TARGET_ROLES = new Set<DispatchableRole>(["architect", "coder", "tester"]);
 const FINAL_GATE_STATUSES = new Set(["disabled", "not_required", "skipped", "overridden"]);
 const MISSING_EVIDENCE_HASH = "<missing>";
@@ -152,10 +155,48 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
         effectiveFlow,
         candidate.proposal.targetRole
       );
+      const followUpApprovalText = candidate.proposal.followUpApprovalText?.trim();
+      const followUpAllowed = Boolean(followUpApprovalText) && await canRouteUserApprovedFollowUp(
+        deps.fs,
+        input,
+        state,
+        current,
+        effectiveFlow,
+        candidate.proposal.targetRole,
+        verdict.allowedTransitions
+      );
       let overrideAuthorizationId: string | undefined;
       let userAuthorization: WorkflowUserAuthorization | undefined;
+      let followUpApprovalId: string | undefined;
+      let userApprovedFollowUp: WorkflowUserApprovedFollowUp | undefined;
 
-      if (!verdict.allowed) {
+      if (followUpApprovalText) {
+        if (verdict.allowed) {
+          throw workflowError(
+            "WORKFLOW_FOLLOW_UP_APPROVAL_NOT_REQUIRED",
+            "This workflow transition is already legal and must not consume a post-validation follow-up approval.",
+            "Set User-Approved Follow-Up Approval Text to none."
+          );
+        }
+        if (!followUpAllowed) {
+          throw workflowError(
+            "WORKFLOW_FOLLOW_UP_APPROVAL_INVALID",
+            "User-approved follow-up work is legal only for a Tester dispatch after a fresh passing Test Report and successful validation-adequacy and code-diff Gates.",
+            "Use the normal allowed transition, or ask the user only when optional Tester-owned work is proposed after validation is fully green."
+          );
+        }
+        if (state.userApprovedFollowUps.some((entry) => entry.approvalText === followUpApprovalText)) {
+          throw workflowError(
+            "WORKFLOW_FOLLOW_UP_APPROVAL_REUSED",
+            "This user-approved follow-up has already been recorded for another workflow transition.",
+            "Ask the user for a new explicit approval for this exact additional work."
+          );
+        }
+        userApprovedFollowUp = createUserApprovedFollowUp(
+          id(), current, candidate, effectiveFlow, baseHistoryHash, followUpApprovalText, now()
+        );
+        followUpApprovalId = userApprovedFollowUp.id;
+      } else if (!verdict.allowed) {
         const authorizationText = candidate.proposal.authorizationText?.trim();
         const violatedRule = candidate.proposal.violatedRule?.trim();
         if (!authorizationText && !violatedRule) {
@@ -203,6 +244,7 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
         evidence: candidate.proposal.evidence,
         expectedRoutePath: expectedRoutePath(input.handoffDir, candidate.proposal.targetRole),
         overrideAuthorizationId,
+        followUpApprovalId,
         status: "pending",
         createdAt: timestamp,
         updatedAt: timestamp
@@ -219,6 +261,9 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
         userAuthorizations: userAuthorization
           ? [...state.userAuthorizations, userAuthorization]
           : state.userAuthorizations,
+        userApprovedFollowUps: userApprovedFollowUp
+          ? [...state.userApprovedFollowUps, userApprovedFollowUp]
+          : state.userApprovedFollowUps,
         updatedAt: timestamp
       });
       return { path: relativeProgressPath(input), content: normalized };
@@ -320,6 +365,7 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
         targetRole: pending.targetRole,
         evidence: pending.evidence,
         overrideAuthorizationId: pending.overrideAuthorizationId,
+        followUpApprovalId: pending.followUpApprovalId,
         confirmedAt: timestamp
       };
       const activeDispatch = await captureEvidenceBaseline(
@@ -350,6 +396,11 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
           ? { ...entry, status: "consumed" as const, consumedAt: timestamp }
           : entry
       );
+      const userApprovedFollowUps = state.userApprovedFollowUps.map((entry) =>
+        entry.id === pending.followUpApprovalId
+          ? { ...entry, status: "consumed" as const, consumedAt: timestamp }
+          : entry
+      );
       await writeAtomic(deps.fs, progressPath(input), renderWorkflowProgress(completed));
       await saveState(input, {
         ...state,
@@ -357,6 +408,7 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
         activeDispatch,
         flowRun,
         userAuthorizations,
+        userApprovedFollowUps,
         updatedAt: timestamp
       });
     });
@@ -481,6 +533,23 @@ export function parseWorkflowProgress(content: string, expectedTaskSlug?: string
     errors.push("User Authorization fields must be none when no role dispatch is proposed.");
   }
 
+  const followUpSection = readArtifactSectionContent(content, "User-Approved Follow-Up");
+  const followUpApprovalText = followUpSection === undefined
+    ? "none"
+    : rawField(followUpSection, "Approval Text");
+  if (!followUpApprovalText) {
+    errors.push("User-Approved Follow-Up requires an Approval Text field.");
+  } else if (proposal) {
+    if (followUpApprovalText !== "none") {
+      if (proposal.authorizationText || proposal.violatedRule) {
+        errors.push("User-Approved Follow-Up and User Authorization cannot be used in the same proposal.");
+      }
+      proposal.followUpApprovalText = followUpApprovalText;
+    }
+  } else if (followUpApprovalText !== "none") {
+    errors.push("User-Approved Follow-Up Approval Text must be none when no role dispatch is proposed.");
+  }
+
   if (errors.length > 0) throw progressValidationError(errors);
   return {
     taskSlug: title!,
@@ -499,7 +568,7 @@ export function renderWorkflowProgress(progress: WorkflowProgressDocument): stri
         HISTORY_HEADER,
         HISTORY_SEPARATOR,
         ...progress.history.map((entry) =>
-          `| ${entry.sequence} | ${entry.flow} | ${entry.targetRole} | ${escapeCell(entry.evidence)} | ${entry.overrideAuthorizationId ?? "none"} | ${entry.confirmedAt ?? "none"} |`
+          `| ${entry.sequence} | ${entry.flow} | ${entry.targetRole} | ${escapeCell(entry.evidence)} | ${entry.overrideAuthorizationId ?? "none"} | ${entry.followUpApprovalId ?? "none"} | ${entry.confirmedAt ?? "none"} |`
         )
       ].join("\n");
   const proposal = progress.proposal;
@@ -523,6 +592,10 @@ Evidence: ${proposal?.evidence ?? "none"}
 
 Authorization Text: ${proposal?.authorizationText ?? "none"}
 Violated Rule: ${proposal?.violatedRule ?? "none"}
+
+## User-Approved Follow-Up
+
+Approval Text: ${proposal?.followUpApprovalText ?? "none"}
 `;
 }
 
@@ -545,6 +618,38 @@ async function evaluateTransition(
     allowedTransitions,
     blockedHint: await describeBlockedCheckpoint(fs, input, state, current)
   };
+}
+
+async function canRouteUserApprovedFollowUp(
+  fs: FileSystemAdapter,
+  input: WorkflowControlContext,
+  state: WorkflowControlState,
+  current: WorkflowProgressDocument,
+  effectiveFlow: WorkflowFlow,
+  targetRole: DispatchableRole,
+  allowedTransitions: string[]
+): Promise<boolean> {
+  if (targetRole !== "tester"
+    || current.status !== "active"
+    || current.flow !== effectiveFlow
+    || (effectiveFlow !== "code-change"
+      && effectiveFlow !== "architect-debug"
+      && effectiveFlow !== "architecture-diagnosis")) return false;
+  const active = state.activeDispatch;
+  if (!active || active.flow !== effectiveFlow || active.targetRole !== "tester") return false;
+  const test = await artifactState(fs, input, "test-report.md", "test-report");
+  if (test.value !== "pass" || !evidenceIsFresh(state, effectiveFlow, "tester", "test-report.md", test.hash)) {
+    return false;
+  }
+  const validation = await gateState(fs, input, "validation-adequacy");
+  const codeDiff = await gateState(fs, input, "code-diff");
+  if (!gatePassedForDispatch(state, effectiveFlow, "tester", "validation-adequacy", validation)
+    || !gatePassedForDispatch(state, effectiveFlow, "tester", "code-diff", codeDiff)) return false;
+  const flowRun = resolveFlowRun(state.flowRun, current);
+  const expectedExit = flowRun.activeBranch === effectiveFlow
+    ? `${flowRun.rootFlow}/architect`
+    : `${effectiveFlow}/architect`;
+  return allowedTransitions.length === 1 && allowedTransitions[0] === expectedExit;
 }
 
 async function getAllowedTransitions(
@@ -588,6 +693,8 @@ async function getAllowedTransitions(
     if (!gatePassedForDispatch(state, flow, "tester", "validation-adequacy", validationGate)) return [];
     return [];
   }
+  const coderDocsCorrection = await allowedActiveCoderDocsCorrection(fs, input, state, flow);
+  if (coderDocsCorrection) return coderDocsCorrection;
   const segment = activeFlowSegment(current.history, flow, flowRun.startedAtSequence);
   if (flow === "code-change") {
     return allowedCodeChange(fs, input, state, segment, flowRun.resumedFromBranch);
@@ -754,14 +861,40 @@ async function allowedPostImplementationArchitect(
   if (flow === "code-change" && architectEntries.length > 1 && acceptance.value === "needs-architect-follow-up") {
     return allowedArchitectureFollowup(fs, input, state, architectEntries[1]?.confirmedAt);
   }
-  if (evidenceIsFresh(state, flow, "architect", "docs-sync-report.md", docs.hash)
-    && (docs.value === "synced" || docs.value === "unchanged")) {
-    if (acceptance.value === "needs-coder-follow-up" && flow === "code-change") return ["code-change/coder"];
-    if (acceptance.value === "needs-docs-sync") return [`${flow}/architect`];
-    if (acceptance.value === "needs-architect-follow-up") return [`${flow}/architect`];
-    return [];
+  if (evidenceIsFresh(state, flow, "architect", "docs-sync-report.md", docs.hash) && docs.complete) {
+    if (docs.value === "synced" || docs.value === "unchanged") {
+      if (acceptance.value === "needs-coder-follow-up" && flow === "code-change") return ["code-change/coder"];
+      if (acceptance.value === "needs-docs-sync") return [`${flow}/architect`];
+      if (acceptance.value === "needs-architect-follow-up") return [`${flow}/architect`];
+      return [];
+    }
+    if (docs.value === "blocked" && docs.correctionOwner && docs.correctionOwner !== "none") {
+      return [`${flow}/${docs.correctionOwner}`];
+    }
   }
   return [`${flow}/architect`];
+}
+
+async function allowedActiveCoderDocsCorrection(
+  fs: FileSystemAdapter,
+  input: WorkflowControlContext,
+  state: WorkflowControlState,
+  flow: "code-change" | "architect-debug" | "architecture-diagnosis"
+): Promise<string[] | undefined> {
+  const active = state.activeDispatch;
+  if (!active || active.flow !== flow || active.targetRole !== "coder") return undefined;
+  const docs = await artifactState(fs, input, "docs-sync-report.md", "docs-sync-report");
+  if (!docs.complete
+    || docs.value !== "blocked"
+    || docs.correctionOwner !== "coder"
+    || active.artifactHashes["docs-sync-report.md"] !== docs.hash) return undefined;
+  const coder = await artifactState(fs, input, "coder-completion.md", "coder-completion");
+  if (!evidenceIsFresh(state, flow, "coder", "coder-completion.md", coder.hash)
+    || coder.value === "incomplete") return [`${flow}/coder`];
+  if (coder.value === "ready_for_review") return [`${flow}/tester`];
+  if (flow === "code-change") return ["architect-debug/architect"];
+  if (flow === "architect-debug") return ["architecture-diagnosis/architect"];
+  return [];
 }
 
 async function allowedAfterTester(
@@ -808,7 +941,14 @@ async function artifactState(
   input: WorkflowControlContext,
   fileName: string,
   kind: Parameters<typeof checkMarkdownArtifact>[0]
-): Promise<{ complete: boolean; hash: string; value?: string; infrastructure?: string; disposition?: string }> {
+): Promise<{
+  complete: boolean;
+  hash: string;
+  value?: string;
+  infrastructure?: string;
+  disposition?: string;
+  correctionOwner?: DispatchableRole | "none";
+}> {
   const relative = path.posix.join(input.handoffDir, fileName);
   const absolute = resolveRepoPath(input.taskRepoRoot, relative);
   if (!(await fs.pathExists(absolute))) return { complete: false, hash: MISSING_EVIDENCE_HASH };
@@ -830,12 +970,18 @@ async function artifactState(
   const disposition = kind === "architect-debug" || kind === "architecture-diagnosis"
     ? readArtifactSectionContent(content, "Final Disposition")?.trim().toLowerCase()
     : undefined;
+  const correctionOwner = kind === "docs-sync-report"
+    ? readArtifactSectionContent(content, "Correction Owner")?.trim().toLowerCase()
+    : undefined;
   return {
     complete: check.status === "ok",
     hash: contentHash(content),
     value,
     infrastructure,
-    disposition
+    disposition,
+    correctionOwner: correctionOwner === "none" || asTargetRole(correctionOwner)
+      ? correctionOwner as DispatchableRole | "none"
+      : undefined
   };
 }
 
@@ -1199,6 +1345,30 @@ function createUserAuthorization(
   };
 }
 
+function createUserApprovedFollowUp(
+  approvalId: string,
+  current: WorkflowProgressDocument,
+  candidate: WorkflowProgressDocument,
+  effectiveFlow: WorkflowFlow,
+  baseHistoryHash: string,
+  approvalText: string,
+  timestamp: string
+): WorkflowUserApprovedFollowUp {
+  return {
+    id: approvalId,
+    status: "accepted",
+    role: "project-manager",
+    operation: "post-validation-follow-up",
+    baseRevision: current.revision,
+    baseHistoryHash,
+    effectiveFlow: effectiveFlow as WorkflowUserApprovedFollowUp["effectiveFlow"],
+    targetRole: "tester",
+    evidence: candidate.proposal!.evidence,
+    approvalText,
+    createdAt: timestamp
+  };
+}
+
 async function readProgress(fs: FileSystemAdapter, input: WorkflowControlContext): Promise<WorkflowProgressDocument> {
   const target = progressPath(input);
   if (!(await fs.pathExists(target))) return parseWorkflowProgress(renderWorkflowProgressTemplate(input.taskSlug), input.taskSlug);
@@ -1225,7 +1395,8 @@ async function ensureProgressFile(
 function parseHistory(value: string | undefined, errors: string[]): WorkflowDispatchHistoryEntry[] {
   if (!value || value.trim() === "none") return [];
   const lines = value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  if (lines[0] !== HISTORY_HEADER || lines[1] !== HISTORY_SEPARATOR) {
+  const legacy = lines[0] === LEGACY_HISTORY_HEADER && lines[1] === LEGACY_HISTORY_SEPARATOR;
+  if (!legacy && (lines[0] !== HISTORY_HEADER || lines[1] !== HISTORY_SEPARATOR)) {
     errors.push("Dispatch History must use the exact VCM table header.");
     return [];
   }
@@ -1234,8 +1405,9 @@ function parseHistory(value: string | undefined, errors: string[]): WorkflowDisp
     const cells = line.startsWith("|") && line.endsWith("|")
       ? line.slice(1, -1).split("|").map((cell) => cell.trim())
       : [];
-    if (cells.length !== 6) {
-      errors.push("Every Dispatch History row must contain exactly six columns.");
+    const expectedColumns = legacy ? 6 : 7;
+    if (cells.length !== expectedColumns) {
+      errors.push(`Every Dispatch History row must contain exactly ${expectedColumns} columns.`);
       continue;
     }
     const sequence = Number(cells[0]);
@@ -1251,7 +1423,8 @@ function parseHistory(value: string | undefined, errors: string[]): WorkflowDisp
       targetRole,
       evidence: cells[3],
       overrideAuthorizationId: cells[4] === "none" ? undefined : cells[4],
-      confirmedAt: cells[5] === "none" ? undefined : cells[5]
+      followUpApprovalId: legacy || cells[5] === "none" ? undefined : cells[5],
+      confirmedAt: cells[legacy ? 5 : 6] === "none" ? undefined : cells[legacy ? 5 : 6]
     });
   }
   return entries;
@@ -1270,6 +1443,11 @@ function normalizeState(value: unknown, taskSlug: string, timestamp: string): Wo
     : value.userAuthorizations === undefined && Array.isArray(value.overrideRequests)
       ? []
     : undefined;
+  const userApprovedFollowUps = value.userApprovedFollowUps === undefined
+    ? []
+    : Array.isArray(value.userApprovedFollowUps) && value.userApprovedFollowUps.every(isUserApprovedFollowUp)
+      ? value.userApprovedFollowUps
+      : undefined;
   const activeDispatch = value.activeDispatch === undefined || value.activeDispatch === null
     ? null
     : normalizeDispatchEvidenceBaseline(value.activeDispatch);
@@ -1284,6 +1462,7 @@ function normalizeState(value: unknown, taskSlug: string, timestamp: string): Wo
     || activeDispatch === undefined
     || flowRun === undefined
     || userAuthorizations === undefined
+    || userApprovedFollowUps === undefined
     || awaitingUser === undefined
   ) {
     return { ...emptyState(taskSlug, timestamp), warnings: ["Workflow control state has an unsupported shape."] };
@@ -1296,6 +1475,7 @@ function normalizeState(value: unknown, taskSlug: string, timestamp: string): Wo
     activeDispatch,
     flowRun,
     userAuthorizations,
+    userApprovedFollowUps,
     warnings: [],
     updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : timestamp
   };
@@ -1310,6 +1490,7 @@ function emptyState(taskSlug: string, timestamp: string): WorkflowControlState {
     activeDispatch: null,
     flowRun: null,
     userAuthorizations: [],
+    userApprovedFollowUps: [],
     warnings: [],
     updatedAt: timestamp
   };
@@ -1426,6 +1607,7 @@ function isPendingDispatch(value: unknown): value is WorkflowPendingDispatch {
     && typeof value.evidence === "string"
     && typeof value.expectedRoutePath === "string"
     && (value.overrideAuthorizationId === undefined || typeof value.overrideAuthorizationId === "string")
+    && (value.followUpApprovalId === undefined || typeof value.followUpApprovalId === "string")
     && (value.status === "pending" || value.status === "dispatching")
     && (value.routeContentHash === undefined || typeof value.routeContentHash === "string")
     && (value.messageId === undefined || typeof value.messageId === "string")
@@ -1447,6 +1629,24 @@ function isUserAuthorization(value: unknown): value is WorkflowUserAuthorization
     && typeof value.evidence === "string"
     && typeof value.violatedRule === "string"
     && typeof value.authorizationText === "string"
+    && typeof value.createdAt === "string"
+    && (value.consumedAt === undefined || typeof value.consumedAt === "string");
+}
+
+function isUserApprovedFollowUp(value: unknown): value is WorkflowUserApprovedFollowUp {
+  if (!isRecord(value)) return false;
+  return typeof value.id === "string"
+    && (value.status === "accepted" || value.status === "consumed")
+    && value.role === "project-manager"
+    && value.operation === "post-validation-follow-up"
+    && Number.isInteger(value.baseRevision)
+    && typeof value.baseHistoryHash === "string"
+    && (value.effectiveFlow === "code-change"
+      || value.effectiveFlow === "architect-debug"
+      || value.effectiveFlow === "architecture-diagnosis")
+    && value.targetRole === "tester"
+    && typeof value.evidence === "string"
+    && typeof value.approvalText === "string"
     && typeof value.createdAt === "string"
     && (value.consumedAt === undefined || typeof value.consumedAt === "string");
 }

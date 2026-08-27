@@ -207,7 +207,9 @@ describe("createHarnessService", () => {
     expect(architectAgent).toContain("commit all Diagnosis implementation changes before reporting");
     expect(architectAgent).toContain("Do not write it for Docs-Only Flow or a Debug/Diagnosis Branch");
     expect(architectAgent).toContain("In Docs-Only Flow, submit the complete `.ai/vcm/handoffs/docs-update-report.md`");
-    expect(architectAgent).toContain("`Decision` must be `synced`, `unchanged`, or `blocked`");
+    expect(architectAgent).toContain("`Decision: synced` or `unchanged` requires `Correction Owner: none`");
+    expect(projectManagerAgent).toContain("**User-Approved Post-Validation Work:**");
+    expect(projectManagerAgent).toContain("Submit the user's exact approval through `User-Approved Follow-Up`");
     const testerAgent = await fs.readText("/repo/.claude/agents/tester.md");
     expect(frontmatterOf(testerAgent)).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Skill");
     expect(testerAgent).toContain("Own L2/L3/L4 final-validation design, execution, and acceptance evidence");

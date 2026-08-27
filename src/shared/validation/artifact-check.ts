@@ -8,6 +8,7 @@ import {
   ARCHITECTURE_PLAN_RESULTS,
   CODER_COMPLETION_DECISIONS,
   DOCS_REPORT_DECISIONS,
+  DOCS_SYNC_CORRECTION_OWNERS,
   FINAL_ACCEPTANCE_DECISIONS,
   L3_ACTIONS,
   L3_REQUIRED_VALUES,
@@ -403,8 +404,49 @@ function validateArtifactFields(
     return invalidFields;
   }
 
-  if (kind === "docs-update-report" || kind === "docs-sync-report") {
+  if (kind === "docs-update-report") {
     return validateDecision(content, DOCS_REPORT_DECISIONS);
+  }
+
+  if (kind === "docs-sync-report") {
+    const invalidFields = validateDecision(content, DOCS_REPORT_DECISIONS);
+    const decision = readArtifactSectionContent(content, "Decision")?.trim().toLowerCase();
+    const owner = readArtifactSectionContent(content, "Correction Owner")?.trim().toLowerCase();
+    const evidence = readArtifactSectionContent(content, "Correction Evidence");
+    if (!isAllowedValue(owner, DOCS_SYNC_CORRECTION_OWNERS)) {
+      invalidFields.push(renderExactSectionError(
+        "Correction Owner",
+        DOCS_SYNC_CORRECTION_OWNERS.join("|"),
+        owner
+      ));
+    }
+    if (decision === "synced" || decision === "unchanged") {
+      if (owner !== "none") {
+        invalidFields.push(renderExactSectionError(
+          "Correction Owner",
+          "none",
+          owner,
+          `when Decision is ${decision}`
+        ));
+      }
+      if (!isExactNone(evidence)) {
+        invalidFields.push(renderExactSectionError(
+          "Correction Evidence",
+          STRICT_NONE_VALUE,
+          evidence,
+          `when Decision is ${decision}`
+        ));
+      }
+    }
+    if (decision === "blocked") {
+      if (!owner || owner === "none") {
+        invalidFields.push("Correction Owner must be architect, coder, or tester when Decision is blocked.");
+      }
+      if (!hasSubstantiveSectionValue(evidence)) {
+        invalidFields.push("Correction Evidence must identify the unresolved documentation correction when Decision is blocked.");
+      }
+    }
+    return invalidFields;
   }
 
   if (kind === "final-acceptance") {

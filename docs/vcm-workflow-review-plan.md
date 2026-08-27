@@ -48,6 +48,10 @@ Evidence: <real artifact or accepted user request>
 
 Authorization Text: none
 Violated Rule: none
+
+## User-Approved Follow-Up
+
+Approval Text: none
 ```
 
 For every proposal, Project Manager must copy the accepted Flow, Status, and
@@ -113,6 +117,12 @@ does not restart the active flow run. A return from a Debug or Diagnosis Branch
 retains the parent run and its completed implementation history; a switch to an
 independent flow starts a fresh run.
 
+User-approved post-validation work is a separate one-time record. It permits
+only a Tester dispatch after a fresh passing Test Report and successful
+Validation Adequacy and Code Diff Gates. It carries the user's exact approval,
+does not create a workflow override, and makes the prior Test Report and Gate
+results stale when consumed.
+
 ## Supported Flows
 
 ### Code Change
@@ -137,7 +147,9 @@ Allowed branches include:
 - Tester infrastructure repair or validation-only findings return to Tester
 - other Tester failures enter Architect Debug
 - Code Diff test-only findings return to Tester
+- explicit user-approved Tester-owned work after both green Gates returns to Tester
 - implementation findings enter Architect Debug
+- blocked docs sync routes its exact Architect, Coder, or Tester correction owner, then repeats invalidated validation and Gates before docs sync
 - Final Acceptance follow-up returns to the responsible Coder or Architect path
 
 An Architect follow-up from Final Acceptance must produce a fresh complete plan
@@ -195,8 +207,9 @@ to Code Change at Architect.
 ## Completion
 
 Project Manager completes the active flow by submitting a new Workflow Progress
-revision with `Status: completed` and every proposal and override field set to
-`none`. VCM checks the required accepted artifact:
+revision with `Status: completed` and every proposal, override, and
+user-approved follow-up field set to `none`. VCM checks the required accepted
+artifact:
 
 - Code Change and standalone Architect Debug require accepted Final Acceptance.
 - Implemented Architecture Diagnosis requires accepted Final Acceptance;
@@ -235,6 +248,8 @@ Unit and backend E2E coverage verifies:
 - completed-flow restarts, same-flow restarts, top-level switches, nested Debug
   and Diagnosis branches, and parent-flow restoration
 - one-time exact user override binding
+- one-time user-approved post-validation Tester work without an override, with stale Gate rejection afterward
+- strict docs-sync correction owner/evidence and owner-specific return paths
 - route denial without approval and target mismatch rejection
 - claim before terminal submission, release on failure, and confirmation only
   from the matching target `UserPromptSubmit`

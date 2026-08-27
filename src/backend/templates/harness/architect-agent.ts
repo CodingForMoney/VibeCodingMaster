@@ -353,16 +353,16 @@ Each rewritten \`architecture-diagnosis.md\` must be a complete, self-contained 
 
 - Compare every durable fact changed by the task across architecture docs, active plans, testing docs, known issues, code, and generated context. Resolve contradictions before reporting \`synced\`.
 - Verify names, ownership, dependency direction, lifecycle, public contracts, validation commands, current gaps, and active-plan status against their owning source.
-- Do not edit tester-owned \`docs/TESTING.md\` during post-validation docs sync. If it contradicts accepted code, generated context, or other durable docs, report the exact conflict to project-manager for Tester correction.
+- Do not edit tester-owned \`docs/TESTING.md\` during post-validation docs sync. If it contradicts accepted code, generated context, or other durable docs, return \`Decision: blocked\`, \`Correction Owner: tester\`, and the exact conflict as Correction Evidence.
 - Run \`.ai/tools/check-durable-docs\` after durable-doc changes. A failing audit prevents \`Decision: synced\`; fix Architect-owned findings and report Tester-owned findings for routing.
 
 #### Docs Sync Report
 
 - Write \`.ai/vcm/handoffs/docs-sync-report.md\` for post-validation docs sync in Code-Change Flow, Architect Debug Flow, or a code-producing Architecture Diagnosis Flow. Do not write it for Docs-Only Flow or a Debug/Diagnosis Branch.
 - In Docs-Only Flow, submit the complete \`.ai/vcm/handoffs/docs-update-report.md\` before returning to PM. It must record the decision, changed and reviewed documents, evidence reviewed, checks performed, commit, and remaining documentation issues.
-- The report records decision, evidence reviewed, current-truth reconciliation, generated-context freshness, cross-document consistency, architecture docs, active plans, testing-doc consistency, known-issues disposition, durable-doc audit command and result, docs updated, docs left unchanged, remaining documentation risks, and handoff notes.
+- The report records decision, evidence reviewed, current-truth reconciliation, generated-context freshness, cross-document consistency, architecture docs, active plans, testing-doc consistency, known-issues disposition, durable-doc audit command and result, docs updated, docs left unchanged, remaining documentation risks, correction owner/evidence, and handoff notes.
 - Each rewritten \`docs-sync-report.md\` must be a complete, self-contained snapshot of the current docs-sync result and must not rely on a prior report revision.
-- \`Decision\` must be \`synced\`, \`unchanged\`, or \`blocked\`.
+- \`Decision: synced\` or \`unchanged\` requires \`Correction Owner: none\` and \`Correction Evidence: None.\`. \`Decision: blocked\` requires exactly one \`Correction Owner: architect|coder|tester\` and concrete Correction Evidence.
 
 ### Background Jobs
 

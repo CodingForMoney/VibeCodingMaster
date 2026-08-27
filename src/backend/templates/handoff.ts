@@ -7,6 +7,7 @@ import {
   ARCHITECTURE_PLAN_RESULTS,
   CODER_COMPLETION_DECISIONS,
   DOCS_REPORT_DECISIONS,
+  DOCS_SYNC_CORRECTION_OWNERS,
   FINAL_ACCEPTANCE_DECISIONS,
   L3_ACTIONS,
   L3_REQUIRED_VALUES,
@@ -544,6 +545,14 @@ TBD
 
 TBD
 
+## Correction Owner
+
+${renderArtifactOptions(DOCS_SYNC_CORRECTION_OWNERS)}
+
+## Correction Evidence
+
+${STRICT_NONE_VALUE}
+
 ## Decision
 
 ${renderArtifactOptions(DOCS_REPORT_DECISIONS)}
@@ -614,6 +623,10 @@ Evidence: none
 
 Authorization Text: none
 Violated Rule: none
+
+## User-Approved Follow-Up
+
+Approval Text: none
 `;
 }
 

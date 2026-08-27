@@ -310,10 +310,38 @@ None.
 ## Known Issues Disposition
 No task issues to promote.
 
+## Correction Owner
+none
+
+## Correction Evidence
+None.
+
 ## Decision
 unchanged
 `);
     expect(result.status).toBe("ok");
+  });
+
+  it("requires blocked docs sync to identify one correction owner and concrete evidence", () => {
+    const content = completeTemplate("docs-sync-report", renderDocsSyncReportTemplate("demo"))
+      .replace("## Correction Owner\n\nnone", "## Correction Owner\n\ntester")
+      .replace("## Correction Evidence\n\nNone.", "## Correction Evidence\n\ndocs/TESTING.md records the wrong command.")
+      .replace("## Decision\n\nunchanged", "## Decision\n\nblocked");
+    const result = checkMarkdownArtifact("docs-sync-report", "docs-sync-report.md", content);
+
+    expect(result.status).toBe("ok");
+  });
+
+  it("rejects a correction owner on a green docs sync result", () => {
+    const content = completeTemplate("docs-sync-report", renderDocsSyncReportTemplate("demo"))
+      .replace("## Correction Owner\n\nnone", "## Correction Owner\n\ntester")
+      .replace("## Correction Evidence\n\nNone.", "## Correction Evidence\n\ndocs/TESTING.md needs correction.");
+    const result = checkMarkdownArtifact("docs-sync-report", "docs-sync-report.md", content);
+
+    expect(result.status).toBe("incomplete");
+    expect(result.invalidFields).toContain(
+      "Correction Owner must contain exactly \"none\" when Decision is unchanged; found \"tester\"."
+    );
   });
 
   it("supports final acceptance reports", () => {
@@ -715,6 +743,9 @@ looks-good
     expect(renderDocsSyncReportTemplate("demo")).toContain(
       "## Decision\n\nsynced|unchanged|blocked"
     );
+    expect(renderDocsSyncReportTemplate("demo")).toContain(
+      "## Correction Owner\n\nnone|architect|coder|tester"
+    );
     expect(renderDocsUpdateReportTemplate("demo")).toContain(
       "## Decision\n\nsynced|unchanged|blocked"
     );
@@ -799,7 +830,12 @@ function completeTemplate(
       "Planning Result: complete"
     );
   }
-  if (kind === "docs-update-report" || kind === "docs-sync-report") {
+  if (kind === "docs-sync-report") {
+    return completed
+      .replace("none|architect|coder|tester", "none")
+      .replace("synced|unchanged|blocked", "unchanged");
+  }
+  if (kind === "docs-update-report") {
     return completed.replace("synced|unchanged|blocked", "unchanged");
   }
   return completed;

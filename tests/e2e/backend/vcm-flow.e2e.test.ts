@@ -2,7 +2,13 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { parseWorkflowProgress, renderWorkflowProgress } from "../../../src/backend/services/workflow-control-service.js";
-import { renderDocsUpdateReportTemplate } from "../../../src/backend/templates/handoff.js";
+import {
+  renderArchitecturePlanTemplate,
+  renderCoderCompletionTemplate,
+  renderDocsUpdateReportTemplate,
+  renderTestReportTemplate
+} from "../../../src/backend/templates/handoff.js";
+import type { DispatchableRole } from "../../../src/shared/types/role.js";
 import { createMockClaudeE2eApp } from "./helpers/e2e-app.js";
 import { createE2eRepo, git } from "./helpers/e2e-repo.js";
 import {
@@ -73,6 +79,10 @@ describe("backend E2E with mock Claude Code", () => {
       "",
       "Authorization Text: none",
       "Violated Rule: none",
+      "",
+      "## User-Approved Follow-Up",
+      "",
+      "Approval Text: none",
       ""
     ].join("\n");
     const approval = await env.app.inject({
@@ -358,6 +368,10 @@ describe("backend E2E with mock Claude Code", () => {
       "",
       "Authorization Text: none",
       "Violated Rule: none",
+      "",
+      "## User-Approved Follow-Up",
+      "",
+      "Approval Text: none",
       ""
     ].join("\n");
     const approval = await env.app.inject({
@@ -437,6 +451,131 @@ describe("backend E2E with mock Claude Code", () => {
         targetRole: "tester"
       }
     });
+  });
+
+  it("accepts one explicit Tester follow-up after green Gates and invalidates the old evidence", async () => {
+    const env = await createMockClaudeE2eApp({ workflowControl: true });
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "post-validation-follow-up");
+    const pm = await startRole(env.app, task.taskSlug, "project-manager");
+    const service = env.deps.workflowControlService!;
+    const context = {
+      taskRepoRoot: task.worktreePath,
+      stateRoot: ".ai/vcm",
+      handoffDir: ".ai/vcm/handoffs",
+      taskSlug: task.taskSlug
+    };
+
+    await advanceWorkflow(service, context, "architect", "code-change", "accepted code change");
+    await fs.writeFile(
+      path.join(task.worktreePath, context.handoffDir, "architecture-plan.md"),
+      completeWorkflowArtifact(renderArchitecturePlanTemplate(task.taskSlug), [
+        ["Planning Result: complete|incomplete|user clarification required", "Planning Result: complete"]
+      ]),
+      "utf8"
+    );
+    await writeWorkflowGateIndex(task.worktreePath, { architecture: "approve" }, "2026-08-20T00:00:10.000Z");
+    await advanceWorkflow(service, context, "coder", undefined, "approved architecture plan");
+    await fs.writeFile(
+      path.join(task.worktreePath, context.handoffDir, "coder-completion.md"),
+      completeWorkflowArtifact(renderCoderCompletionTemplate(task.taskSlug), [
+        ["Decision: ready_for_review|incomplete|failed", "Decision: ready_for_review"]
+      ]),
+      "utf8"
+    );
+    await advanceWorkflow(service, context, "tester", undefined, "completed implementation");
+    await fs.writeFile(
+      path.join(task.worktreePath, context.handoffDir, "test-report.md"),
+      completeWorkflowArtifact(renderTestReportTemplate(task.taskSlug), [
+        ["Test Result: pass|fail|incomplete", "Test Result: pass"],
+        ["L3 Required: yes|no", "L3 Required: no"],
+        ["Status: none|repair-required|repaired|production-change-required", "Status: none"]
+      ]),
+      "utf8"
+    );
+    await writeWorkflowGateIndex(task.worktreePath, {
+      architecture: "approve",
+      validation: "approve",
+      codeDiff: "approve"
+    }, "2026-08-20T00:00:20.000Z");
+
+    const current = parseWorkflowProgress(await fs.readFile(
+      path.join(task.worktreePath, context.handoffDir, "workflow-progress.md"),
+      "utf8"
+    ), task.taskSlug);
+    const withoutApproval = await env.app.inject({
+      method: "POST",
+      url: `/api/tasks/${task.taskSlug}/artifacts/submit`,
+      payload: {
+        kind: "workflow-progress",
+        mode: "final",
+        role: "project-manager",
+        runtimeSessionToken: pm.runtimeSessionToken,
+        content: renderWorkflowProgress({
+          ...current,
+          revision: current.revision + 1,
+          proposal: {
+            targetRole: "tester",
+            evidence: "add the approved regression coverage"
+          }
+        })
+      }
+    });
+    expect(withoutApproval.statusCode, withoutApproval.body).toBe(422);
+
+    const approved = await env.app.inject({
+      method: "POST",
+      url: `/api/tasks/${task.taskSlug}/artifacts/submit`,
+      payload: {
+        kind: "workflow-progress",
+        mode: "final",
+        role: "project-manager",
+        runtimeSessionToken: pm.runtimeSessionToken,
+        content: renderWorkflowProgress({
+          ...current,
+          revision: current.revision + 1,
+          proposal: {
+            targetRole: "tester",
+            evidence: "add the approved regression coverage",
+            followUpApprovalText: "Add this regression coverage before completing the task."
+          }
+        })
+      }
+    });
+    expect(approved.statusCode, approved.body).toBe(200);
+    expect((await service.getState(context)).pendingDispatch).toMatchObject({
+      targetRole: "tester",
+      followUpApprovalId: expect.any(String)
+    });
+
+    await service.claimDispatch({
+      ...context,
+      routePath: ".ai/vcm/handoffs/messages/project-manager-tester.md",
+      targetRole: "tester",
+      routeContentHash: "follow-up-route",
+      messageId: "follow-up-message"
+    });
+    await service.confirmDispatch(context, "follow-up-message");
+    expect(await service.getState(context)).toMatchObject({
+      pendingDispatch: null,
+      userAuthorizations: [],
+      userApprovedFollowUps: [expect.objectContaining({ status: "consumed" })]
+    });
+
+    const afterFollowUp = parseWorkflowProgress(await fs.readFile(
+      path.join(task.worktreePath, context.handoffDir, "workflow-progress.md"),
+      "utf8"
+    ), task.taskSlug);
+    await expect(service.submitProgress(context, renderWorkflowProgress({
+      ...afterFollowUp,
+      revision: afterFollowUp.revision + 1,
+      proposal: {
+        targetRole: "architect",
+        evidence: "attempt to reuse old validation evidence"
+      }
+    }))).rejects.toMatchObject({ code: "WORKFLOW_TRANSITION_DENIED" });
   });
 
   it("retries a retryable StopFailure by sending a recovery prompt to the same role session", async () => {
@@ -616,4 +755,71 @@ function completeDocsUpdateReport(taskSlug: string, decision: "synced" | "unchan
   return renderDocsUpdateReportTemplate(taskSlug)
     .replaceAll("TBD", "Verified documentation-only task evidence.")
     .replace("synced|unchanged|blocked", decision);
+}
+
+async function advanceWorkflow(
+  service: NonNullable<Awaited<ReturnType<typeof createMockClaudeE2eApp>>["deps"]["workflowControlService"]>,
+  context: { taskRepoRoot: string; stateRoot: string; handoffDir: string; taskSlug: string },
+  targetRole: DispatchableRole,
+  requestedFlow: "code-change" | undefined,
+  evidence: string
+): Promise<void> {
+  const progressPath = path.join(context.taskRepoRoot, context.handoffDir, "workflow-progress.md");
+  const current = parseWorkflowProgress(await fs.readFile(progressPath, "utf8"), context.taskSlug);
+  await service.submitProgress(context, renderWorkflowProgress({
+    ...current,
+    revision: current.revision + 1,
+    proposal: { targetRole, requestedFlow, evidence }
+  }));
+  const messageId = `workflow-message-${current.revision + 1}`;
+  await service.claimDispatch({
+    ...context,
+    routePath: `.ai/vcm/handoffs/messages/project-manager-${targetRole}.md`,
+    targetRole,
+    routeContentHash: `workflow-route-${current.revision + 1}`,
+    messageId
+  });
+  await service.confirmDispatch(context, messageId);
+}
+
+function completeWorkflowArtifact(template: string, replacements: Array<[string, string]>): string {
+  return replacements.reduce((content, [from, to]) => content.replace(from, to), template)
+    .replaceAll("TBD", "Verified E2E workflow evidence.");
+}
+
+async function writeWorkflowGateIndex(
+  taskRepoRoot: string,
+  decisions: {
+    architecture?: "approve";
+    validation?: "approve";
+    codeDiff?: "approve";
+  },
+  updatedAt: string
+): Promise<void> {
+  const record = (gate: "architecture-plan" | "validation-adequacy" | "code-diff", decision?: "approve") => ({
+    gate,
+    required: true,
+    status: decision ? "completed" : "pending",
+    decision,
+    requestId: decision ? `request-${gate}-${updatedAt}` : undefined,
+    inputHash: decision ? `input-${gate}-${updatedAt}` : undefined,
+    codeDiffSource: gate === "code-diff" && decision ? "coder" : undefined,
+    reportPath: `.ai/vcm/gate-reviews/${gate}-review.md`,
+    promptPath: `.ai/vcm/gate-reviews/${gate}-prompt.md`,
+    completedAt: decision ? updatedAt : undefined,
+    updatedAt
+  });
+  const gateDir = path.join(taskRepoRoot, ".ai/vcm/gate-reviews");
+  await fs.mkdir(gateDir, { recursive: true });
+  await fs.writeFile(path.join(gateDir, "index.json"), JSON.stringify({
+    version: 1,
+    enabled: true,
+    activeGate: null,
+    gates: {
+      "architecture-plan": record("architecture-plan", decisions.architecture),
+      "validation-adequacy": record("validation-adequacy", decisions.validation),
+      "code-diff": record("code-diff", decisions.codeDiff)
+    },
+    updatedAt
+  }, null, 2) + "\n", "utf8");
 }

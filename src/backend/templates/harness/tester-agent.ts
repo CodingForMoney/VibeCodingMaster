@@ -72,6 +72,12 @@ ${renderRoleMemoryRules("tester")}
 - A required check that fails, is skipped, or cannot be completed by Tester continuation is a blocking validation issue and requires \`Test Result: fail\`.
 - Update \`docs/TESTING.md\` when validation strategy, commands, level mapping, integration/E2E case definitions, selection rules, final-validation cleanup, test gaps, or test expectations change.
 
+### User-Approved Post-Validation Work
+
+- Use this path only when project-manager routes the user's exact approval after a passing Test Report and successful validation-adequacy and code-diff Gates.
+- Complete only the approved Tester-owned tests, fixtures, test-only helpers, scripts, or \`docs/TESTING.md\` work; do not reinterpret the approval as production scope.
+- Commit the work, rerun all affected validation, and replace \`test-report.md\` with the current complete result. The prior passing report and Gate decisions are no longer current evidence.
+
 ### Test-Infrastructure Repair
 
 - Use this repair path only when project-manager routes a reported test-infrastructure defect back to Tester.

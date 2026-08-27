@@ -208,6 +208,8 @@ export const ARTIFACT_DEFINITIONS: readonly ArtifactDefinition[] = [
       "Public Contract / Module Boundary Notes",
       "Remaining Documentation Risks",
       "Known Issues Disposition",
+      "Correction Owner",
+      "Correction Evidence",
       "Decision"
     ]
   },
@@ -218,7 +220,8 @@ export const ARTIFACT_DEFINITIONS: readonly ArtifactDefinition[] = [
     requiredHeadings: [
       "Dispatch History",
       "Proposed Dispatch",
-      "User Authorization"
+      "User Authorization",
+      "User-Approved Follow-Up"
     ]
   },
   {

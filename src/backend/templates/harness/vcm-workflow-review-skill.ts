@@ -28,6 +28,10 @@ Evidence: <current artifact, Gate result, or user request supporting this dispat
 
 Authorization Text: none
 Violated Rule: none
+
+## User-Approved Follow-Up
+
+Approval Text: none
 \`\`\`
 
 Use \`Requested Flow\` only to start a flow, switch a top-level flow, enter or replace a Branch, or return from a Branch. Otherwise use \`none\`.
@@ -53,8 +57,20 @@ Violated Rule: <copy the exact VCM rejection reason>
 
 VCM binds that authorization to this exact task state, flow, target role, evidence, and violated rule. It applies once and is consumed by the matching dispatch. Do not infer, broaden, or reuse authorization.
 
+## User-Approved Post-Validation Work
+
+When Tester has returned \`pass\`, validation-adequacy and code-diff are both successful, and the user explicitly approves additional Tester-owned work in the current task, propose Tester again with:
+
+\`\`\`text
+Authorization Text: none
+Violated Rule: none
+Approval Text: <user's exact approval>
+\`\`\`
+
+This is a normal one-time follow-up approval, not a Workflow Override. Do not use it before both Gates are successful, for required unresolved coverage, for another owner, or without the user's exact approval. After Tester completes the approved work, rerun Tester validation and every invalidated Gate.
+
 ## Completion
 
-When the active flow has completed without another role dispatch, increment Revision, copy the confirmed history exactly, set \`Status: completed\`, and set every Proposed Dispatch and User Authorization value to \`none\`. VCM accepts completion only when the flow's required final artifact and Gate evidence exists.
+When the active flow has completed without another role dispatch, increment Revision, copy the confirmed history exactly, set \`Status: completed\`, and set every Proposed Dispatch, User Authorization, and User-Approved Follow-Up value to \`none\`. VCM accepts completion only when the flow's required final artifact and Gate evidence exists.
 `;
 }

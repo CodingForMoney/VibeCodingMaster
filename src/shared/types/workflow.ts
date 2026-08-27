@@ -36,6 +36,7 @@ export interface WorkflowDispatchHistoryEntry {
   targetRole: DispatchableRole;
   evidence: string;
   overrideAuthorizationId?: string;
+  followUpApprovalId?: string;
   confirmedAt?: string;
 }
 
@@ -45,6 +46,7 @@ export interface WorkflowProgressProposal {
   evidence: string;
   authorizationText?: string;
   violatedRule?: string;
+  followUpApprovalText?: string;
 }
 
 export interface WorkflowProgressDocument {
@@ -65,6 +67,7 @@ export interface WorkflowPendingDispatch {
   evidence: string;
   expectedRoutePath: string;
   overrideAuthorizationId?: string;
+  followUpApprovalId?: string;
   status: "pending" | "dispatching";
   routeContentHash?: string;
   messageId?: string;
@@ -105,6 +108,21 @@ export interface WorkflowUserAuthorization {
   consumedAt?: string;
 }
 
+export interface WorkflowUserApprovedFollowUp {
+  id: string;
+  status: "accepted" | "consumed";
+  role: "project-manager";
+  operation: "post-validation-follow-up";
+  baseRevision: number;
+  baseHistoryHash: string;
+  effectiveFlow: "code-change" | "architect-debug" | "architecture-diagnosis";
+  targetRole: "tester";
+  evidence: string;
+  approvalText: string;
+  createdAt: string;
+  consumedAt?: string;
+}
+
 export interface WorkflowAwaitingUser {
   question: string;
   requestedAt: string;
@@ -118,6 +136,7 @@ export interface WorkflowControlState {
   activeDispatch: WorkflowDispatchEvidenceBaseline | null;
   flowRun: WorkflowFlowRun | null;
   userAuthorizations: WorkflowUserAuthorization[];
+  userApprovedFollowUps: WorkflowUserApprovedFollowUp[];
   warnings: string[];
   updatedAt: string;
 }

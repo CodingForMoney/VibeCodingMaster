@@ -294,7 +294,12 @@ Architect, Coder, and Tester because Docs-Only Flow assigns documentation to
 the role that owns the relevant project evidence. Auto Memory durable-document
 assignments also use this report with an exact backend-assigned Assignment ID;
 they do not enter Docs-Only Flow. `docs-sync-report.md` remains Architect-owned
-post-validation synchronization for code-producing flows.
+post-validation synchronization for code-producing flows. Its terminal
+contract is strict: `synced` and `unchanged` require no correction owner, while
+`blocked` names exactly one Architect, Coder, or Tester owner and records the
+correction evidence. Workflow Control routes that owner and requires the
+affected validation and Gate evidence to be produced again before docs sync
+can complete.
 
 The shared PreToolUse guard blocks workflow-role attempts to write managed
 workflow Markdown directly through Bash, Write, or Edit. Route messages, Coder
@@ -318,7 +323,11 @@ role's matching `UserPromptSubmit`; confirmation appends the history row and
 clears the approval. Exact user overrides are recorded by the backend and are
 bound to one rejected transition. An override changes only that transition's
 permission; flow relationships still determine whether the existing run is
-preserved or a genuinely independent flow run starts. The runtime record also
+preserved or a genuinely independent flow run starts. A separate one-time
+post-validation approval permits only explicitly approved Tester-owned work
+after a fresh passing Test Report and successful validation-adequacy and
+code-diff Gates. It is consumed by the matching Tester dispatch, invalidates
+the prior validation evidence, and is not recorded as a workflow override. The runtime record also
 identifies the current root flow, active Debug or Diagnosis branch, branch
 return, and the first dispatch of the active flow run. A branch return retains
 the parent implementation history even when the authorized return dispatch

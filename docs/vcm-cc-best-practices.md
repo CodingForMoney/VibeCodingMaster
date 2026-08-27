@@ -553,6 +553,12 @@ for the reply, and then copies the user's exact authorization into the next
 Workflow Progress submission. The authorization is bound to one revision,
 flow, target, evidence, and violated rule and can be consumed only once.
 
+After a passing Test Report and successful validation-adequacy and code-diff
+Gates, the user may approve one additional Tester-owned change in the current
+task. PM records the exact approval in `User-Approved Follow-Up`; this is a
+normal one-time Tester dispatch, not a workflow override. Tester replaces the
+test evidence, and the invalidated Gates run again.
+
 Workflow-role Markdown must be submitted through `.ai/tools/vcm-artifact`.
 Workflow roles write candidates outside `.ai/vcm`; VCM checks
 the artifact owner, required structure, strict values, lifecycle state, and
@@ -564,7 +570,9 @@ updates to managed workflow Markdown.
 
 Docs-Only Flow uses the shared `docs-update-report.md`, which Architect, Coder,
 or Tester may submit. The code-producing-flow `docs-sync-report.md` remains
-Architect-owned and is not reused for Docs-Only completion.
+Architect-owned and is not reused for Docs-Only completion. A blocked docs-sync
+report names one correction owner and concrete evidence. PM routes that owner,
+then repeats affected validation and Gates before Architect reruns docs sync.
 
 Harness Engineer is not a workflow role. It writes the assigned Task Harness
 Retrospective Result Path directly; its Stop Hook reads the report and checks

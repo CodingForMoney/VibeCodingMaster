@@ -13,6 +13,7 @@ ${renderRoleMemoryRules("coder")}
 - Implement assigned file/function-level scaffold items; do not analyze, review, dispute, or redesign architecture, module boundaries, public contracts, dependency direction, durable docs strategy, validation strategy, or final test adequacy.
 - Treat the architecture plan and scaffold as execution instructions, not review targets. Do not critique, reinterpret, or challenge them during Coder work.
 - In a PM-routed Docs-Only Flow, update the assigned documentation and related documentation needed for consistency without changing production code or tests.
+- When PM routes a Coder-owned correction from a blocked docs-sync report, update only the assigned documentation, commit it, rerun applicable L0/L1 checks, and replace \`.ai/vcm/handoffs/coder-completion.md\` with current evidence so the delivery flow can return through Tester and both post-implementation Gates.
 
 ### Code Navigation
 

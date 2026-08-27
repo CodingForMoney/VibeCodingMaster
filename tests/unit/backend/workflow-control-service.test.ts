@@ -65,6 +65,17 @@ describe("workflow control service", () => {
     expect((await service.getState(context)).pendingDispatch).toBeNull();
   });
 
+  it("reads a pre-upgrade workflow progress document without a follow-up section", () => {
+    const legacy = renderWorkflowProgress(initialProposal("architect"))
+      .replace("\n## User-Approved Follow-Up\n\nApproval Text: none\n", "\n");
+
+    expect(parseWorkflowProgress(legacy, "task-1").proposal).toMatchObject({
+      requestedFlow: "code-change",
+      targetRole: "architect",
+      evidence: "user-request"
+    });
+  });
+
   it("atomically pauses for a user question and permanently cancels the pending dispatch", async () => {
     const { context, fs } = await createContext(roots);
     const service = createWorkflowControlService({ fs, now: sequenceClock() });
@@ -281,6 +292,121 @@ describe("workflow control service", () => {
       "tester",
       "architect"
     ]);
+  });
+
+  it("records one user-approved green Tester follow-up and invalidates the previous Gates", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock(), id: () => "follow-up-1" });
+    await enterCodeChangeTester(service, fs, context);
+    await writeTestReport(fs, context, "pass");
+    await expect(advanceWithFollowUpApproval(
+      service,
+      fs,
+      context,
+      "premature approved work",
+      "Add the regression coverage in this task."
+    )).rejects.toMatchObject({ code: "WORKFLOW_FOLLOW_UP_APPROVAL_INVALID" });
+    await writeGateIndex(fs, context, {
+      architecture: "approve",
+      validation: "approve",
+      codeDiff: "approve"
+    }, "2026-08-06T00:00:30.000Z");
+
+    await expect(propose(service, fs, context, "tester", undefined, "add approved regression coverage"))
+      .rejects.toMatchObject({ code: "WORKFLOW_TRANSITION_DENIED" });
+    await advanceWithFollowUpApproval(
+      service,
+      fs,
+      context,
+      "add approved regression coverage",
+      "Add the regression coverage in this task."
+    );
+
+    const approvedState = await service.getState(context);
+    expect(approvedState.userAuthorizations).toEqual([]);
+    expect(approvedState.userApprovedFollowUps).toEqual([
+      expect.objectContaining({
+        id: "follow-up-1",
+        status: "consumed",
+        targetRole: "tester",
+        approvalText: "Add the regression coverage in this task."
+      })
+    ]);
+    expect((await readProgress(fs, context)).history.at(-1)).toMatchObject({
+      targetRole: "tester",
+      followUpApprovalId: "follow-up-1"
+    });
+
+    await writeTestReport(fs, context, "pass", "none", "approved follow-up validation");
+    await expect(propose(service, fs, context, "architect", undefined, "old Gates are stale"))
+      .rejects.toMatchObject({ code: "WORKFLOW_TRANSITION_DENIED" });
+    await writeGateIndex(fs, context, {
+      architecture: "approve",
+      validation: "approve",
+      codeDiff: "approve"
+    }, "2026-08-06T00:00:50.000Z");
+    await expect(advanceWithFollowUpApproval(
+      service,
+      fs,
+      context,
+      "repeat approved work",
+      "Add the regression coverage in this task."
+    )).rejects.toMatchObject({ code: "WORKFLOW_FOLLOW_UP_APPROVAL_REUSED" });
+    await advance(service, fs, context, "architect", undefined, "fresh validation and code-diff Gates");
+  });
+
+  it("routes a blocked docs sync to Tester and returns through validation and both Gates", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await enterCodeChangeTester(service, fs, context);
+    await writeTestReport(fs, context, "pass");
+    await writeGateIndex(fs, context, {
+      architecture: "approve",
+      validation: "approve",
+      codeDiff: "approve"
+    }, "2026-08-06T00:00:30.000Z");
+    await advance(service, fs, context, "architect", undefined, "passed validation and code-diff Gates");
+    await writeFinalArtifact(fs, context, "docs-sync-report.md", renderDocsSyncReportTemplate(context.taskSlug), [
+      ["none|architect|coder|tester", "tester"],
+      ["## Correction Evidence\n\nNone.", "## Correction Evidence\n\ndocs/TESTING.md records the wrong command."],
+      ["synced|unchanged|blocked", "blocked"]
+    ]);
+
+    await advance(service, fs, context, "tester", undefined, "correct tester-owned durable documentation");
+    await writeTestReport(fs, context, "pass", "none", "corrected documentation and rerun validation");
+    await expect(propose(service, fs, context, "architect", undefined, "old Gates are stale"))
+      .rejects.toMatchObject({ code: "WORKFLOW_TRANSITION_DENIED" });
+    await writeGateIndex(fs, context, {
+      architecture: "approve",
+      validation: "approve",
+      codeDiff: "approve"
+    }, "2026-08-06T00:00:50.000Z");
+    await advance(service, fs, context, "architect", undefined, "corrected Tester evidence passed both Gates");
+  });
+
+  it("routes a blocked docs sync to Coder before Tester revalidation", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await enterCodeChangeTester(service, fs, context);
+    await writeTestReport(fs, context, "pass");
+    await writeGateIndex(fs, context, {
+      architecture: "approve",
+      validation: "approve",
+      codeDiff: "approve"
+    }, "2026-08-06T00:00:30.000Z");
+    await advance(service, fs, context, "architect", undefined, "passed validation and code-diff Gates");
+    await writeFinalArtifact(fs, context, "docs-sync-report.md", renderDocsSyncReportTemplate(context.taskSlug), [
+      ["none|architect|coder|tester", "coder"],
+      ["## Correction Evidence\n\nNone.", "## Correction Evidence\n\nCoder-owned reference documentation is stale."],
+      ["synced|unchanged|blocked", "blocked"]
+    ]);
+
+    await advance(service, fs, context, "coder", undefined, "correct coder-owned durable documentation");
+    await writeFinalArtifact(fs, context, "coder-completion.md", renderCoderCompletionTemplate(context.taskSlug), [
+      ["Decision: ready_for_review|incomplete|failed", "Decision: ready_for_review"],
+      ["## Changed Files\n\nTBD", "## Changed Files\n\nCorrected the assigned durable documentation and reran L0/L1 checks."]
+    ]);
+    await advance(service, fs, context, "tester", undefined, "validate the Coder-owned documentation correction");
   });
 
   it("resumes Architecture Diagnosis validation after one user-authorized repair without reusing stale evidence", async () => {
@@ -1015,6 +1141,35 @@ async function advanceWithOverride(
   await service.confirmDispatch(context, messageId);
 }
 
+async function advanceWithFollowUpApproval(
+  service: WorkflowControlService,
+  fs: FileSystemAdapter,
+  context: WorkflowControlContext,
+  evidence: string,
+  approvalText: string
+): Promise<void> {
+  const current = await readProgress(fs, context);
+  const proposal: WorkflowProgressDocument = {
+    ...current,
+    revision: current.revision + 1,
+    proposal: {
+      targetRole: "tester",
+      evidence,
+      followUpApprovalText: approvalText
+    }
+  };
+  await service.submitProgress(context, renderWorkflowProgress(proposal));
+  const messageId = `message-${proposal.revision}`;
+  await service.claimDispatch({
+    ...context,
+    routePath: routePath("tester"),
+    targetRole: "tester",
+    routeContentHash: `route-${proposal.revision}`,
+    messageId
+  });
+  await service.confirmDispatch(context, messageId);
+}
+
 async function writeArchitectureDiagnosis(
   fs: FileSystemAdapter,
   context: WorkflowControlContext,
@@ -1158,10 +1313,13 @@ async function writeFinalArtifact(
   template: string,
   replacements: Array<[string, string]>
 ): Promise<void> {
-  const content = replacements.reduce(
+  let content = replacements.reduce(
     (current, [from, to]) => current.replace(from, to),
     template
   ).replaceAll("TBD", "Verified task evidence.");
+  if (fileName === "docs-sync-report.md") {
+    content = content.replace("none|architect|coder|tester", "none");
+  }
   await fs.writeText(path.join(context.taskRepoRoot, context.handoffDir, fileName), content);
 }
 
