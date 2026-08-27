@@ -75,6 +75,42 @@ describe("vcm-bash-guard", () => {
       "bash <<'EOF'",
       ".ai/tools/run-long-check --timeout 5m -- cargo test | tail -5",
       "EOF"
+    ].join("\n"))],
+    ["Python os.system backgrounding", bash([
+      "python3 - <<'PY'",
+      "import os",
+      'os.system("sleep 300 &")',
+      "PY"
+    ].join("\n"))],
+    ["Python subprocess.Popen", bash([
+      "python3 - <<'PY'",
+      "import subprocess",
+      'subprocess.Popen(["sleep", "300"])',
+      "PY"
+    ].join("\n"))],
+    ["Python imported Popen alias", bash([
+      "python3 - <<'PY'",
+      "from subprocess import Popen as start_process",
+      'start_process(["sleep", "300"])',
+      "PY"
+    ].join("\n"))],
+    ["Python os.spawn", bash([
+      "python3 - <<'PY'",
+      "import os",
+      'os.spawnlp(os.P_NOWAIT, "sleep", "sleep", "300")',
+      "PY"
+    ].join("\n"))],
+    ["Node child_process.spawn", bash([
+      "node <<'JS'",
+      'const childProcess = require("node:child_process");',
+      'childProcess.spawn("sleep", ["300"]);',
+      "JS"
+    ].join("\n"))],
+    ["Node destructured spawn", bash([
+      "node <<'JS'",
+      'const { spawn: startProcess } = require("child_process");',
+      'startProcess("sleep", ["300"]);',
+      "JS"
     ].join("\n"))]
   ];
 
@@ -99,6 +135,44 @@ describe("vcm-bash-guard", () => {
       "cat > /tmp/probe-prose.md <<EOF",
       ".ai/tools/run-long-check --timeout 30m -- cargo test",
       ".ai/tools/watch-job job-id",
+      "EOF"
+    ].join("\n"))],
+    ["Python bitwise and", bash([
+      "python3 - <<'PY'",
+      "flags = 3",
+      "mask = 1",
+      "print(flags & mask)",
+      "PY"
+    ].join("\n"))],
+    ["Python ampersand comment", bash([
+      "python3 - <<'PY'",
+      "# subprocess.Popen(['sleep', '300']) & take reference here",
+      'print("subprocess.Popen and R&D are documentation")',
+      "PY"
+    ].join("\n"))],
+    ["Python foreground subprocess.run", bash([
+      "python3 - <<'PY'",
+      "import subprocess",
+      'subprocess.run(["printf", "ok"], check=True)',
+      "PY"
+    ].join("\n"))],
+    ["Node bitwise and", bash([
+      "node <<'JS'",
+      "const flags = 3;",
+      "const mask = 1;",
+      "console.log(flags & mask);",
+      "JS"
+    ].join("\n"))],
+    ["Node ampersand comment", bash([
+      "node <<'JS'",
+      '// child_process.spawn("sleep", ["300"]) & take reference here',
+      'console.log("child_process.spawn and R&D are documentation");',
+      "JS"
+    ].join("\n"))],
+    ["process API names in data heredoc", bash([
+      "cat > /tmp/process-api-notes.md <<'EOF'",
+      "subprocess.Popen(['sleep', '300'])",
+      'child_process.spawn("sleep", ["300"])',
       "EOF"
     ].join("\n"))],
     ["non-Bash tool", { tool_name: "Read", tool_input: { file_path: "a&b.txt" } }]
@@ -219,6 +293,12 @@ describe("vcm-bash-guard", () => {
           "from pathlib import Path",
           "Path(\".ai/vcm/handoffs/architecture-plan.md\").write_text(\"bad\")",
           "PY"
+        ].join("\n"),
+        [
+          "node <<'JS'",
+          'const fs = require("node:fs");',
+          'fs.writeFileSync(".ai/vcm/handoffs/architecture-plan.md", "bad");',
+          "JS"
         ].join("\n"),
         "node -e 'require(\"fs\").writeFileSync(\".ai/vcm/handoffs/architecture-plan.md\", \"bad\")'",
         "echo vcm-artifact; printf bad > .ai/vcm/handoffs/architecture-plan.md"

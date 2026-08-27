@@ -9,6 +9,7 @@ shell code, so they are scanned recursively. `.ai/tools/run-long-check` is the
 only sanctioned detached worker; the command it runs must still stay in the
 supervised foreground process group.
 """
+import ast
 import json
 import re
 import shlex
@@ -39,8 +40,9 @@ HEREDOC_START = re.compile(
 EXECUTABLE_HEREDOC_RECEIVER = re.compile(
     r"(?:^|[;&|()])\s*"
     r"(?:(?:env\s+)?(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|()]+\s+)*)"
-    r"(?:[^\s;&|()]*/)?(?:sh|bash|zsh|dash|ksh|python\d*(?:\.\d+)?|node)(?=\s|$)"
+    r"(?:[^\s;&|()]*/)?(?P<receiver>sh|bash|zsh|dash|ksh|python\d*(?:\.\d+)?|node)(?=\s|$)"
 )
+SHELL_HEREDOC_RECEIVERS = {"sh", "bash", "zsh", "dash", "ksh"}
 SHELL_CONTROL_OPERATOR = re.compile(r"(?:\|&?|&&|\|\||;|\n|\(|\)|`)")
 RUN_LONG_CHECK_SHELL_STRING = re.compile(
     r"(?:^|[;&|()\n])\s*"
@@ -106,34 +108,70 @@ def strip_escaped_characters(command: str) -> str:
     return "".join(cleaned)
 
 
-def strip_heredoc_bodies(command: str) -> str:
-    """Remove heredoc data while preserving executable lines and separators."""
-    pending: list[tuple[str, bool, bool]] = []
-    executable = []
+def heredoc_receiver_language(line: str):
+    match = EXECUTABLE_HEREDOC_RECEIVER.search(line)
+    if not match:
+        return None
+    receiver = match.group("receiver")
+    if receiver in SHELL_HEREDOC_RECEIVERS:
+        return "shell"
+    if receiver.startswith("python"):
+        return "python"
+    return "node"
+
+
+def parse_heredoc_content(command: str) -> tuple[str, str, list[tuple[str, str]]]:
+    """Return shell-only text, all executable text, and typed interpreter bodies."""
+    pending = []
+    shell_executable = []
+    all_executable = []
+    interpreter_sections: list[tuple[str, list[str]]] = []
     for line in command.splitlines(keepends=True):
         if pending:
-            delimiter, strip_tabs, preserve_body = pending[0]
+            delimiter, strip_tabs, language, body = pending[0]
             candidate = line.rstrip("\r\n")
             if strip_tabs:
                 candidate = candidate.lstrip("\t")
             if candidate == delimiter:
                 pending.pop(0)
-            elif preserve_body:
-                executable.append(line)
+            elif language:
+                content_line = line.lstrip("\t") if strip_tabs else line
+                all_executable.append(content_line)
+                if language == "shell":
+                    shell_executable.append(content_line)
+                else:
+                    body.append(content_line)
+                    if content_line.endswith(("\n", "\r")):
+                        shell_executable.append("\n")
             elif line.endswith(("\n", "\r")):
-                executable.append("\n")
+                shell_executable.append("\n")
+                all_executable.append("\n")
             continue
 
-        executable.append(line)
-        preserve_body = bool(EXECUTABLE_HEREDOC_RECEIVER.search(line))
+        shell_executable.append(line)
+        all_executable.append(line)
+        language = heredoc_receiver_language(line)
         for match in HEREDOC_START.finditer(line):
             delimiter = match.group(3) or match.group(4)
-            pending.append((delimiter, bool(match.group(1)), preserve_body))
-    return "".join(executable)
+            body: list[str] = []
+            pending.append((delimiter, bool(match.group(1)), language, body))
+            if language in ("python", "node"):
+                interpreter_sections.append((language, body))
+    return (
+        "".join(shell_executable),
+        "".join(all_executable),
+        [(language, "".join(body)) for language, body in interpreter_sections],
+    )
+
+
+def strip_heredoc_bodies(command: str) -> str:
+    """Remove data heredocs while preserving all executable interpreter bodies."""
+    return parse_heredoc_content(command)[1]
 
 
 def shell_segments(command: str) -> list[list[str]]:
-    normalized = strip_heredoc_bodies(command).replace("\\\n", " ").replace("\n", " ; ")
+    shell_command, _, _ = parse_heredoc_content(command)
+    normalized = shell_command.replace("\\\n", " ").replace("\n", " ; ")
     try:
         lexer = shlex.shlex(normalized, posix=True, punctuation_chars=";&|()<>")
         lexer.whitespace_split = True
@@ -290,16 +328,190 @@ def protected_tool_invoked(command_without_quotes: str) -> bool:
     return bool(PROTECTED_TOOL_INVOCATION.search(command_without_quotes))
 
 
-def scan_shell_command(command: str, depth: int = 0) -> list[str]:
+def shell_background_reasons(command: str) -> list[str]:
+    stripped = strip_escaped_characters(strip_quoted(command))
     reasons = []
-    executable_command = strip_heredoc_bodies(command)
-    stripped = strip_escaped_characters(strip_quoted(executable_command))
     if re.search(r"(?:^|[\s;&|(])(?:nohup|setsid)(?:\s|$)", stripped):
         reasons.append("nohup/setsid detach is forbidden")
     if re.search(r"(?:^|[\s;&|(])disown(?:\s|$)", stripped):
         reasons.append("disown is forbidden")
     if unquoted_ampersand(stripped):
         reasons.append("'&' background execution is forbidden")
+    return reasons
+
+
+def python_dotted_name(node, aliases: dict[str, str]):
+    parts = []
+    current = node
+    while isinstance(current, ast.Attribute):
+        parts.append(current.attr)
+        current = current.value
+    if not isinstance(current, ast.Name):
+        return None
+    parts.append(current.id)
+    parts.reverse()
+    if parts[0] in aliases:
+        parts = aliases[parts[0]].split(".") + parts[1:]
+    return ".".join(parts)
+
+
+def python_import_aliases(tree) -> dict[str, str]:
+    aliases = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for imported in node.names:
+                aliases[imported.asname or imported.name.split(".")[0]] = imported.name
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            for imported in node.names:
+                aliases[imported.asname or imported.name] = f"{node.module}.{imported.name}"
+    return aliases
+
+
+def literal_string(node):
+    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+
+def scan_python_backgrounding(source: str) -> list[str]:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    aliases = python_import_aliases(tree)
+    reasons = []
+    asynchronous_calls = {
+        "subprocess.Popen",
+        "os.fork",
+        "os.popen",
+        "asyncio.create_subprocess_exec",
+        "asyncio.create_subprocess_shell",
+    }
+    shell_calls = {
+        "os.system",
+        "subprocess.getoutput",
+        "subprocess.getstatusoutput",
+    }
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = python_dotted_name(node.func, aliases)
+        if not name:
+            continue
+        if name in asynchronous_calls or name.startswith("os.spawn"):
+            reasons.append("Python asynchronous process creation is forbidden")
+            continue
+        command = literal_string(node.args[0]) if node.args else None
+        if name in shell_calls and command and shell_background_reasons(command):
+            reasons.append("Python shell background execution is forbidden")
+            continue
+        if name in {"subprocess.run", "subprocess.call", "subprocess.check_call", "subprocess.check_output"}:
+            uses_shell = any(
+                keyword.arg == "shell" and isinstance(keyword.value, ast.Constant) and keyword.value.value is True
+                for keyword in node.keywords
+            )
+            if uses_shell and command and shell_background_reasons(command):
+                reasons.append("Python shell background execution is forbidden")
+    return reasons
+
+
+def mask_javascript(source: str, mask_strings: bool) -> str:
+    output = []
+    state = "code"
+    quote = ""
+    index = 0
+    while index < len(source):
+        character = source[index]
+        following = source[index + 1] if index + 1 < len(source) else ""
+        if state == "code":
+            if character == "/" and following == "/":
+                output.extend((" ", " "))
+                state = "line-comment"
+                index += 2
+                continue
+            if character == "/" and following == "*":
+                output.extend((" ", " "))
+                state = "block-comment"
+                index += 2
+                continue
+            if character in ("'", '"', "`"):
+                quote = character
+                state = "string"
+                output.append(" " if mask_strings else character)
+                index += 1
+                continue
+            output.append(character)
+            index += 1
+            continue
+        if state == "line-comment":
+            output.append("\n" if character == "\n" else " ")
+            if character == "\n":
+                state = "code"
+            index += 1
+            continue
+        if state == "block-comment":
+            if character == "*" and following == "/":
+                output.extend((" ", " "))
+                state = "code"
+                index += 2
+            else:
+                output.append("\n" if character == "\n" else " ")
+                index += 1
+            continue
+        if character == "\\" and following:
+            output.extend((" ", " ") if mask_strings else (character, following))
+            index += 2
+            continue
+        output.append(" " if mask_strings and character != "\n" else character)
+        if character == quote:
+            state = "code"
+        index += 1
+    return "".join(output)
+
+
+def scan_node_backgrounding(source: str) -> list[str]:
+    without_comments = mask_javascript(source, False)
+    executable = mask_javascript(source, True)
+    module_aliases = {"child_process"}
+    function_aliases = set()
+    module_pattern = r"(?:node:)?child_process"
+    for match in re.finditer(
+        rf"\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*require\(\s*['\"]{module_pattern}['\"]\s*\)",
+        without_comments,
+    ):
+        module_aliases.add(match.group(1))
+    for match in re.finditer(
+        rf"\bimport\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+['\"]{module_pattern}['\"]",
+        without_comments,
+    ):
+        module_aliases.add(match.group(1))
+    destructured_patterns = [
+        rf"\b(?:const|let|var)\s*\{{([^}}]+)\}}\s*=\s*require\(\s*['\"]{module_pattern}['\"]\s*\)",
+        rf"\bimport\s*\{{([^}}]+)\}}\s*from\s*['\"]{module_pattern}['\"]",
+    ]
+    asynchronous = {"spawn", "exec", "execFile", "fork"}
+    for pattern in destructured_patterns:
+        for match in re.finditer(pattern, without_comments):
+            for item in match.group(1).split(","):
+                parts = re.split(r"\s+(?:as)\s+|\s*:\s*", item.strip())
+                if parts and parts[0] in asynchronous:
+                    function_aliases.add(parts[-1])
+    for alias in module_aliases:
+        if re.search(rf"\b{re.escape(alias)}\s*\.\s*(?:spawn|exec|execFile|fork)\s*\(", executable):
+            return ["Node asynchronous process creation is forbidden"]
+    for alias in function_aliases:
+        if re.search(rf"\b{re.escape(alias)}\s*\(", executable):
+            return ["Node asynchronous process creation is forbidden"]
+    if re.search(
+        rf"\brequire\(\s*['\"]{module_pattern}['\"]\s*\)\s*\.\s*(?:spawn|exec|execFile|fork)\s*\(",
+        without_comments,
+    ):
+        return ["Node asynchronous process creation is forbidden"]
+    return []
+
+
+def scan_shell_command(command: str, depth: int = 0) -> list[str]:
+    shell_command, _, interpreter_sections = parse_heredoc_content(command)
+    reasons = shell_background_reasons(shell_command)
+    stripped = strip_escaped_characters(strip_quoted(shell_command))
     if protected_tool_invoked(stripped):
         if SHELL_CONTROL_OPERATOR.search(stripped):
             reasons.append("run-long-check and watch-job must be standalone Bash commands")
@@ -308,16 +520,21 @@ def scan_shell_command(command: str, depth: int = 0) -> list[str]:
 
     # `sh -c '...'` quoted payloads are shell code, not plain strings.
     if depth < MAX_NESTED_SHELL_DEPTH and SHELL_DASH_C.search(stripped):
-        for segment in quoted_segments(executable_command):
+        for segment in quoted_segments(shell_command):
             if protected_tool_invoked(strip_escaped_characters(strip_quoted(segment))):
                 reasons.append("run-long-check and watch-job must not be invoked through a shell command string")
             reasons.extend(scan_shell_command(segment, depth + 1))
     if depth < MAX_NESTED_SHELL_DEPTH:
-        for substitution in double_quoted_command_substitutions(executable_command):
+        for substitution in double_quoted_command_substitutions(shell_command):
             nested_stripped = strip_escaped_characters(strip_quoted(substitution))
             if protected_tool_invoked(nested_stripped):
                 reasons.append("run-long-check and watch-job must not be invoked through command substitution")
             reasons.extend(scan_shell_command(substitution, depth + 1))
+    for language, source in interpreter_sections:
+        if language == "python":
+            reasons.extend(scan_python_backgrounding(source))
+        elif language == "node":
+            reasons.extend(scan_node_backgrounding(source))
     return reasons
 
 
