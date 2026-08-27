@@ -504,6 +504,11 @@ function HarnessFeedbackInbox({
 }) {
   return (
     <HarnessCollapsibleSection title={`Harness Feedback Inbox (${state?.queuedCount ?? 0})`}>
+      {state?.warnings.length ? (
+        <ul className="warnings">
+          {state.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+        </ul>
+      ) : null}
       <ul className="harness-studio-doc-list">
         {state?.pending.length ? state.pending.map((item) => (
           <li key={item.path}>

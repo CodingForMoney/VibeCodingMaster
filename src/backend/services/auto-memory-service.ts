@@ -67,6 +67,13 @@ export interface MemoryReviewCandidate {
   existing?: string;
 }
 
+export interface ExistingMemoryReviewEntry {
+  itemId: string;
+  target: MemoryReviewTarget;
+  memoryPath: string;
+  entry: string;
+}
+
 interface StoredMemoryReviewState {
   version: 1;
   runId: string;
@@ -191,6 +198,7 @@ export interface TaskRetrospectiveMemoryReviewContext {
   roleDraftsPath: string;
   currentMemoryPath: string;
   activeMemoryPaths: string[];
+  existingEntriesPath: string;
   proposalCandidates: MemoryReviewCandidate[];
   reviewResultPath: string;
   planningCandidatePath?: string;
@@ -555,6 +563,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       });
     }
     await writeRunMemoryHostSnapshot(taskRepoRoot, state.runId);
+    const existingEntries = collectExistingMemoryReviewEntries(beforeMemory);
     const timestamp = now();
     state.reviewPromptDispatchedAt = timestamp;
     state.retrospectiveReportPath = retrospectiveReportPath;
@@ -563,12 +572,19 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     await persistActiveState(taskRepoRoot, state);
 
     const runRoot = resolveRepoPath(taskRepoRoot, `${MEMORY_REVIEW_RUNS_ROOT}/${state.runId}`);
+    const existingEntriesPath = path.join(runRoot, "existing-entries.json");
+    await deps.fs.writeJsonAtomic(existingEntriesPath, {
+      version: 1,
+      runId: state.runId,
+      entries: existingEntries
+    });
     const planningCandidatePath = await findPlanningCandidateSnapshot(taskRepoRoot, state.runId);
     return {
       runId: state.runId,
       roleDraftsPath: path.join(runRoot, "drafts"),
       currentMemoryPath: path.join(runRoot, "before"),
       activeMemoryPaths: memoryPaths.map((memoryPath) => resolveRepoPath(taskRepoRoot, memoryPath)),
+      existingEntriesPath,
       reviewResultPath: path.join(runRoot, "review-result.json"),
       proposalCandidates,
       ...(planningCandidatePath
@@ -1340,34 +1356,35 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
         statusCode: 409
       });
     }
-    for (const decision of result.decisions.filter((candidate) => candidate.source === "existing")) {
-      const memoryPath = memoryTargetToPath(decision.target);
-      if (!substantiveMemoryEntries(before[memoryPath]).includes(decision.entry)) {
+    const existingEntries = collectExistingMemoryReviewEntries(before);
+    const existingDecisions = result.decisions.filter((candidate) => candidate.source === "existing");
+    for (const decision of existingDecisions) {
+      const assigned = existingEntries.find((entry) => entry.itemId === decision.itemId);
+      if (!assigned) {
         throw new VcmError({
           code: "MEMORY_REVIEW_EXISTING_DECISION_UNKNOWN",
           message: `review-result.json contains an unknown existing-memory decision: ${decision.itemId}`,
           statusCode: 409
         });
       }
-    }
-
-    for (const definition of MEMORY_FILE_DEFINITIONS) {
-      const target = memoryPathToTarget(definition.path);
-      for (const entry of substantiveMemoryEntries(before[definition.path])) {
-        const matches = result.decisions.filter(
-          (decision) => decision.source === "existing"
-            && decision.target === target
-            && decision.entry === entry
-        );
-        if (matches.length !== 1) {
-          throw new VcmError({
-            code: "MEMORY_REVIEW_EXISTING_DECISION_MISSING",
-            message: `review-result.json must contain exactly one decision for existing memory entry in ${definition.path}: ${entry}`,
-            statusCode: 409
-          });
-        }
-        validateExistingMemoryDecision(definition.path, entry, matches[0], after);
+      if (decision.target !== assigned.target || decision.entry !== assigned.entry) {
+        throw new VcmError({
+          code: "MEMORY_REVIEW_EXISTING_DECISION_MISMATCH",
+          message: `Existing-memory decision must copy the assigned target and entry exactly: ${decision.itemId}`,
+          statusCode: 409
+        });
       }
+    }
+    for (const assigned of existingEntries) {
+      const matches = existingDecisions.filter((decision) => decision.itemId === assigned.itemId);
+      if (matches.length !== 1) {
+        throw new VcmError({
+          code: "MEMORY_REVIEW_EXISTING_DECISION_MISSING",
+          message: `review-result.json must contain exactly one decision for existing memory item ${assigned.itemId} in ${assigned.memoryPath}.`,
+          statusCode: 409
+        });
+      }
+      validateExistingMemoryDecision(assigned.memoryPath, assigned.entry, matches[0], after);
     }
 
     const moveDecisions = result.decisions.filter((decision) => decision.decision === "move-to-durable-doc");
@@ -1380,7 +1397,6 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     }
     const assignmentKeys = new Set<string>();
     for (const assignment of result.durableDocAssignments) {
-      validateDurableDocAssignmentInput(assignment, after);
       const key = `${assignment.sourceMemoryPath}\n${assignment.sourceEntry}\n${assignment.targetPath}`;
       if (assignmentKeys.has(key)) {
         throw new VcmError({
@@ -1402,6 +1418,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
           statusCode: 409
         });
       }
+      validateDurableDocAssignmentInput(assignment, matchingDecision.source, after);
     }
     return result;
   }
@@ -1419,7 +1436,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
         statusCode: 409
       });
     }
-    const afterEntries = new Set(substantiveMemoryEntries(after[memoryTargetToPath(decision.target)]));
+    const afterContent = after[memoryTargetToPath(decision.target)];
     if (candidate.operation === "remove") {
       if (decision.decision !== "remove" && decision.decision !== "retain") {
         throw new VcmError({
@@ -1428,14 +1445,14 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
           statusCode: 409
         });
       }
-      if (decision.decision === "remove" && afterEntries.has(expectedEntry)) {
+      if (decision.decision === "remove" && memoryContainsReviewContent(afterContent, expectedEntry)) {
         throw new VcmError({
           code: "MEMORY_REVIEW_PROPOSAL_REMOVAL_MISMATCH",
           message: `Accepted removal is still present for proposal ${candidate.id}.`,
           statusCode: 409
         });
       }
-      if (decision.decision === "retain" && !afterEntries.has(expectedEntry)) {
+      if (decision.decision === "retain" && !memoryContainsReviewContent(afterContent, expectedEntry)) {
         throw new VcmError({
           code: "MEMORY_REVIEW_PROPOSAL_RETAIN_MISMATCH",
           message: `Rejected removal is missing from memory for proposal ${candidate.id}.`,
@@ -1453,7 +1470,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     }
     if (
       (decision.decision === "keep-in-memory" || decision.decision === "keep-memory-reference")
-      && !afterEntries.has(decision.finalContent)
+      && !memoryContainsReviewContent(afterContent, decision.finalContent)
     ) {
       throw new VcmError({
         code: "MEMORY_REVIEW_PROPOSAL_CONTENT_MISSING",
@@ -1469,7 +1486,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     decision: HarnessMemoryReviewDecision,
     after: MemorySet
   ): void {
-    const afterEntries = new Set(substantiveMemoryEntries(after[memoryPath]));
+    const afterEntries = new Set(parseExistingMemoryEntries(after[memoryPath]));
     if (decision.decision === "retain" && !afterEntries.has(entry)) {
       throw new VcmError({
         code: "MEMORY_REVIEW_RETAIN_MISMATCH",
@@ -1497,6 +1514,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
 
   function validateDurableDocAssignmentInput(
     assignment: HarnessDurableDocAssignmentInput,
+    source: HarnessMemoryReviewDecision["source"],
     after: MemorySet
   ): void {
     if (!MEMORY_FILE_DEFINITIONS.some((definition) => definition.path === assignment.sourceMemoryPath)) {
@@ -1506,7 +1524,10 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
         statusCode: 409
       });
     }
-    if (substantiveMemoryEntries(after[assignment.sourceMemoryPath]).includes(assignment.sourceEntry)) {
+    const sourceStillPresent = source === "existing"
+      ? parseExistingMemoryEntries(after[assignment.sourceMemoryPath]).includes(assignment.sourceEntry)
+      : memoryContainsReviewContent(after[assignment.sourceMemoryPath], assignment.sourceEntry);
+    if (sourceStillPresent) {
       throw new VcmError({
         code: "MEMORY_REVIEW_ASSIGNMENT_SOURCE_NOT_REMOVED",
         message: `Move-to-durable-doc must remove memory before assignment: ${assignment.sourceEntry}`,
@@ -1919,11 +1940,49 @@ function memoryTargetToPath(target: MemoryReviewTarget): string {
   return definition.path;
 }
 
-function substantiveMemoryEntries(content: string): string[] {
+function collectExistingMemoryReviewEntries(memory: MemorySet): ExistingMemoryReviewEntry[] {
+  return MEMORY_FILE_DEFINITIONS.flatMap((definition) => {
+    const target = memoryPathToTarget(definition.path);
+    return parseExistingMemoryEntries(memory[definition.path]).map((entry, index) => ({
+      itemId: `existing:${target}:${index + 1}:${sha256(entry).slice(0, 12)}`,
+      target,
+      memoryPath: definition.path,
+      entry
+    }));
+  });
+}
+
+function parseExistingMemoryEntries(content: string): string[] {
+  const normalized = content.replace(/\r\n?/g, "\n").trim();
+  if (!normalized) {
+    return [];
+  }
+  const lines = normalized.split("\n");
+  const sectionStarts = lines
+    .map((line, index) => (/^##(?:\s+|$)/.test(line) ? index : -1))
+    .filter((index) => index >= 0);
+  if (sectionStarts.length === 0) {
+    return [normalized];
+  }
+  return sectionStarts.map((start, index) => {
+    const end = sectionStarts[index + 1] ?? lines.length;
+    return lines.slice(start, end).join("\n").trim();
+  }).filter(Boolean);
+}
+
+function memoryContainsReviewContent(content: string, expected: string): boolean {
+  const normalizedExpected = expected.replace(/\r\n?/g, "\n").trim();
+  if (!normalizedExpected) {
+    return false;
+  }
+  if (normalizedExpected.includes("\n") || /^##(?:\s+|$)/.test(normalizedExpected)) {
+    return parseExistingMemoryEntries(content).includes(normalizedExpected);
+  }
   return content
-    .split(/\r?\n/)
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
     .map((line) => line.trim())
-    .filter(Boolean);
+    .includes(normalizedExpected);
 }
 
 function assertDurableDocPath(targetPath: string): void {

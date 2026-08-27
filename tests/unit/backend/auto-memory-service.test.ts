@@ -1,5 +1,6 @@
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 import { createNodeFileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
@@ -559,6 +560,79 @@ describe("auto-memory-service", () => {
     expect(context.gitCommits).toHaveLength(0);
   });
 
+  it("treats each level-two memory section as one existing review entry", async () => {
+    const context = await createContext(true);
+    const sharedMemory = [
+      "# Shared Memory",
+      "Cross-cutting verified facts.",
+      "",
+      "## Generated context",
+      "Generated indexes record source lines, so comment-only edits and formatter",
+      "line shifts invalidate freshness checks.",
+      "",
+      "## Lifecycle ownership",
+      "Backend hooks own lifecycle completion."
+    ].join("\n");
+    const review = await prepareHarnessMemoryReview(context, sharedMemory);
+    const manifest = JSON.parse(await readFile(review.existingEntriesPath, "utf8")) as {
+      entries: Array<{ itemId: string; target: string; memoryPath: string; entry: string }>;
+    };
+    const sharedEntries = manifest.entries.filter((entry) => entry.target === "shared");
+
+    expect(sharedEntries).toHaveLength(2);
+    expect(sharedEntries[0]).toMatchObject({
+      memoryPath: "CLAUDE.md",
+      entry: [
+        "## Generated context",
+        "Generated indexes record source lines, so comment-only edits and formatter",
+        "line shifts invalidate freshness checks."
+      ].join("\n")
+    });
+    expect(sharedEntries[1].entry).toBe("## Lifecycle ownership\nBackend hooks own lifecycle completion.");
+    expect(manifest.entries.some((entry) => entry.entry === "# Shared Memory")).toBe(false);
+
+    await context.service.handleHarnessEngineerHook({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      eventName: "Stop"
+    });
+    await expect(context.service.getState(context.baseRepoRoot, context.taskRepoRoot))
+      .resolves.toMatchObject({ status: "idle", runs: [expect.objectContaining({ status: "applied" })] });
+  });
+
+  it("rejects a review result that omits an assigned semantic memory entry", async () => {
+    const context = await createContext(true);
+    const review = await prepareHarnessMemoryReview(context, [
+      "## Generated context",
+      "Generated indexes include source lines.",
+      "",
+      "## Lifecycle ownership",
+      "Backend hooks own lifecycle completion."
+    ].join("\n"));
+    const result = JSON.parse(await readFile(review.reviewResultPath, "utf8")) as {
+      decisions: Array<{ source: string; target: string }>;
+    };
+    const sharedDecisions = result.decisions.filter(
+      (decision) => decision.source === "existing" && decision.target === "shared"
+    );
+    expect(sharedDecisions).toHaveLength(2);
+    result.decisions.splice(result.decisions.indexOf(sharedDecisions[1]), 1);
+    await writeFile(review.reviewResultPath, `${JSON.stringify(result, null, 2)}\n`, "utf8");
+
+    await context.service.handleHarnessEngineerHook({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      eventName: "Stop"
+    });
+
+    const state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state).toMatchObject({ status: "failed" });
+    expect(state.active?.error).toContain("must contain exactly one decision for existing memory item");
+    expect(state.active?.error).toContain("CLAUDE.md");
+  });
+
   it("rejects a Harness Engineer commit that changes content outside a memory block", async () => {
     const context = await createContext(true);
     await prepareHarnessMemoryReview(context);
@@ -798,13 +872,26 @@ describe("auto-memory-service", () => {
     const review = await context.service.prepareTaskRetrospectiveReview(context.taskRepoRoot, retrospectiveReportPath);
     await mkdir(path.dirname(retrospectiveReportPath), { recursive: true });
     await writeFile(retrospectiveReportPath, "# Task Harness Retrospective\n", "utf8");
+    const manifest = JSON.parse(await readFile(review!.existingEntriesPath, "utf8")) as {
+      entries: Array<{
+        itemId: string;
+        target: Parameters<typeof existingDecision>[0];
+        entry: string;
+      }>;
+    };
     await writeFile(
       review!.reviewResultPath,
       `${JSON.stringify({
         version: 1,
         runId: review!.runId,
         memoryCommit: "none",
-        decisions: [existingDecision("shared", sharedMemory, "retain"), ...defaultRoleMemoryDecisions()],
+        decisions: manifest.entries.map((entry) => existingDecision(
+          entry.target,
+          entry.entry,
+          "retain",
+          entry.entry,
+          entry.itemId
+        )),
         durableDocAssignments: []
       }, null, 2)}\n`,
       "utf8"
@@ -912,10 +999,11 @@ function existingDecision(
   target: "shared" | "project-manager" | "architect" | "coder" | "tester" | "reviewer" | "harness-engineer",
   entry: string,
   decision: "retain" | "update" | "remove" | "move-to-durable-doc",
-  finalContent = entry
+  finalContent = entry,
+  itemId = existingEntryItemId(target, entry)
 ) {
   return {
-    itemId: `existing:${target}`,
+    itemId,
     source: "existing",
     target,
     entry,
@@ -926,6 +1014,12 @@ function existingDecision(
     finalContent,
     durableDocPath: "none"
   };
+}
+
+function existingEntryItemId(target: string, entry: string, index = 1): string {
+  const normalized = entry.replace(/\r\n?/g, "\n").trim();
+  const hash = createHash("sha256").update(normalized).digest("hex").slice(0, 12);
+  return `existing:${target}:${index}:${hash}`;
 }
 
 function defaultRoleMemoryDecisions() {

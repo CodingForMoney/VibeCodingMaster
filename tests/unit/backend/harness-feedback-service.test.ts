@@ -202,6 +202,7 @@ None.
               path.join(taskRepoRoot, "CLAUDE.md"),
               path.join(taskRepoRoot, ".claude/agents/architect.md")
             ],
+            existingEntriesPath: path.join(taskRepoRoot, "memory-run/existing-entries.json"),
             proposalCandidates: [{
               id: "architect:add:1",
               source: "architect",
@@ -232,12 +233,14 @@ None.
     expect(prompt).toContain("Auto Memory Review:");
     expect(prompt).toContain(`Role drafts: ${path.join(taskRepoRoot, "memory-run/drafts")}`);
     expect(prompt).toContain(`Current memory snapshot: ${path.join(taskRepoRoot, "memory-run/before")}`);
+    expect(prompt).toContain(`Existing memory entries: ${path.join(taskRepoRoot, "memory-run/existing-entries.json")}`);
     expect(prompt).toContain(`Architect planning-session candidate: ${path.join(taskRepoRoot, "memory-run/architect-planning.md")}`);
     expect(prompt).toContain(`- ${path.join(taskRepoRoot, "CLAUDE.md")}`);
     expect(prompt).toContain("Apply the reviewed result directly to the listed <VCM-memory> blocks");
     expect(prompt).toContain("commit only the changed active memory files with message [VCM Harness] Update VCM memory");
     expect(prompt).not.toContain("Write the complete reviewed memory set to:");
-    expect(prompt).toContain("Before evaluating proposals, review every substantive entry in every current memory snapshot");
+    expect(prompt).toContain("The existing memory entries file is the complete required decision set");
+    expect(prompt).toContain("Emit exactly one source=existing decision for every listed itemId");
     expect(prompt).toContain("architect:add:1 | source=architect | operation=add");
     expect(prompt).toContain(`Write the complete machine-readable review to: ${path.join(taskRepoRoot, "memory-run/review-result.json")}`);
     expect(prompt).toContain("For every existing entry and proposal");
@@ -441,6 +444,78 @@ None.
     ));
     expect(marker).toMatchObject({ status: "failed" });
     expect(marker.error).toContain(path.join(pendingDir, assigned[1]));
+  });
+
+  it("consumes valid feedback dispositions when only Auto Memory review fails", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-retrospective-memory-failure-"));
+    const taskRepoRoot = path.join(tmpRepo, ".claude/worktrees/demo-task");
+    await mkdir(path.join(taskRepoRoot, ".ai/vcm/handoffs"), { recursive: true });
+    await writeFile(
+      path.join(taskRepoRoot, ".ai/vcm/handoffs/final-acceptance.md"),
+      renderFinalAcceptance("accepted"),
+      "utf8"
+    );
+    const feedbackPath = ".ai/vcm/harness-feedback/pending/01-coder.md";
+    await mkdir(path.join(tmpRepo, ".ai/vcm/harness-feedback/pending"), { recursive: true });
+    await writeFile(path.join(tmpRepo, feedbackPath), renderFeedback("Coder feedback", "coder"), "utf8");
+    const service = createHarnessFeedbackService({
+      fs: createNodeFileSystemAdapter(),
+      runtime: createRuntime([]),
+      sessionService: createSessionService(),
+      autoMemoryService: {
+        async prepareTaskRetrospectiveReview() {
+          return {
+            runId: "memory-run",
+            roleDraftsPath: path.join(taskRepoRoot, "memory-run/drafts"),
+            currentMemoryPath: path.join(taskRepoRoot, "memory-run/before"),
+            activeMemoryPaths: [path.join(taskRepoRoot, "CLAUDE.md")],
+            existingEntriesPath: path.join(taskRepoRoot, "memory-run/existing-entries.json"),
+            proposalCandidates: [],
+            reviewResultPath: path.join(taskRepoRoot, "memory-run/review-result.json")
+          };
+        },
+        async cancelTaskRetrospectiveReview() {
+          return undefined;
+        }
+      },
+      now: createClock()
+    });
+
+    await service.startTaskRetrospective(tmpRepo, {
+      taskSlug: "demo-task",
+      taskRepoRoot,
+      handoffDir: ".ai/vcm/handoffs",
+      trigger: "auto"
+    });
+    await writeFile(
+      path.join(tmpRepo, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.md"),
+      renderRetrospectiveReport([path.join(tmpRepo, feedbackPath)]),
+      "utf8"
+    );
+
+    await service.handleTaskRetrospectiveHook(tmpRepo, {
+      taskSlug: "demo-task",
+      eventName: "Stop",
+      memoryReviewStatus: "failed",
+      memoryReviewError: "review-result.json is missing existing memory item existing:shared:1."
+    });
+
+    await expect(readFile(path.join(tmpRepo, feedbackPath), "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
+    const marker = JSON.parse(await readFile(
+      path.join(tmpRepo, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.json"),
+      "utf8"
+    ));
+    expect(marker).toMatchObject({
+      status: "failed",
+      pendingFeedbackPaths: [],
+      feedbackProcessedAt: expect.any(String)
+    });
+    expect(marker.error).toContain("review-result.json is missing existing memory item");
+    await expect(service.getState(tmpRepo, "demo-task")).resolves.toMatchObject({
+      queuedCount: 0,
+      warnings: [expect.stringContaining("review-result.json is missing existing memory item")]
+    });
   });
 
   it("does not start a task harness retrospective for a follow-up final-acceptance decision", async () => {

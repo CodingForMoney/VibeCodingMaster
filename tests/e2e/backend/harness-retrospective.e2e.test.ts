@@ -5,7 +5,7 @@ import {
   renderDocsUpdateReportTemplate,
   renderFinalAcceptanceTemplate
 } from "../../../src/backend/templates/handoff.js";
-import { readVcmMemoryBlock, replaceVcmMemoryBlock } from "../../../src/backend/templates/harness/memory-block.js";
+import { replaceVcmMemoryBlock } from "../../../src/backend/templates/harness/memory-block.js";
 import { createMockClaudeE2eApp } from "./helpers/e2e-app.js";
 import { createE2eRepo, git } from "./helpers/e2e-repo.js";
 import {
@@ -56,6 +56,24 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
     const repo = await createE2eRepo();
     cleanups.push(() => repo.cleanup());
     const task = await connectAndCreateTask(env.app, repo, "mock-memory-retrospective");
+    const sharedMemoryPath = path.join(task.worktreePath, "CLAUDE.md");
+    await fs.writeFile(
+      sharedMemoryPath,
+      replaceVcmMemoryBlock(await fs.readFile(sharedMemoryPath, "utf8"), [
+        "# Shared Memory",
+        "Cross-cutting verified facts.",
+        "",
+        "## Generated context",
+        "Generated indexes record source lines, so comment-only edits and formatter",
+        "line shifts invalidate freshness checks.",
+        "",
+        "## Lifecycle ownership",
+        "Lifecycle completion is inferred by each client."
+      ].join("\n")),
+      "utf8"
+    );
+    await git(task.worktreePath, "add", "--", "CLAUDE.md");
+    await git(task.worktreePath, "commit", "-m", "test: seed structured memory");
     await updatePreferences(env.app, { autoMemoryEnabled: true });
     const pmMemoryStarted = createDeferred();
     const releasePmMemory = createDeferred();
@@ -139,6 +157,7 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
     expect(harnessWrites).not.toContain("[VCM Task Harness Review: Memory Review]");
     expect(harnessWrites).toContain("[VCM Task Harness Retrospective]");
     expect(harnessWrites).toContain("Auto Memory Review:");
+    expect(harnessWrites).toContain("Existing memory entries:");
     expect(harnessWrites).toContain("Active memory files:");
     expect(harnessWrites).toContain("Apply the reviewed result directly to the listed <VCM-memory> blocks");
     expect(harnessWrites).toContain("Write the complete machine-readable review to:");
@@ -334,19 +353,14 @@ async function writeHarnessRetrospective(ctx: MockClaudePromptContext): Promise<
   let reviewResultPath: string | undefined;
   let memoryDecisions: ReturnType<typeof e2eExistingDecision>[] = [];
   if (autoMemoryReview) {
-    const activeMemoryPaths = matchPromptList(ctx.prompt, "Active memory files:", "Proposal candidates:");
-    memoryDecisions = await Promise.all(activeMemoryPaths.map(async (memoryPath) => {
-      const entry = readVcmMemoryBlock(await fs.readFile(memoryPath, "utf8"))!.trim();
-      const target = memoryPath.endsWith("/CLAUDE.md") && !memoryPath.includes("/.claude/agents/")
-        ? "shared"
-        : path.basename(memoryPath, ".md");
-      return e2eExistingDecision(
-        target,
-        entry,
-        target === "shared" ? "update" : "retain",
-        target === "shared" ? "Backend hooks own lifecycle completion." : entry
-      );
-    }));
+    const manifest = await readExistingMemoryManifest(ctx.prompt);
+    memoryDecisions = manifest.entries.map((assigned) => e2eExistingDecision(
+      assigned.itemId,
+      assigned.target,
+      assigned.entry,
+      assigned.target === "shared" ? "update" : "retain",
+      assigned.target === "shared" ? "Backend hooks own lifecycle completion." : assigned.entry
+    ));
     await ctx.writeFile(
       "CLAUDE.md",
       replaceVcmMemoryBlock(
@@ -415,19 +429,15 @@ async function writeHarnessRetrospectiveWithDurableDocMove(
   await ctx.userPromptSubmit();
   const resultPath = matchPromptPath(ctx.prompt, "Write the analysis to Result Path");
   const reviewResultPath = matchPromptPath(ctx.prompt, "Write the complete machine-readable review to");
-  const activeMemoryPaths = matchPromptList(ctx.prompt, "Active memory files:", "Proposal candidates:");
-  const decisions = await Promise.all(activeMemoryPaths.map(async (memoryPath) => {
-    const entry = readVcmMemoryBlock(await fs.readFile(memoryPath, "utf8"))!.trim();
-    const target = memoryPath.endsWith("/CLAUDE.md") && !memoryPath.includes("/.claude/agents/")
-      ? "shared"
-      : path.basename(memoryPath, ".md");
-    return target === "shared"
+  const manifest = await readExistingMemoryManifest(ctx.prompt);
+  const decisions = manifest.entries.map((assigned) => {
+    return assigned.target === "shared"
       ? {
-          ...e2eExistingDecision(target, entry, "move-to-durable-doc", "none"),
+          ...e2eExistingDecision(assigned.itemId, assigned.target, assigned.entry, "move-to-durable-doc", "none"),
           durableDocPath: "docs/ARCHITECTURE.md"
         }
-      : e2eExistingDecision(target, entry, "retain", entry);
-  }));
+      : e2eExistingDecision(assigned.itemId, assigned.target, assigned.entry, "retain", assigned.entry);
+  });
   await ctx.writeFile(
     "CLAUDE.md",
     replaceVcmMemoryBlock(await ctx.readFile("CLAUDE.md"), "No accumulated project memory yet.\n")
@@ -520,19 +530,9 @@ function renderHarnessFeedback(title: string, role: string): string {
   ].join("\n");
 }
 
-function matchPromptList(prompt: string, startLabel: string, endLabel: string): string[] {
-  const block = prompt.split(`${startLabel}\n`, 2)[1]?.split(`\n${endLabel}`, 1)[0]?.trim();
-  if (!block || block === "none") {
-    return [];
-  }
-  return block.split("\n")
-    .map((line) => line.match(/^-\s+(.+)$/)?.[1]?.trim())
-    .filter((item): item is string => Boolean(item));
-}
-
-function e2eExistingDecision(target: string, entry: string, decision: string, finalContent: string) {
+function e2eExistingDecision(itemId: string, target: string, entry: string, decision: string, finalContent: string) {
   return {
-    itemId: `existing:${target}`,
+    itemId,
     source: "existing",
     target,
     entry,
@@ -543,6 +543,13 @@ function e2eExistingDecision(target: string, entry: string, decision: string, fi
     finalContent,
     durableDocPath: "none"
   };
+}
+
+async function readExistingMemoryManifest(prompt: string): Promise<{
+  entries: Array<{ itemId: string; target: string; memoryPath: string; entry: string }>;
+}> {
+  const manifestPath = matchPromptPath(prompt, "Existing memory entries");
+  return JSON.parse(await fs.readFile(manifestPath, "utf8"));
 }
 
 function acceptedFinalAcceptance(taskSlug: string): string {

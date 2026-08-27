@@ -49,6 +49,7 @@ export interface TaskRetrospectiveHookInput {
   taskSlug: string;
   eventName: ClaudeHookEventName;
   memoryReviewStatus: AutoMemoryReviewStatus;
+  memoryReviewError?: string;
 }
 
 export interface HarnessFeedbackServiceDeps {
@@ -83,21 +84,25 @@ interface TaskRetrospectiveMarker {
   updatedAt: string;
   completedAt?: string;
   failedAt?: string;
+  feedbackProcessedAt?: string;
   error?: string;
 }
 
 export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): HarnessFeedbackService {
   const now = deps.now ?? (() => new Date().toISOString());
 
-  async function getState(repoRoot: string, _activeTaskSlug?: string): Promise<HarnessFeedbackStateReport> {
+  async function getState(repoRoot: string, activeTaskSlug?: string): Promise<HarnessFeedbackStateReport> {
     await cleanupLegacyState(repoRoot);
     const pending = await listPendingFeedback(repoRoot);
+    const marker = activeTaskSlug
+      ? await loadTaskRetrospectiveMarker(repoRoot, activeTaskSlug)
+      : undefined;
     return {
       version: 1,
       status: pending.length > 0 ? "queued" : "idle",
       queuedCount: pending.length,
       pending,
-      warnings: []
+      warnings: marker?.status === "failed" && marker.error ? [marker.error] : []
     };
   }
 
@@ -245,27 +250,41 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
         ]
       : ["Report is empty."];
     const reportReady = reportErrors.length === 0;
-    if (!reportReady || (marker.memoryRunId && input.memoryReviewStatus === "failed")) {
+    if (!reportReady) {
       await persistTaskRetrospectiveMarker(repoRoot, {
         ...marker,
         status: "failed",
         failedAt: timestamp,
         updatedAt: timestamp,
-        error: !reportReady
-          ? `Harness Engineer did not write a valid Task Harness Retrospective report: ${reportErrors.join(" ")}`
-          : "Task Harness Retrospective memory review failed."
+        error: `Harness Engineer did not write a valid Task Harness Retrospective report: ${reportErrors.join(" ")}`
       });
       return true;
     }
-    if (marker.memoryRunId && input.memoryReviewStatus === "documenting") {
+    const processedMarker = await consumeAcceptedFeedback(repoRoot, marker);
+    if (!processedMarker) {
+      return true;
+    }
+    if (processedMarker.memoryRunId && input.memoryReviewStatus === "failed") {
       await persistTaskRetrospectiveMarker(repoRoot, {
-        ...marker,
+        ...processedMarker,
+        status: "failed",
+        failedAt: timestamp,
+        updatedAt: timestamp,
+        error: input.memoryReviewError
+          ? `Task Harness Retrospective memory review failed: ${input.memoryReviewError}`
+          : "Task Harness Retrospective memory review failed. Open Harness Studio Memory to inspect the validation error."
+      });
+      return true;
+    }
+    if (processedMarker.memoryRunId && input.memoryReviewStatus === "documenting") {
+      await persistTaskRetrospectiveMarker(repoRoot, {
+        ...processedMarker,
         status: "waiting-docs",
         updatedAt: timestamp
       });
       return true;
     }
-    await completeTaskRetrospective(repoRoot, marker);
+    await completeTaskRetrospective(repoRoot, processedMarker);
     return true;
   }
 
@@ -298,6 +317,26 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
 
   async function completeTaskRetrospective(repoRoot: string, marker: TaskRetrospectiveMarker): Promise<void> {
     const timestamp = now();
+    const processedMarker = await consumeAcceptedFeedback(repoRoot, marker);
+    if (!processedMarker) {
+      return;
+    }
+    await persistTaskRetrospectiveMarker(repoRoot, {
+      ...processedMarker,
+      status: "completed",
+      completedAt: timestamp,
+      updatedAt: timestamp
+    });
+  }
+
+  async function consumeAcceptedFeedback(
+    repoRoot: string,
+    marker: TaskRetrospectiveMarker
+  ): Promise<TaskRetrospectiveMarker | undefined> {
+    if (marker.feedbackProcessedAt) {
+      return marker;
+    }
+    const timestamp = now();
     try {
       await removeProcessedFeedback(repoRoot, marker.pendingFeedbackPaths ?? []);
     } catch (error) {
@@ -308,14 +347,16 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
         updatedAt: timestamp,
         error: `VCM could not remove processed Harness Feedback: ${errorMessage(error)}`
       });
-      return;
+      return undefined;
     }
-    await persistTaskRetrospectiveMarker(repoRoot, {
+    const processedMarker: TaskRetrospectiveMarker = {
       ...marker,
-      status: "completed",
-      completedAt: timestamp,
+      pendingFeedbackPaths: [],
+      feedbackProcessedAt: timestamp,
       updatedAt: timestamp
-    });
+    };
+    await persistTaskRetrospectiveMarker(repoRoot, processedMarker);
+    return processedMarker;
   }
 
   async function assertHarnessEngineerAvailable(_repoRoot: string): Promise<void> {
@@ -438,6 +479,7 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
             "Auto Memory Review:",
             `Role drafts: ${memoryReview.roleDraftsPath}`,
             `Current memory snapshot: ${memoryReview.currentMemoryPath}`,
+            `Existing memory entries: ${memoryReview.existingEntriesPath}`,
             "Active memory files:",
             ...memoryReview.activeMemoryPaths.map((memoryPath) => `- ${memoryPath}`),
             "Proposal candidates:",
@@ -456,7 +498,9 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
             "",
             "Review every memory candidate against final task evidence while performing this retrospective.",
             "The snapshot files contain only the matching pre-review <VCM-memory> block content.",
-            "Before evaluating proposals, review every substantive entry in every current memory snapshot against current code, documentation, and final task evidence.",
+            "The existing memory entries file is the complete required decision set. It groups each ## section and its body as one semantic entry; legacy memory without ## sections is one entry.",
+            "Emit exactly one source=existing decision for every listed itemId. Copy its target and entry exactly; do not create decisions for headings, wrapped lines, or other text not listed there.",
+            "Review every listed existing entry against current code, documentation, and final task evidence before evaluating proposals.",
             "Evaluate each proposal independently. Keep only verified, durable, reusable project knowledge; do not keep task narrative, temporary state, unverified conclusions, or Harness rules in memory.",
             "For every existing entry and proposal, record why the decision is necessary, the impact if the knowledge is absent, the evidence checked, and whether a durable document is the correct source.",
             "When the decision is move-to-durable-doc, remove the entry from memory now and add one durableDocAssignment. Do not wait for the durable document update before removing memory.",
