@@ -312,9 +312,13 @@ An accepted revision grants one pending PM route. `message-service` claims that
 approval before terminal submission and confirms it only from the target
 role's matching `UserPromptSubmit`; confirmation appends the history row and
 clears the approval. Exact user overrides are recorded by the backend and are
-bound to one rejected transition. The runtime record also identifies the
-current root flow, active Debug or Diagnosis branch, branch return, and the
-first dispatch of the active flow run. Those fields isolate repeated and
+bound to one rejected transition. An override changes only that transition's
+permission; flow relationships still determine whether the existing run is
+preserved or a genuinely independent flow run starts. The runtime record also
+identifies the current root flow, active Debug or Diagnosis branch, branch
+return, and the first dispatch of the active flow run. A branch return retains
+the parent implementation history even when the authorized return dispatch
+adds another Tester round before docs sync. Those fields isolate repeated and
 switched flows from older history. Completion requires evidence produced after
 the current role dispatch; an active branch cannot consume parent Final
 Acceptance or complete independently.

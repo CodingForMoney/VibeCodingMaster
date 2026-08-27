@@ -335,7 +335,6 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
         state,
         current,
         pending.effectiveFlow,
-        Boolean(pending.overrideAuthorizationId),
         entry.sequence
       );
       const completed: WorkflowProgressDocument = {
@@ -590,7 +589,7 @@ async function getAllowedTransitions(
   }
   const segment = activeFlowSegment(current.history, flow, flowRun.startedAtSequence);
   if (flow === "code-change") {
-    return allowedCodeChange(fs, input, state, segment, flowRun.resumedFromBranch !== undefined);
+    return allowedCodeChange(fs, input, state, segment, flowRun.resumedFromBranch);
   }
   if (flow === "architect-debug") {
     return allowedArchitectFix(
@@ -629,12 +628,19 @@ async function allowedCodeChange(
   input: WorkflowControlContext,
   state: WorkflowControlState,
   segment: WorkflowDispatchHistoryEntry[],
-  resumedFromBranch: boolean
+  resumedFromBranch: WorkflowFlowRun["resumedFromBranch"]
 ): Promise<string[]> {
   const coderIndex = findLastIndex(segment, (entry) => entry.targetRole === "coder");
   const testerIndex = findLastIndex(segment, (entry) => entry.targetRole === "tester");
-  if (resumedFromBranch && coderIndex < 0 && testerIndex < 0) {
-    return allowedPostImplementationArchitect(fs, input, state, "code-change", segment);
+  if (resumedFromBranch && coderIndex < 0) {
+    if (testerIndex < 0) {
+      return allowedPostImplementationArchitect(fs, input, state, "code-change", segment);
+    }
+    return allowedAfterTester(fs, input, state, "code-change", resumedFromBranch, {
+      testerFailureFlow: "architect-debug",
+      implementationFailureFlow: "architect-debug",
+      successTarget: "code-change/architect"
+    });
   }
   if (coderIndex < 0) {
     const plan = await artifactState(fs, input, "architecture-plan.md", "architecture-plan");
@@ -660,7 +666,7 @@ async function allowedCodeChange(
   if (architectsAfterTester.length > 0) {
     return allowedPostImplementationArchitect(fs, input, state, "code-change", architectsAfterTester);
   }
-  return allowedAfterTester(fs, input, state, "coder", {
+  return allowedAfterTester(fs, input, state, "code-change", "coder", {
     testerFailureFlow: "architect-debug",
     implementationFailureFlow: "architect-debug",
     successTarget: "code-change/architect"
@@ -728,7 +734,7 @@ async function allowedArchitectFix(
       ? []
       : [`${source}/architect`];
   }
-  return allowedAfterTester(fs, input, state, source, {
+  return allowedAfterTester(fs, input, state, source, source, {
     testerFailureFlow: source === "architect-debug" ? "architecture-diagnosis" : undefined,
     implementationFailureFlow: source,
     successTarget: parentFlow ? `${parentFlow}/architect` : `${source}/architect`
@@ -761,6 +767,7 @@ async function allowedAfterTester(
   fs: FileSystemAdapter,
   input: WorkflowControlContext,
   state: WorkflowControlState,
+  currentFlow: "code-change" | "architect-debug" | "architecture-diagnosis",
   codeSource: "coder" | "architect-debug" | "architecture-diagnosis",
   options: {
     testerFailureFlow?: "architect-debug" | "architecture-diagnosis";
@@ -769,7 +776,6 @@ async function allowedAfterTester(
   }
 ): Promise<string[]> {
   const test = await artifactState(fs, input, "test-report.md", "test-report");
-  const currentFlow = codeSource === "coder" ? "code-change" : codeSource;
   if (!evidenceIsFresh(state, currentFlow, "tester", "test-report.md", test.hash)) {
     return [`${currentFlow}/tester`];
   }
@@ -880,10 +886,9 @@ async function advanceFlowRun(
   state: WorkflowControlState,
   current: WorkflowProgressDocument,
   effectiveFlow: WorkflowFlow,
-  usedOverride: boolean,
   nextSequence: number
 ): Promise<WorkflowFlowRun> {
-  if (!current.flow || current.status === "completed" || (usedOverride && effectiveFlow !== current.flow)) {
+  if (!current.flow || current.status === "completed") {
     return newFlowRun(effectiveFlow, nextSequence);
   }
   const run = resolveFlowRun(state.flowRun, current);

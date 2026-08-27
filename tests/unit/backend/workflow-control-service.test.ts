@@ -473,6 +473,148 @@ describe("workflow control service", () => {
     expect((await readProgress(fs, context)).status).toBe("completed");
   });
 
+  it("preserves the parent Code-Change run when an override adds Tester at Debug Branch exit", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({
+      fs,
+      now: sequenceClock(),
+      id: () => "branch-exit-override"
+    });
+    await enterCodeChangeTester(service, fs, context);
+    await writeTestReport(fs, context, "fail", "none", "code-change validation failure");
+
+    await advance(service, fs, context, "architect", "architect-debug", "Tester failed");
+    await writeArchitectDebug(fs, context, "debug repair");
+    await advance(service, fs, context, "tester", undefined, "validate debug repair");
+    await writeTestReport(fs, context, "pass", "none", "debug branch validation");
+    await writeGateIndex(fs, context, {
+      validation: "approve",
+      codeDiff: "approve",
+      codeDiffSource: "architect-debug"
+    }, "2026-08-06T00:02:30.000Z");
+
+    await advanceWithOverride(
+      service,
+      fs,
+      context,
+      "tester",
+      "user-authorized additional validation",
+      "Run one additional Tester round before docs sync.",
+      "code-change"
+    );
+
+    expect((await service.getState(context))).toMatchObject({
+      flowRun: {
+        rootFlow: "code-change",
+        resumedFromBranch: "architect-debug",
+        startedAtSequence: 1
+      },
+      userAuthorizations: [
+        expect.objectContaining({ id: "branch-exit-override", status: "consumed" })
+      ]
+    });
+
+    await writeTestReport(fs, context, "pass", "none", "additional validation completed");
+    await writeGateIndex(fs, context, {
+      validation: "approve",
+      codeDiff: "approve",
+      codeDiffSource: "architect-debug"
+    }, "2026-08-06T00:02:40.000Z");
+
+    const restored = createWorkflowControlService({ fs, now: sequenceClock() });
+    await advance(restored, fs, context, "architect", undefined, "resume required docs sync");
+    expect((await restored.getState(context)).userAuthorizations).toHaveLength(1);
+
+    await writeDocsSyncReport(fs, context, "synced", "debug branch and additional validation");
+    await writeFinalAcceptance(fs, context);
+    await completeFlow(restored, fs, context);
+
+    const progress = await readProgress(fs, context);
+    expect(progress.status).toBe("completed");
+    expect(progress.history.map((entry) => `${entry.flow}/${entry.targetRole}`)).toEqual([
+      "code-change/architect",
+      "code-change/coder",
+      "code-change/tester",
+      "architect-debug/architect",
+      "architect-debug/tester",
+      "code-change/tester",
+      "code-change/architect"
+    ]);
+    expect(progress.history.filter((entry) => entry.overrideAuthorizationId)).toHaveLength(1);
+  });
+
+  it("starts a fresh flow run for an override that genuinely switches active flows", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock(), id: () => "flow-switch-override" });
+
+    await advance(service, fs, context, "architect", "code-change", "accepted code change");
+    await advanceWithOverride(
+      service,
+      fs,
+      context,
+      "architect",
+      "user-authorized independent documentation flow",
+      "Switch this active task to Docs-Only now.",
+      "docs-only"
+    );
+
+    expect((await service.getState(context)).flowRun).toEqual({
+      rootFlow: "docs-only",
+      startedAtSequence: 2
+    });
+  });
+
+  it("keeps Diagnosis as the reviewed code source when an override adds Tester at branch exit", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock(), id: () => "diagnosis-exit-override" });
+    await enterCodeChangeTester(service, fs, context);
+    await writeTestReport(fs, context, "fail", "none", "code-change validation failure");
+
+    await advance(service, fs, context, "architect", "architect-debug", "Tester failed");
+    await writeArchitectDebug(fs, context, "debug repair");
+    await advance(service, fs, context, "tester", undefined, "validate debug repair");
+    await writeTestReport(fs, context, "fail", "none", "debug validation failure");
+
+    await advance(service, fs, context, "architect", "architecture-diagnosis", "debug repair failed");
+    await writeArchitectureDiagnosis(fs, context, "diagnosis repair");
+    await advance(service, fs, context, "tester", undefined, "validate diagnosis repair");
+    await writeTestReport(fs, context, "pass", "none", "diagnosis branch validation");
+    await writeGateIndex(fs, context, {
+      validation: "approve",
+      codeDiff: "approve",
+      codeDiffSource: "architect-diagnosis"
+    }, "2026-08-06T00:02:50.000Z");
+
+    await advanceWithOverride(
+      service,
+      fs,
+      context,
+      "tester",
+      "user-authorized additional validation",
+      "Run one additional Tester round before docs sync.",
+      "code-change"
+    );
+    expect((await service.getState(context)).flowRun).toMatchObject({
+      rootFlow: "code-change",
+      resumedFromBranch: "architecture-diagnosis",
+      startedAtSequence: 1
+    });
+
+    await writeTestReport(fs, context, "pass", "none", "additional diagnosis validation completed");
+    await writeGateIndex(fs, context, {
+      validation: "approve",
+      codeDiff: "approve",
+      codeDiffSource: "architect-diagnosis"
+    }, "2026-08-06T00:03:00.000Z");
+    await advance(service, fs, context, "architect", undefined, "resume required docs sync");
+
+    expect((await service.getState(context)).userAuthorizations).toHaveLength(1);
+    expect((await readProgress(fs, context)).history.at(-1)).toMatchObject({
+      flow: "code-change",
+      targetRole: "architect"
+    });
+  });
+
   it("replaces a failed Debug Branch with Diagnosis and returns to Code-Change", async () => {
     const { context, fs } = await createContext(roots);
     const service = createWorkflowControlService({ fs, now: sequenceClock() });
@@ -823,15 +965,17 @@ async function advanceWithOverride(
   context: WorkflowControlContext,
   targetRole: DispatchableRole,
   evidence: string,
-  authorizationText: string
+  authorizationText: string,
+  requestedFlow?: WorkflowProgressDocument["flow"]
 ): Promise<void> {
   const current = await readProgress(fs, context);
-  const effectiveFlow = current.flow!;
+  const effectiveFlow = requestedFlow ?? current.flow!;
   const violatedRule = `Transition ${effectiveFlow}/${targetRole} is not legal after the confirmed Workflow Progress history.`;
   const proposal: WorkflowProgressDocument = {
     ...current,
     revision: current.revision + 1,
     proposal: {
+      requestedFlow,
       targetRole,
       evidence,
       authorizationText,

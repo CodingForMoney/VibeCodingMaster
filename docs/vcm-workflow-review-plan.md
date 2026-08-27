@@ -108,7 +108,10 @@ An illegal transition can proceed only after direct user authorization:
 An authorization is bound to one task, submitting role, operation, base revision, history hash, flow, target,
 evidence, violated rule, and exact authorization text. It bypasses only the
 workflow transition rule; it does not bypass role ownership, routing,
-filesystem, artifact, Gate, or runtime safety rules.
+filesystem, artifact, Gate, or runtime safety rules. Consuming an authorization
+does not restart the active flow run. A return from a Debug or Diagnosis Branch
+retains the parent run and its completed implementation history; a switch to an
+independent flow starts a fresh run.
 
 ## Supported Flows
 
