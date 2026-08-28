@@ -1,5 +1,6 @@
 import path from "node:path";
 import { isVcmRoleName } from "../../shared/constants.js";
+import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
 import type {
@@ -67,6 +68,7 @@ export interface TranslationService {
   retryFailedTranslations(sessionId: string): Promise<TranslationFailuresResult>;
   ignoreTranslationFailures(sessionId: string): Promise<TranslationFailuresResult>;
   translateGatewayOutput(input: TranslateGatewayOutputInput): Promise<string>;
+  shouldDelayFlowPauseNotification(input: FlowPauseTranslationInput): Promise<boolean>;
   getDiagnostics(): TranslationDiagnostics;
 }
 
@@ -87,6 +89,13 @@ export interface PollTranslationTaskFeedServiceInput {
   taskSlug: string;
   after: number;
   limit?: number;
+}
+
+export interface FlowPauseTranslationInput {
+  repoRoot: string;
+  taskRepoRoot: string;
+  taskSlug: string;
+  roundState: VcmSessionRoundState;
 }
 
 export interface RecordTranslationConversationBoundaryInput {
@@ -214,6 +223,11 @@ interface TaskFeedState {
   nextSeq: number;
   seenSessionEvents: Set<string>;
 }
+
+type TranslationTaskContext = Pick<
+  PollTranslationTaskFeedServiceInput,
+  "repoRoot" | "taskRepoRoot" | "taskSlug"
+>;
 
 type TranslationSessionEventInput =
   | { type: "entry"; entry: TranslationEntry }
@@ -1471,6 +1485,68 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         hint: "Wait for the translation panel to finish translating the PM final reply, then retry from Gateway."
       });
     },
+    async shouldDelayFlowPauseNotification(input) {
+      const round = input.roundState;
+      if (
+        !round.flowPause?.paused
+        || round.flowPause.reason !== "stopped-no-next-turn"
+        || round.status !== "stopped"
+        || !round.roundId
+        || !round.activeRole
+        || !isVcmRoleName(round.activeRole)
+      ) {
+        return false;
+      }
+
+      const preferences = await deps.appSettings.getPreferences();
+      if (!preferences.translationEnabled
+        || (preferences.translationOutputMode === "pm-final-only" && round.activeRole !== "project-manager")) {
+        return false;
+      }
+
+      const roleSession = await deps.sessionService.getRoleSession(input.repoRoot, input.taskSlug, round.activeRole);
+      if (!roleSession) {
+        return false;
+      }
+      await prepareCache({
+        repoRoot: input.taskRepoRoot,
+        baseRepoRoot: input.repoRoot,
+        taskSlug: input.taskSlug,
+        role: roleSession.role,
+        sessionId: roleSession.id
+      });
+      if (roleSession.status === "running") {
+        startTranscriptTail(roleSession);
+      }
+
+      const candidate = findRoundFinalReplyCandidate(input, round);
+      if (!candidate) {
+        return isWithinTranscriptReplayGrace(round.stoppedAt);
+      }
+      if (candidate.entry.status === "translated" || candidate.entry.status === "failed") {
+        return false;
+      }
+      if (candidate.entry.status === "preserved") {
+        const config: TranslationRuntimeConfig = {
+          sourceLanguage: TRANSLATION_SOURCE_LANGUAGE,
+          targetLanguage: preferences.translationTargetLanguage,
+          inputMode: TRANSLATION_INPUT_MODE,
+          outputMode: preferences.translationOutputMode,
+          contextEnabled: TRANSLATION_CONTEXT_ENABLED
+        };
+        const started = startClaudeOutputTranslation(candidate.sessionId, candidate.entry.sourceText, config, {
+          entryId: candidate.entry.id,
+          replaceExisting: true,
+          flushImmediately: true,
+          metadata: {
+            transcriptStopReason: candidate.entry.transcriptStopReason,
+            transcriptTimestamp: candidate.entry.transcriptTimestamp
+          }
+        });
+        return started !== undefined;
+      }
+      return candidate.entry.status === "queued" || candidate.entry.status === "translating";
+    },
     getDiagnostics() {
       let transcriptWatchers = 0;
       let listeners = 0;
@@ -1538,8 +1614,8 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
   }
 
   function findRoundFinalReplyCandidate(
-    input: PollTranslationTaskFeedServiceInput,
-    round: { activeRole?: RoleName; stoppedAt?: string }
+    input: TranslationTaskContext,
+    round: { activeRole?: RoleName; stoppedAt?: string; lastTurnStartedAt?: string }
   ): { sessionId: string; entry: TranslationEntry } | undefined {
     const candidates: Array<{ sessionId: string; entry: TranslationEntry }> = [];
     for (const [sessionId, state] of sessionStates) {
@@ -1547,7 +1623,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         continue;
       }
       for (const entry of state.entries) {
-        if (isRoundFinalCandidateEntry(entry, input, round.stoppedAt)) {
+        if (isRoundFinalCandidateEntry(entry, input, round.stoppedAt, round.lastTurnStartedAt)) {
           candidates.push({ sessionId, entry });
         }
       }
@@ -1560,7 +1636,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 
   function isRoundFinalCandidateState(
     state: SessionState,
-    input: PollTranslationTaskFeedServiceInput,
+    input: TranslationTaskContext,
     activeRole?: RoleName
   ): boolean {
     if (state.repoRoot !== input.taskRepoRoot || state.taskSlug !== input.taskSlug || !state.role) {
@@ -1571,8 +1647,9 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 
   function isRoundFinalCandidateEntry(
     entry: TranslationEntry,
-    input: PollTranslationTaskFeedServiceInput,
-    stoppedAt?: string
+    input: TranslationTaskContext,
+    stoppedAt?: string,
+    lastTurnStartedAt?: string
   ): boolean {
     if (
       entry.taskSlug !== input.taskSlug ||
@@ -1582,7 +1659,14 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     ) {
       return false;
     }
-    if (entry.status !== "preserved" && entry.status !== "queued" && entry.status !== "translating" && entry.status !== "translated") {
+    if (entry.status !== "preserved"
+      && entry.status !== "queued"
+      && entry.status !== "translating"
+      && entry.status !== "translated"
+      && entry.status !== "failed") {
+      return false;
+    }
+    if (lastTurnStartedAt && entry.transcriptTimestamp && entry.transcriptTimestamp < lastTurnStartedAt) {
       return false;
     }
     if (!stoppedAt || !entry.transcriptTimestamp) {
@@ -1598,6 +1682,14 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       return left.id.localeCompare(right.id);
     }
     return leftTime.localeCompare(rightTime);
+  }
+
+  function isWithinTranscriptReplayGrace(stoppedAt: string | undefined): boolean {
+    const stoppedAtMs = Date.parse(stoppedAt ?? "");
+    const nowMs = Date.parse(now());
+    return Number.isFinite(stoppedAtMs)
+      && Number.isFinite(nowMs)
+      && nowMs - stoppedAtMs < TRANSCRIPT_REPLAY_GRACE_MS;
   }
 
   async function findReusableGatewayOutputTranslation(input: TranslateGatewayOutputInput): Promise<string | undefined> {

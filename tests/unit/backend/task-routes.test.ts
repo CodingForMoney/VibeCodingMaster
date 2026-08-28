@@ -227,6 +227,7 @@ describe("task routes", () => {
     const app = Fastify({ logger: false });
     const task = createTask();
     let declaredWorkflow: Record<string, unknown> | undefined;
+    let translationPending = true;
 
     registerTaskRoutes(app, {
       architectRestartService: {
@@ -302,20 +303,34 @@ describe("task routes", () => {
         async getSessionRoundState() {
           return {
             taskSlug: "demo-task",
-            status: "running",
+            status: "stopped",
+            roundId: "round-1",
+            activeRole: "project-manager",
+            lastTurnStartedAt: "2026-05-31T00:00:00.000Z",
+            stoppedAt: "2026-05-31T00:00:01.000Z",
             turnCount: 1,
-            completedTurnCount: 0,
+            completedTurnCount: 1,
             totalRoundCount: 1,
             totalTurnCount: 1,
-            totalCompletedTurnCount: 0,
+            totalCompletedTurnCount: 1,
             totalCcActiveMs: 1000,
             currentRoundCcActiveMs: 1000,
-            roles: ["architect"],
-            updatedAt: "2026-05-31T00:00:00.000Z"
+            roles: ["project-manager"],
+            flowPause: {
+              paused: true,
+              reason: "stopped-no-next-turn",
+              role: "project-manager"
+            },
+            updatedAt: "2026-05-31T00:00:01.000Z"
           };
         },
         stopTask() {}
       } as never,
+      translationService: {
+        async shouldDelayFlowPauseNotification() {
+          return translationPending;
+        }
+      },
       taskWorkflowService: {
         async getState() {
           return {
@@ -368,7 +383,7 @@ describe("task routes", () => {
       },
       messages: [{ id: "msg-1" }],
       orchestration: { mode: "auto" },
-      roundState: { status: "running" },
+      roundState: { status: "stopped" },
       workflowState: {
         declared: { flow: "code-change", step: "architect-planning" }
       },
@@ -376,6 +391,19 @@ describe("task routes", () => {
         sessionId: "runtime-architect",
         status: "pending"
       }
+    });
+    expect(response.json().roundState).not.toHaveProperty("flowPause");
+
+    translationPending = false;
+    const releasedResponse = await app.inject({
+      method: "GET",
+      url: "/api/tasks/demo-task/workspace-state"
+    });
+    expect(releasedResponse.statusCode).toBe(200);
+    expect(releasedResponse.json().roundState.flowPause).toMatchObject({
+      paused: true,
+      reason: "stopped-no-next-turn",
+      role: "project-manager"
     });
 
     const updateResponse = await app.inject({

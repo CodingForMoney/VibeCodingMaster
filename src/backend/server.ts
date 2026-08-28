@@ -191,7 +191,8 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     roundService: deps.roundService,
     taskWorkflowService: deps.taskWorkflowService,
     architectRestartService: deps.architectRestartService,
-    roleStallDetector: deps.roleStallDetector
+    roleStallDetector: deps.roleStallDetector,
+    translationService: deps.translationService
   });
   registerSessionRoutes(app, {
     projectService: deps.projectService,

@@ -17,6 +17,7 @@ import type { RoundService } from "../services/round-service.js";
 import type { TaskWorkflowService } from "../services/task-workflow-service.js";
 import type { ArchitectRestartService } from "../services/architect-restart-service.js";
 import type { RoleStallDetectorService } from "../services/role-stall-detector-service.js";
+import type { TranslationService } from "../services/translation-service.js";
 
 export interface TaskRouteDeps {
   projectService: ProjectService;
@@ -29,6 +30,7 @@ export interface TaskRouteDeps {
   taskWorkflowService?: Pick<TaskWorkflowService, "getState" | "declare">;
   architectRestartService: Pick<ArchitectRestartService, "getState">;
   roleStallDetector: Pick<RoleStallDetectorService, "getWarning" | "ignoreWarning" | "recoverWarning">;
+  translationService?: Pick<TranslationService, "shouldDelayFlowPauseNotification">;
 }
 
 export function registerTaskRoutes(app: FastifyInstance, deps: TaskRouteDeps): void {
@@ -111,12 +113,18 @@ export function registerTaskRoutes(app: FastifyInstance, deps: TaskRouteDeps): v
           taskSlug
         }) ?? Promise.resolve(degradedWorkflowState(taskSlug))
       ]);
+      const displayedRoundState = await delayFlowPauseForTranslation(deps, {
+        repoRoot: project.repoRoot,
+        taskRepoRoot,
+        taskSlug,
+        roundState
+      });
 
       return {
         taskStatus,
         messages,
         orchestration,
-        roundState,
+        roundState: displayedRoundState,
         workflowState,
         architectRestart: deps.architectRestartService.getState(project.repoRoot, taskSlug),
         roleStallWarning: deps.roleStallDetector.getWarning(project.repoRoot, taskSlug)
@@ -199,6 +207,27 @@ export function registerTaskRoutes(app: FastifyInstance, deps: TaskRouteDeps): v
     const project = await requireCurrentProject(deps.projectService);
     return deps.taskCloseService.closeTask(project.repoRoot, request.params.taskSlug);
   });
+}
+
+async function delayFlowPauseForTranslation(
+  deps: Pick<TaskRouteDeps, "translationService">,
+  input: {
+    repoRoot: string;
+    taskRepoRoot: string;
+    taskSlug: string;
+    roundState: VcmSessionRoundState;
+  }
+): Promise<VcmSessionRoundState> {
+  if (!input.roundState.flowPause?.paused || !deps.translationService) {
+    return input.roundState;
+  }
+  try {
+    const pending = await deps.translationService.shouldDelayFlowPauseNotification(input);
+    return pending ? { ...input.roundState, flowPause: undefined } : input.roundState;
+  } catch {
+    // Translation-state failures must release, rather than suppress, the pause alert.
+    return input.roundState;
+  }
 }
 
 function requireWarningId(value: unknown): string {

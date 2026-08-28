@@ -1237,6 +1237,192 @@ describe("translation-service", () => {
     });
   });
 
+  it("delays the flow pause notification until round-final translation succeeds", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+    });
+    await appSettings.updatePreferences({
+      translationEnabled: true,
+      translationOutputMode: "round-final"
+    });
+    const pmSession = createRoleSessionRecord({
+      id: "session-pm",
+      role: "project-manager",
+      command: "claude --agent project-manager",
+      cwd: "/repo/.claude/worktrees/demo-task"
+    });
+    const transcripts = createSessionTranscriptStub();
+    const worker = createDeferredTranslationWorkerServiceStub("Round final translated.");
+    const service = createTranslationService({
+      appSettings,
+      translationWorkerService: worker,
+      runtime: createRuntimeStub([pmSession]),
+      sessionRegistry: createRegistryStub(pmSession),
+      transcripts,
+      sessionService: {
+        async listRoleSessions() {
+          return [pmSession];
+        },
+        async getRoleSession() {
+          return pmSession;
+        }
+      } as SessionService,
+      projectService: createProjectServiceStub()
+    });
+    const roundState = createStoppedFlowPauseRoundState();
+    const messages: TranslationWsMessage[] = [];
+    service.subscribeToSession(pmSession.id, (message) => messages.push(message));
+    await service.pollTaskFeed({
+      repoRoot: "/repo",
+      taskRepoRoot: "/repo/.claude/worktrees/demo-task",
+      taskSlug: "demo-task",
+      after: 1
+    });
+    transcripts.emit(pmSession.id, {
+      kind: "text",
+      id: "pm-round-final",
+      timestamp: "2026-05-30T00:00:02.000Z",
+      stopReason: "end_turn",
+      text: "PM final reply."
+    });
+    await waitFor(() => messages.some((message) =>
+      message.type === "translation-entry"
+      && message.entry.id === "pm-round-final"
+      && message.entry.status === "preserved"
+    ));
+
+    await expect(service.shouldDelayFlowPauseNotification({
+      repoRoot: "/repo",
+      taskRepoRoot: "/repo/.claude/worktrees/demo-task",
+      taskSlug: "demo-task",
+      roundState
+    })).resolves.toBe(true);
+
+    worker.resolve();
+    await waitFor(() => messages.some((message) =>
+      message.type === "translation-entry"
+      && message.entry.id === "pm-round-final"
+      && message.entry.status === "translated"
+    ));
+    await expect(service.shouldDelayFlowPauseNotification({
+      repoRoot: "/repo",
+      taskRepoRoot: "/repo/.claude/worktrees/demo-task",
+      taskSlug: "demo-task",
+      roundState
+    })).resolves.toBe(false);
+  });
+
+  it("releases the flow pause notification when round-final translation fails", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+    });
+    await appSettings.updatePreferences({
+      translationEnabled: true,
+      translationOutputMode: "round-final"
+    });
+    const pmSession = createRoleSessionRecord({
+      id: "session-pm",
+      role: "project-manager",
+      command: "claude --agent project-manager",
+      cwd: "/repo/.claude/worktrees/demo-task"
+    });
+    const transcripts = createSessionTranscriptStub();
+    const service = createTranslationService({
+      appSettings,
+      translationWorkerService: createAlwaysFailTranslationWorkerServiceStub(),
+      runtime: createRuntimeStub([pmSession]),
+      sessionRegistry: createRegistryStub(pmSession),
+      transcripts,
+      sessionService: {
+        async listRoleSessions() {
+          return [pmSession];
+        },
+        async getRoleSession() {
+          return pmSession;
+        }
+      } as SessionService,
+      projectService: createProjectServiceStub()
+    });
+    const roundState = createStoppedFlowPauseRoundState();
+    const messages: TranslationWsMessage[] = [];
+    service.subscribeToSession(pmSession.id, (message) => messages.push(message));
+    await service.pollTaskFeed({
+      repoRoot: "/repo",
+      taskRepoRoot: "/repo/.claude/worktrees/demo-task",
+      taskSlug: "demo-task",
+      after: 1
+    });
+    transcripts.emit(pmSession.id, {
+      kind: "text",
+      id: "pm-round-final-failed",
+      timestamp: "2026-05-30T00:00:02.000Z",
+      stopReason: "end_turn",
+      text: "PM final reply."
+    });
+    await waitFor(() => messages.some((message) =>
+      message.type === "translation-entry"
+      && message.entry.id === "pm-round-final-failed"
+      && message.entry.status === "preserved"
+    ));
+
+    await expect(service.shouldDelayFlowPauseNotification({
+      repoRoot: "/repo",
+      taskRepoRoot: "/repo/.claude/worktrees/demo-task",
+      taskSlug: "demo-task",
+      roundState
+    })).resolves.toBe(true);
+    await waitFor(() => messages.some((message) =>
+      message.type === "translation-entry"
+      && message.entry.id === "pm-round-final-failed"
+      && message.entry.status === "failed"
+    ));
+    await expect(service.shouldDelayFlowPauseNotification({
+      repoRoot: "/repo",
+      taskRepoRoot: "/repo/.claude/worktrees/demo-task",
+      taskSlug: "demo-task",
+      roundState
+    })).resolves.toBe(false);
+  });
+
+  it("does not delay flow pause notifications when translation is disabled", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+    });
+    await appSettings.updatePreferences({
+      translationEnabled: false,
+      translationOutputMode: "round-final"
+    });
+    const pmSession = createRoleSessionRecord({
+      id: "session-pm",
+      role: "project-manager",
+      cwd: "/repo/.claude/worktrees/demo-task"
+    });
+    const service = createTranslationService({
+      appSettings,
+      runtime: createRuntimeStub([pmSession]),
+      sessionRegistry: createRegistryStub(pmSession),
+      transcripts: createSessionTranscriptStub(),
+      sessionService: {
+        async getRoleSession() {
+          return pmSession;
+        }
+      } as SessionService
+    });
+
+    await expect(service.shouldDelayFlowPauseNotification({
+      repoRoot: "/repo",
+      taskRepoRoot: "/repo/.claude/worktrees/demo-task",
+      taskSlug: "demo-task",
+      roundState: createStoppedFlowPauseRoundState()
+    })).resolves.toBe(false);
+  });
+
   it("does not translate round-final candidates for manual interrupts", async () => {
     const fs = createMemoryFs();
     const appSettings = createAppSettingsService({
@@ -2230,6 +2416,32 @@ function createRoundServiceStub(overrides: Partial<VcmSessionRoundState> = {}): 
         ...overrides
       };
     }
+  };
+}
+
+function createStoppedFlowPauseRoundState(): VcmSessionRoundState {
+  return {
+    taskSlug: "demo-task",
+    status: "stopped",
+    roundId: "round-1",
+    activeRole: "project-manager",
+    lastTurnStartedAt: "2026-05-30T00:00:01.000Z",
+    stoppedAt: "2026-05-30T00:00:03.000Z",
+    roundSequence: 1,
+    turnCount: 1,
+    completedTurnCount: 1,
+    totalRoundCount: 1,
+    totalTurnCount: 1,
+    totalCompletedTurnCount: 1,
+    totalCcActiveMs: 1000,
+    currentRoundCcActiveMs: 1000,
+    roles: ["project-manager"],
+    flowPause: {
+      paused: true,
+      reason: "stopped-no-next-turn",
+      role: "project-manager"
+    },
+    updatedAt: "2026-05-30T00:00:03.000Z"
   };
 }
 
