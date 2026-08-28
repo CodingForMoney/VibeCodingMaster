@@ -560,6 +560,33 @@ describe("auto-memory-service", () => {
     expect(context.gitCommits).toHaveLength(0);
   });
 
+  it("accepts a no-change review when memory blocks already contain extra trailing blank lines", async () => {
+    const context = await createContext(true);
+    for (const relativePath of [
+      "CLAUDE.md",
+      ".claude/agents/architect.md",
+      ".claude/agents/tester.md",
+      ".claude/agents/reviewer.md"
+    ]) {
+      const hostPath = path.join(context.taskRepoRoot, relativePath);
+      const content = await readFile(hostPath, "utf8");
+      await writeFile(hostPath, content.replace("\n</VCM-memory>", "\n\n</VCM-memory>"), "utf8");
+    }
+    await prepareHarnessMemoryReview(context);
+
+    await context.service.handleHarnessEngineerHook({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      eventName: "Stop"
+    });
+
+    const state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.status).toBe("idle");
+    expect(state.runs[0]).toMatchObject({ status: "applied", diff: "No memory changes.\n" });
+    expect(context.gitCommits).toHaveLength(0);
+  });
+
   it("treats each level-two memory section as one existing review entry", async () => {
     const context = await createContext(true);
     const sharedMemory = [
@@ -654,6 +681,32 @@ describe("auto-memory-service", () => {
     const state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
     expect(state.status).toBe("failed");
     expect(state.active?.error).toContain("changed content outside the VCM memory block");
+    expect(state.active?.error).toContain("after-block content differs at character");
+    expect(state.active?.error).toContain("Unauthorized surrounding edit");
+  });
+
+  it("reports changes before a memory block with the first differing location", async () => {
+    const context = await createContext(true);
+    await prepareHarnessMemoryReview(context);
+    const sharedMemoryHostPath = path.join(context.taskRepoRoot, "CLAUDE.md");
+    await writeFile(
+      sharedMemoryHostPath,
+      `Unauthorized heading.\n${await readFile(sharedMemoryHostPath, "utf8")}`,
+      "utf8"
+    );
+    context.recordHarnessCommit(["CLAUDE.md"]);
+
+    await context.service.handleHarnessEngineerHook({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      eventName: "Stop"
+    });
+
+    const state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.status).toBe("failed");
+    expect(state.active?.error).toContain("before-block content differs at character 0");
+    expect(state.active?.error).toContain("Unauthorized heading");
   });
 
   it("rejects a Harness Engineer memory commit containing unrelated files", async () => {

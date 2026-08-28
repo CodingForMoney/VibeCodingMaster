@@ -25,8 +25,10 @@ import { VcmError } from "../errors.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import {
+  readVcmMemoryHostFrame,
   readVcmMemoryBlock,
-  replaceVcmMemoryBlock
+  replaceVcmMemoryBlock,
+  type VcmMemoryHostFrame
 } from "../templates/harness/memory-block.js";
 import type { AppSettingsService } from "./app-settings-service.js";
 import {
@@ -347,19 +349,23 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
 
   async function assertOnlyMemoryBlocksChanged(
     taskRepoRoot: string,
-    runId: string,
-    currentMemory: MemorySet
+    runId: string
   ): Promise<void> {
     for (const definition of MEMORY_FILE_DEFINITIONS) {
       const beforeHost = await deps.fs.readText(
         resolveRepoPath(taskRepoRoot, memoryRunHostFilePath(runId, definition.path))
       );
       const currentHost = await deps.fs.readText(resolveRepoPath(taskRepoRoot, definition.path));
-      const expectedHost = replaceVcmMemoryBlock(beforeHost, currentMemory[definition.path]);
-      if (currentHost !== expectedHost) {
+      const beforeFrame = readVcmMemoryHostFrame(beforeHost);
+      const currentFrame = readVcmMemoryHostFrame(currentHost);
+      if (!beforeFrame || !currentFrame) {
+        throw missingMemoryBlockError(definition.path);
+      }
+      const difference = describeMemoryHostDifference(beforeFrame, currentFrame);
+      if (difference) {
         throw new VcmError({
           code: "MEMORY_REVIEW_SCOPE_CHANGED",
-          message: `Harness Engineer changed content outside the VCM memory block: ${definition.path}`,
+          message: `Harness Engineer changed content outside the VCM memory block: ${definition.path} (${difference}).`,
           statusCode: 409,
           hint: "Restore non-memory content, keep only the reviewed <VCM-memory> edit, and commit the correction."
         });
@@ -1187,7 +1193,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
 
     const before = await readRunMemorySet(taskRepoRoot, state.runId, "before");
     const after = await readMemorySet(taskRepoRoot);
-    await assertOnlyMemoryBlocksChanged(taskRepoRoot, state.runId, after);
+    await assertOnlyMemoryBlocksChanged(taskRepoRoot, state.runId);
 
     const memoryPaths: string[] = MEMORY_FILE_DEFINITIONS.map((definition) => definition.path);
     const uncommittedMemoryDiff = await deps.git.getDiff(taskRepoRoot, "HEAD", null, memoryPaths);
@@ -2109,6 +2115,32 @@ function memoryRunFilePath(runId: string, snapshot: "before" | "after", memoryPa
 
 function memoryRunHostFilePath(runId: string, memoryPath: string): string {
   return `${MEMORY_REVIEW_RUNS_ROOT}/${runId}/host-before/${memoryPath}`;
+}
+
+function describeMemoryHostDifference(
+  before: VcmMemoryHostFrame,
+  current: VcmMemoryHostFrame
+): string | undefined {
+  if (before.beforeBlock !== current.beforeBlock) {
+    return describeTextDifference("before-block content", before.beforeBlock, current.beforeBlock);
+  }
+  if (before.afterBlock !== current.afterBlock) {
+    return describeTextDifference("after-block content", before.afterBlock, current.afterBlock);
+  }
+  return undefined;
+}
+
+function describeTextDifference(label: string, before: string, current: string): string {
+  const limit = Math.min(before.length, current.length);
+  let offset = 0;
+  while (offset < limit && before[offset] === current[offset]) {
+    offset += 1;
+  }
+  const excerptStart = Math.max(0, offset - 20);
+  const excerptEnd = offset + 40;
+  const snapshotExcerpt = JSON.stringify(before.slice(excerptStart, excerptEnd));
+  const currentExcerpt = JSON.stringify(current.slice(excerptStart, excerptEnd));
+  return `${label} differs at character ${offset}; snapshot=${snapshotExcerpt}; current=${currentExcerpt}`;
 }
 
 function missingMemoryBlockError(filePath: string): VcmError {

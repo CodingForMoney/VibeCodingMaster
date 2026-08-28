@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ensureVcmMemoryBlock,
+  readVcmMemoryHostFrame,
   readVcmMemoryBlock,
   replaceVcmMemoryBlock
 } from "../../../src/backend/templates/harness/memory-block.js";
@@ -36,5 +37,24 @@ describe("VCM memory blocks", () => {
     expect(replaceVcmMemoryBlock(content, "New fact\n")).toBe(
       "Before\n\n<VCM-memory>\nNew fact\n</VCM-memory>\n\nAfter\n"
     );
+  });
+
+  it("keeps host framing independent from memory content and whitespace", () => {
+    const original = "Before\n\n<VCM-memory>\nOld\n</VCM-memory>\n\nAfter\n";
+    const changedInside = "Before\n\n<VCM-memory>\nNew fact\n\n\n</VCM-memory>\n\nAfter\n";
+
+    expect(readVcmMemoryHostFrame(changedInside)).toEqual(readVcmMemoryHostFrame(original));
+  });
+
+  it("requires exactly one valid memory block when reading host framing", () => {
+    expect(readVcmMemoryHostFrame("No memory block here.\n")).toBeUndefined();
+    expect(() => readVcmMemoryHostFrame([
+      "<VCM-memory>",
+      "One",
+      "</VCM-memory>",
+      "<VCM-memory>",
+      "Two",
+      "</VCM-memory>"
+    ].join("\n"))).toThrow("exactly one valid <VCM-memory> section");
   });
 });

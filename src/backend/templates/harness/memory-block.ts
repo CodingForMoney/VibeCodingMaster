@@ -2,6 +2,11 @@ export const VCM_MEMORY_BLOCK_START = "<VCM-memory>";
 export const VCM_MEMORY_BLOCK_END = "</VCM-memory>";
 export const DEFAULT_VCM_MEMORY = "No accumulated project memory yet.";
 
+export interface VcmMemoryHostFrame {
+  beforeBlock: string;
+  afterBlock: string;
+}
+
 const MANAGED_BLOCK_START_PATTERN = /<!-- VCM:BEGIN(?:\s+version=\d+)? -->/m;
 
 export function renderVcmMemoryBlock(content = DEFAULT_VCM_MEMORY): string {
@@ -23,6 +28,17 @@ export function replaceVcmMemoryBlock(fileContent: string, content: string): str
     throw new Error("VCM memory block is missing.");
   }
   return `${fileContent.slice(0, range.start)}${renderVcmMemoryBlock(content)}${fileContent.slice(range.end)}`;
+}
+
+export function readVcmMemoryHostFrame(fileContent: string): VcmMemoryHostFrame | undefined {
+  const range = findMemoryBlockRange(fileContent);
+  if (!range) {
+    return undefined;
+  }
+  return {
+    beforeBlock: fileContent.slice(0, range.start),
+    afterBlock: fileContent.slice(range.end)
+  };
 }
 
 export function ensureVcmMemoryBlock(fileContent: string): string {
