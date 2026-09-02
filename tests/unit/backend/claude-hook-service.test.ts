@@ -956,7 +956,7 @@ describe("createClaudeHookService", () => {
       } as Pick<TranslationService, "recordConversationBoundary">,
       appSettings: createAppSettingsStub(),
       gatewayService: {
-        async handlePmStop() {
+        async handleRoleStop() {
           throw new Error("PM stop should not be used for role failures.");
         },
         async handleRoleStopFailure(input) {
@@ -1053,7 +1053,7 @@ describe("createClaudeHookService", () => {
       } as Pick<TranslationService, "recordConversationBoundary">,
       appSettings: createAppSettingsStub(),
       gatewayService: {
-        async handlePmStop() {
+        async handleRoleStop() {
           return undefined;
         },
         async handleRoleStopFailure(input) {

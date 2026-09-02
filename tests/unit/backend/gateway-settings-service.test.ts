@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createGatewaySettingsService,
+  normalizeSettings,
   type GatewaySettingsFile
 } from "../../../src/backend/gateway/gateway-settings-service.js";
 
@@ -37,8 +38,34 @@ describe("gateway-settings-service", () => {
     const settings = await service.loadSettings();
 
     expect(settings.channel).toBe("weixin-ilink");
+    expect(settings.targetRole).toBe("project-manager");
     expect(settings.binding.baseUrl).toBe("https://gateway.example");
     expect(written?.binding.baseUrl).toBe("https://gateway.example");
+  });
+
+  it("normalizes the selected role and migrates cached PM replies", () => {
+    const settings = normalizeSettings({
+      targetRole: "architect",
+      latestPmReplies: {
+        legacy: {
+          repoRoot: "/repo",
+          taskSlug: "task-1",
+          sessionId: "pm-session",
+          claudeSessionId: "claude-pm",
+          transcriptEventId: "reply-1",
+          transcriptTimestamp: "2026-06-11T00:00:00.000Z",
+          capturedAt: "2026-06-11T00:00:01.000Z",
+          text: "Legacy PM reply",
+          truncated: false
+        }
+      }
+    } as never, "2026-06-11T00:00:02.000Z");
+
+    expect(settings.targetRole).toBe("architect");
+    expect(settings.latestRoleReplies[JSON.stringify(["/repo", "task-1", "project-manager"])]).toMatchObject({
+      role: "project-manager",
+      text: "Legacy PM reply"
+    });
   });
 
   it("preserves non-http gateway base URL schemes", async () => {

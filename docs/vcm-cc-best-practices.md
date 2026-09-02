@@ -948,27 +948,26 @@ Supported channels:
 
 Rules:
 
-- Gateway sends ordinary mobile text only to the current task's
-  `project-manager`.
-- Gateway never sends directly to architect, coder, tester, or Reviewer.
-- Gateway pushes only the last PM reply from a normally completed Round, along
-  with the Round completion notice.
+- Gateway sends ordinary mobile text to the current task's selected VCM role;
+  Project Manager is the default.
+- Gateway pushes only the selected role's last reply from a normally completed
+  Round, along with the Round completion notice.
 - Gateway state, credentials, and audit logs live in app-local state, not
   connected repositories.
-- Lark uses the most recent active reachable chat as the PM reply target.
+- Lark uses the most recent active reachable chat as the role reply target.
 - Browser flow-pause UI remains blocking while Gateway is on. Gateway enablement
   turns pause-alert sound off once, and Gateway input successfully submitted to
-  PM dismisses the active browser alert.
+  the selected role dismisses the active browser alert.
 - Gateway translation should reuse the existing translation result when
   available and avoid duplicate translation work.
 - Starting Gateway enables conversation translation, auto-send, and the
   `round-final` output mode.
-- Outbound delivery sends the PM original first, then the existing translation
-  panel result. `/retry` is the explicit path that may create a replacement
-  translation after failure or a missing result.
+- Outbound delivery sends the selected role's original first, then the existing
+  translation panel result. `/retry` is the explicit path that may create a
+  replacement translation after failure or a missing result.
 
 Gateway must stay conservative: no full terminal exposure, no arbitrary shell
-commands, and no direct role routing from mobile chat.
+commands, and no Gateway targeting of Translator or Harness Engineer.
 
 ## 19. Runtime, Hooks, and Recovery
 

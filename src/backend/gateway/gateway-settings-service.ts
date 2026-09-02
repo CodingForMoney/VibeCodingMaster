@@ -8,6 +8,8 @@ import type {
   GatewayStatus,
   UpdateGatewaySettingsRequest
 } from "../../shared/types/gateway.js";
+import { isVcmRoleName } from "../../shared/constants.js";
+import type { VcmRoleName } from "../../shared/types/role.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import { resolveVcmDataDir } from "../vcm-data-dir.js";
 
@@ -18,13 +20,14 @@ export interface GatewaySettingsFile {
   translationEnabled: boolean;
   currentProjectId: string | null;
   currentTaskSlug: string | null;
+  targetRole: VcmRoleName;
   binding: GatewayBindingSettings;
   dedupe: {
     recentInboundMessageIds: string[];
   };
   pendingConfirmations: GatewayPendingConfirmations;
   pushCursors: Record<string, GatewayPushCursor>;
-  latestPmReplies: Record<string, GatewayLatestPmReply>;
+  latestRoleReplies: Record<string, GatewayLatestRoleReply>;
   lastPollStatus: GatewayPollStatus;
   lastMessageStatus: GatewayMessageStatus | null;
   updatedAt: string;
@@ -53,9 +56,10 @@ export interface GatewayPushCursor {
   lastTranscriptTimestamp: string | null;
 }
 
-export interface GatewayLatestPmReply {
+export interface GatewayLatestRoleReply {
   repoRoot: string;
   taskSlug: string;
+  role: VcmRoleName;
   sessionId: string;
   claudeSessionId: string;
   transcriptEventId: string | null;
@@ -137,6 +141,7 @@ export function createGatewaySettingsService(deps: GatewaySettingsServiceDeps): 
         translationEnabled: input.translationEnabled ?? current.translationEnabled,
         currentProjectId: input.currentProjectId !== undefined ? normalizeNullableString(input.currentProjectId) : current.currentProjectId,
         currentTaskSlug: input.currentTaskSlug !== undefined ? normalizeNullableString(input.currentTaskSlug) : current.currentTaskSlug,
+        targetRole: input.targetRole ?? current.targetRole,
         binding: {
           ...current.binding,
           baseUrl: input.baseUrl !== undefined
@@ -167,7 +172,7 @@ export function createGatewaySettingsService(deps: GatewaySettingsServiceDeps): 
           recentInboundMessageIds: []
         },
         pushCursors: {},
-        latestPmReplies: current.latestPmReplies,
+        latestRoleReplies: current.latestRoleReplies,
         lastPollStatus: {
           state: "idle"
         },
@@ -185,6 +190,8 @@ export function createGatewaySettingsService(deps: GatewaySettingsServiceDeps): 
         translationEnabled: settings.translationEnabled,
         currentProjectId: settings.currentProjectId,
         currentTaskSlug: settings.currentTaskSlug,
+        targetRole: settings.targetRole,
+        targetRoleSessionStatus: null,
         binding: {
           accountId: settings.binding.accountId,
           baseUrl: settings.binding.baseUrl,
@@ -229,9 +236,14 @@ export function normalizeSettings(
     ? input.pendingConfirmations as GatewayPendingConfirmations
     : {};
   const pushCursors = isObject(input.pushCursors) ? input.pushCursors as Record<string, GatewayPushCursor> : {};
-  const latestPmReplies = isObject(input.latestPmReplies)
-    ? input.latestPmReplies as Record<string, GatewayLatestPmReply>
-    : {};
+  const legacyInput = input as Partial<GatewaySettingsFile> & {
+    latestPmReplies?: Record<string, Omit<GatewayLatestRoleReply, "role">>;
+  };
+  const latestRoleReplies = isObject(input.latestRoleReplies)
+    ? input.latestRoleReplies
+    : isObject(legacyInput.latestPmReplies)
+      ? legacyInput.latestPmReplies
+      : {};
 
   return {
     version: 1,
@@ -240,6 +252,7 @@ export function normalizeSettings(
     translationEnabled: input.translationEnabled !== false,
     currentProjectId: normalizeNullableString(input.currentProjectId),
     currentTaskSlug: normalizeNullableString(input.currentTaskSlug),
+    targetRole: normalizeTargetRole(input.targetRole),
     binding: {
       ...createDefaultBinding(options.defaultBaseUrl),
       accountId: normalizeNullableString(bindingInput.accountId),
@@ -271,7 +284,7 @@ export function normalizeSettings(
       closeTask: normalizeCloseTaskConfirmation(pendingInput.closeTask)
     },
     pushCursors: normalizePushCursors(pushCursors),
-    latestPmReplies: normalizeLatestPmReplies(latestPmReplies),
+    latestRoleReplies: normalizeLatestRoleReplies(latestRoleReplies),
     lastPollStatus: normalizePollStatus(input.lastPollStatus),
     lastMessageStatus: normalizeMessageStatus(input.lastMessageStatus),
     updatedAt: typeof input.updatedAt === "string" ? input.updatedAt : timestamp
@@ -306,6 +319,10 @@ function normalizeLarkDomain(input: unknown): GatewayLarkDomain | null {
   return input === "lark" || input === "feishu" ? input : null;
 }
 
+function normalizeTargetRole(input: unknown): VcmRoleName {
+  return typeof input === "string" && isVcmRoleName(input) ? input : "project-manager";
+}
+
 function normalizeCloseTaskConfirmation(input: unknown): GatewayPendingConfirmations["closeTask"] {
   if (!isObject(input)) {
     return null;
@@ -333,14 +350,17 @@ function normalizePushCursors(input: Record<string, GatewayPushCursor>): Record<
   return out;
 }
 
-function normalizeLatestPmReplies(input: Record<string, GatewayLatestPmReply>): Record<string, GatewayLatestPmReply> {
-  const out: Record<string, GatewayLatestPmReply> = {};
-  for (const [key, value] of Object.entries(input)) {
+function normalizeLatestRoleReplies(
+  input: Record<string, GatewayLatestRoleReply | Omit<GatewayLatestRoleReply, "role">>
+): Record<string, GatewayLatestRoleReply> {
+  const out: Record<string, GatewayLatestRoleReply> = {};
+  for (const value of Object.values(input)) {
     if (!isObject(value)) {
       continue;
     }
     const repoRoot = normalizeNullableString(value.repoRoot);
     const taskSlug = normalizeNullableString(value.taskSlug);
+    const role = normalizeTargetRole("role" in value ? value.role : undefined);
     const sessionId = normalizeNullableString(value.sessionId);
     const claudeSessionId = normalizeNullableString(value.claudeSessionId);
     const capturedAt = normalizeNullableString(value.capturedAt);
@@ -348,9 +368,10 @@ function normalizeLatestPmReplies(input: Record<string, GatewayLatestPmReply>): 
     if (!repoRoot || !taskSlug || !sessionId || !claudeSessionId || !capturedAt || !text) {
       continue;
     }
-    out[key] = {
+    out[JSON.stringify([repoRoot, taskSlug, role])] = {
       repoRoot,
       taskSlug,
+      role,
       sessionId,
       claudeSessionId,
       transcriptEventId: normalizeNullableString(value.transcriptEventId),

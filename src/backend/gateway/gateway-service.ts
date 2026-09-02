@@ -14,8 +14,9 @@ import type {
   UpdateGatewaySettingsRequest
 } from "../../shared/types/gateway.js";
 import type { ProjectSummary } from "../../shared/types/project.js";
-import type { RoleName } from "../../shared/types/role.js";
+import type { RoleName, VcmRoleName } from "../../shared/types/role.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
+import { getRoleDefinition, isVcmRoleName, VCM_ROLE_NAMES } from "../../shared/constants.js";
 import type { TaskRecord } from "../../shared/types/task.js";
 import { VcmError } from "../errors.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
@@ -45,7 +46,7 @@ import type {
 import { parseGatewayCommand, type GatewayCommand } from "./gateway-command-parser.js";
 import type { GatewayAuditLog } from "./gateway-audit-log.js";
 import type {
-  GatewayLatestPmReply,
+  GatewayLatestRoleReply,
   GatewaySettingsFile,
   GatewaySettingsService
 } from "./gateway-settings-service.js";
@@ -66,7 +67,7 @@ export interface GatewayService {
    * start. Armed → connect and poll now when an account is configured; disarmed →
    * stop polling and tear the channel down (the Lark WS closes via the poll
    * abort). While disarmed every auto-connect path (boot, `getStatus`/reconcile
-   * self-heal, QR success, `updateSettings`) is a no-op, and outbound PM push is
+   * self-heal, QR success, `updateSettings`) is a no-op, and outbound role push is
    * skipped. Returns the exposed status. Idempotent / no-throw.
    */
   setConnectionEnabled(enabled: boolean): Promise<GatewayStatus>;
@@ -75,12 +76,12 @@ export interface GatewayService {
   startLarkRegistration(): Promise<StartGatewayLarkRegistrationResult>;
   checkLarkRegistration(): Promise<CheckGatewayLarkRegistrationResult>;
   bindLarkApp(input: BindGatewayLarkAppRequest): Promise<CheckGatewayLarkRegistrationResult>;
-  handlePmStop(input: GatewayPmStopInput): Promise<void>;
+  handleRoleStop(input: GatewayRoleStopInput): Promise<void>;
   handleRoleStopFailure(input: GatewayRoleStopFailureInput): Promise<void>;
   getDiagnostics(): GatewayDiagnostics;
 }
 
-export interface GatewayPmStopInput {
+export interface GatewayRoleStopInput {
   repoRoot: string;
   taskSlug: string;
   session: RoleSessionRecord;
@@ -134,7 +135,7 @@ interface LarkRegistrationState {
 interface LastFailedGatewayTranslation {
   repoRoot: string;
   taskSlug: string;
-  role: "project-manager";
+  role: VcmRoleName;
   sourceText: string;
   failedAt: string;
   error: string;
@@ -147,10 +148,11 @@ interface GatewayOutputRenderResult {
   translationError?: string;
 }
 
-interface PlainTextPmTarget {
+interface PlainTextRoleTarget {
   project: ProjectSummary;
   task: TaskRecord;
   session: RoleSessionRecord;
+  role: VcmRoleName;
   settings: GatewaySettingsFile;
 }
 
@@ -163,7 +165,7 @@ const DEFAULT_POLL_TIMEOUT_MS = 35_000;
 const LARK_REGISTRATION_CONFIRM_TIMEOUT_MS = 15_000;
 const GATEWAY_ROUND_FINAL_WAIT_MS = 12_000;
 const GATEWAY_ROUND_FINAL_POLL_MS = 250;
-const GATEWAY_TRANSLATION_FAILURE_TEXT = "PM 回复已收到，但翻译失败。\n发送 /retry 重新翻译。";
+const GATEWAY_TRANSLATION_FAILURE_TEXT = "角色回复已收到，但翻译失败。\n发送 /retry 重新翻译。";
 const COMMANDS_ALLOWED_WHEN_DISABLED = new Set<GatewayCommand["kind"]>([
   "help",
   "start",
@@ -183,7 +185,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
   let qrLogin: QrLoginState | null = null;
   let larkRegistrationState: LarkRegistrationState | null = null;
   let lastFailedTranslation: LastFailedGatewayTranslation | null = null;
-  let lastPmInputMessageId: string | null = null;
+  let lastGatewayInputMessageId: string | null = null;
   // Runtime channel-connection arming switch. Not persisted: every process starts
   // disarmed. `ensurePolling` is the single chokepoint that reads it, so no
   // self-heal path can connect the channel while this is false.
@@ -423,7 +425,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
 
   async function handlePlainInbound(update: GatewayInboundMessage, text: string): Promise<void> {
     try {
-      const target = await resolvePlainTextPmTarget(text);
+      const target = await resolvePlainTextRoleTarget(text);
       if (typeof target === "string") {
         await reply(await deps.settings.loadSettings(), update.fromUserId, target);
         await recordInbound(update, "ok", "plain");
@@ -433,21 +435,25 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       if (target.settings.translationEnabled) {
         await reply(await deps.settings.loadSettings(), update.fromUserId, "已收到，正在翻译...");
       } else {
-        await reply(await deps.settings.loadSettings(), update.fromUserId, "已收到，正在发送给 PM...");
+        await reply(
+          await deps.settings.loadSettings(),
+          update.fromUserId,
+          `已收到，正在发送给 ${roleLabel(target.role)}...`
+        );
       }
 
       const englishText = target.settings.translationEnabled
-        ? await translatePlainTextForPm(target, text, update)
+        ? await translatePlainTextForRole(target, text, update)
         : text;
 
       await submitTerminalInput(deps.runtime, target.session.id, englishText);
-      lastPmInputMessageId = update.messageId;
+      lastGatewayInputMessageId = update.messageId;
       await reply(
         await deps.settings.loadSettings(),
         update.fromUserId,
         target.settings.translationEnabled
-          ? formatGatewayInputTranslationSuccess(englishText)
-          : "已发送给 PM。"
+          ? formatGatewayInputTranslationSuccess(target.role, englishText)
+          : `已发送给 ${roleLabel(target.role)}。`
       );
       await recordInbound(update, "ok", "plain");
     } catch (error) {
@@ -460,8 +466,8 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     }
   }
 
-  async function translatePlainTextForPm(
-    target: PlainTextPmTarget,
+  async function translatePlainTextForRole(
+    target: PlainTextRoleTarget,
     text: string,
     update: GatewayInboundMessage
   ): Promise<string> {
@@ -470,7 +476,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         repoRoot: target.project.repoRoot,
         taskRepoRoot: getTaskRuntimeRepoRoot(target.task),
         taskSlug: target.task.taskSlug,
-        role: "project-manager",
+        role: target.role,
         text,
         useContext: false,
         send: false
@@ -480,7 +486,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       await reply(
         await deps.settings.loadSettings(),
         update.fromUserId,
-        formatGatewayInputTranslationFailure(message)
+        formatGatewayInputTranslationFailure(target.role, message)
       );
       await recordInbound(update, "error", "plain", message);
       throw new HandledGatewayInboundError();
@@ -548,7 +554,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       return [
         "Gateway is connected but off.",
         "Available commands while off: /help, /start, /status, /projects, /tasks.",
-        "Turn Gateway on in desktop VCM to send PM messages or run task-changing commands."
+        "Turn Gateway on in desktop VCM to send role messages or run task-changing commands."
       ].join("\n");
     }
 
@@ -579,8 +585,10 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         return closeTaskConfirm(command.taskSlug);
       case "translate":
         return setGatewayTranslation(command.enabled);
+      case "role":
+        return command.role ? setGatewayTargetRole(command.role) : gatewayRoleText(settings);
       case "plain":
-        return sendPlainTextToPm(command.text);
+        return sendPlainTextToRole(command.text);
       case "unknown":
         return `Unknown command: ${command.name}. Send /help for available commands.`;
     }
@@ -603,6 +611,8 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       await deps.settings.saveSettings({
         ...settings,
         currentProjectId: project.repoRoot,
+        currentTaskSlug: null,
+        targetRole: "project-manager",
         updatedAt: now()
       });
     }
@@ -630,6 +640,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       ...settings,
       currentProjectId: project.repoRoot,
       currentTaskSlug: nextTaskSlug,
+      targetRole: "project-manager",
       updatedAt: now()
     });
   }
@@ -660,6 +671,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       ...settings,
       currentProjectId: project.repoRoot,
       currentTaskSlug: null,
+      targetRole: "project-manager",
       updatedAt: now()
     });
     return `Selected project:\n${project.repoRoot}\nbranch: ${project.branch}\ncommit: ${project.shortHeadCommit ?? project.headCommit ?? "unknown"}`;
@@ -703,6 +715,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     await deps.settings.saveSettings({
       ...settings,
       currentTaskSlug: task.taskSlug,
+      targetRole: "project-manager",
       updatedAt: now()
     });
     return `Selected task: ${task.taskSlug}\nstatus: ${task.status}\nbranch: ${task.branch}`;
@@ -724,6 +737,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         ...settings,
         currentProjectId: project.repoRoot,
         currentTaskSlug: task.taskSlug,
+        targetRole: "project-manager",
         translationEnabled: preferences.translationEnabled,
         updatedAt: now()
       });
@@ -817,12 +831,15 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
 
     const result = await deps.taskCloseService.closeTask(project.repoRoot, taskSlug);
     clearFailedTranslation(project.repoRoot, taskSlug);
-    const latestPmReplies = { ...settings.latestPmReplies };
-    delete latestPmReplies[latestPmReplyKey(project.repoRoot, taskSlug)];
+    const latestRoleReplies = Object.fromEntries(
+      Object.entries(settings.latestRoleReplies)
+        .filter(([, reply]) => reply.repoRoot !== project.repoRoot || reply.taskSlug !== taskSlug)
+    );
     await deps.settings.saveSettings({
       ...settings,
       currentTaskSlug: null,
-      latestPmReplies,
+      targetRole: "project-manager",
+      latestRoleReplies,
       pendingConfirmations: {
         ...settings.pendingConfirmations,
         closeTask: null
@@ -887,20 +904,21 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     await ensurePolling();
     const lines = [
       "Gateway started.",
-      "Full mobile commands and PM messages are now enabled.",
+      "Full mobile commands and role messages are now enabled.",
       `Project: ${enabled.currentProjectId ?? "none"}`,
-      `Task: ${enabled.currentTaskSlug ?? "none"}`
+      `Task: ${enabled.currentTaskSlug ?? "none"}`,
+      `Role: ${roleLabel(enabled.targetRole)}`
     ];
-    const latestReply = getLatestPmReply(enabled);
+    const latestReply = getLatestRoleReply(enabled);
     if (latestReply) {
-      const rendered = await renderLatestPmReply(enabled, latestReply);
-      lines.push("", "Latest PM reply:", rendered.text);
+      const rendered = await renderLatestRoleReply(enabled, latestReply);
+      lines.push("", `Latest ${roleLabel(enabled.targetRole)} reply:`, rendered.text);
     }
     return lines.join("\n");
   }
 
-  async function sendPlainTextToPm(text: string): Promise<string> {
-    const target = await resolvePlainTextPmTarget(text);
+  async function sendPlainTextToRole(text: string): Promise<string> {
+    const target = await resolvePlainTextRoleTarget(text);
     if (typeof target === "string") {
       return target;
     }
@@ -910,7 +928,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
           repoRoot: target.project.repoRoot,
           taskRepoRoot: getTaskRuntimeRepoRoot(target.task),
           taskSlug: target.task.taskSlug,
-          role: "project-manager",
+          role: target.role,
           text,
           useContext: false,
           send: false
@@ -918,10 +936,10 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       : text;
 
     await submitTerminalInput(deps.runtime, target.session.id, englishText);
-    return "Sent to PM.";
+    return `Sent to ${roleLabel(target.role)}.`;
   }
 
-  async function resolvePlainTextPmTarget(text: string): Promise<PlainTextPmTarget | string> {
+  async function resolvePlainTextRoleTarget(text: string): Promise<PlainTextRoleTarget | string> {
     if (!text.trim()) {
       return "Empty message ignored.";
     }
@@ -936,18 +954,52 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       });
     }
     const task = await deps.taskService.loadTask(project.repoRoot, settings.currentTaskSlug);
-    const session = await deps.sessionService.getRoleSession(project.repoRoot, task.taskSlug, "project-manager");
+    const role = settings.targetRole;
+    const session = await deps.sessionService.getRoleSession(project.repoRoot, task.taskSlug, role);
     if (!session || session.status !== "running") {
       throw new VcmError({
-        code: "PM_SESSION_NOT_RUNNING",
-        message: "The current task's PM session is not running.",
+        code: "GATEWAY_TARGET_SESSION_NOT_RUNNING",
+        message: `The current task's ${roleLabel(role)} session is not running.`,
         statusCode: 409
       });
     }
     if (session.activityStatus === "running") {
-      return "PM is still working on the current turn. Please wait and send again later.";
+      return `${roleLabel(role)} is still working on the current turn. Please wait and send again later.`;
     }
-    return { project, task, session, settings };
+    return { project, task, session, role, settings };
+  }
+
+  async function setGatewayTargetRole(role: VcmRoleName): Promise<string> {
+    const project = await ensureProject();
+    const settings = await syncDesktopContext(await deps.settings.loadSettings());
+    if (!settings.currentTaskSlug) {
+      throw new VcmError({
+        code: "TASK_NOT_SELECTED",
+        message: "No task is selected. Use /tasks and /use-task first.",
+        statusCode: 409
+      });
+    }
+    await deps.taskService.loadTask(project.repoRoot, settings.currentTaskSlug);
+    const updated = await deps.settings.updateSettings({ targetRole: role });
+    return `Gateway role: ${roleLabel(updated.targetRole)}.`;
+  }
+
+  async function gatewayRoleText(settings: GatewaySettingsFile): Promise<string> {
+    const synced = await syncDesktopContext(settings);
+    const lines = [`Current Gateway role: ${roleLabel(synced.targetRole)}.`, "Available roles:"];
+    for (const role of VCM_ROLE_NAMES) {
+      let status = "not started";
+      if (synced.currentProjectId && synced.currentTaskSlug) {
+        try {
+          const session = await deps.sessionService.getRoleSession(synced.currentProjectId, synced.currentTaskSlug, role);
+          status = session?.status ?? status;
+        } catch {
+          status = "missing";
+        }
+      }
+      lines.push(`- ${gatewayRoleCommandName(role)} [${status}]`);
+    }
+    return lines.join("\n");
   }
 
   async function reply(settings: GatewaySettingsFile, userId: string, text: string): Promise<void> {
@@ -995,9 +1047,23 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
 
   async function exposeStatus(settings: GatewaySettingsFile): Promise<GatewayStatus> {
     const preferences = await deps.appSettings.getPreferences();
+    let targetRoleSessionStatus: GatewayStatus["targetRoleSessionStatus"] = null;
+    if (settings.currentProjectId && settings.currentTaskSlug) {
+      try {
+        const session = await deps.sessionService.getRoleSession(
+          settings.currentProjectId,
+          settings.currentTaskSlug,
+          settings.targetRole
+        );
+        targetRoleSessionStatus = session?.status ?? "not_started";
+      } catch {
+        targetRoleSessionStatus = "missing";
+      }
+    }
     return {
       ...deps.settings.expose(settings, isRunning(), connectionEnabled),
-      lastPmInputMessageId,
+      targetRoleSessionStatus,
+      lastGatewayInputMessageId,
       pauseAlertSoundEnabled: preferences.flowPauseAlerts
     };
   }
@@ -1014,6 +1080,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       `Translation: ${synced.translationEnabled ? "on" : "off"}`,
       `Project: ${project?.repoRoot ?? synced.currentProjectId ?? "none"}`,
       `Task: ${synced.currentTaskSlug ?? "none"}`,
+      `Role: ${roleLabel(synced.targetRole)}`,
       `Last poll: ${synced.lastPollStatus.state}${synced.lastPollStatus.error ? ` (${synced.lastPollStatus.error})` : ""}`
     ].join("\n");
   }
@@ -1034,7 +1101,10 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       return exposeStatus(settings);
     },
     async updateSettings(input) {
-      const currentSettings = await deps.settings.loadSettings();
+      let currentSettings = await deps.settings.loadSettings();
+      if (input.enabled === true || currentSettings.enabled) {
+        currentSettings = await syncDesktopContext(currentSettings);
+      }
       const enablingGateway = input.enabled === true && !currentSettings.enabled;
       const gatewayStartInput = input.enabled === true
         ? { ...input, translationEnabled: true }
@@ -1049,9 +1119,6 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         await enableGatewayTranslationRuntime({ disablePauseAlertSound: enablingGateway });
       }
       let settings = await deps.settings.updateSettings(updateInput);
-      if (settings.enabled) {
-        settings = await syncDesktopContext(settings);
-      }
       if (toAccount(settings)) {
         await ensurePolling();
       } else {
@@ -1325,8 +1392,18 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         gatewayStatus: status
       };
     },
-    async handlePmStop(input) {
-      if (input.session.role !== "project-manager") {
+    async handleRoleStop(input) {
+      if (!isVcmRoleName(input.session.role)) {
+        return;
+      }
+
+      const role = input.session.role;
+      const settings = await syncDesktopContext(await deps.settings.loadSettings());
+      if (
+        settings.currentProjectId !== input.repoRoot
+        || settings.currentTaskSlug !== input.taskSlug
+        || settings.targetRole !== role
+      ) {
         return;
       }
 
@@ -1335,54 +1412,62 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         return;
       }
       const events = await readTranscriptTextEvents(transcriptPath);
-      const round = await waitForGatewayRoundFinal(input.repoRoot, input.taskSlug);
+      const round = await waitForGatewayRoundFinal(input.repoRoot, input.taskSlug, role);
       if (!round) {
         return;
       }
-      const cursorKey = `${input.taskSlug}:project-manager:${input.session.claudeSessionId}`;
-      const settings = await deps.settings.loadSettings();
-      const cursor = settings.pushCursors[cursorKey];
+      const latestSettings = await syncDesktopContext(await deps.settings.loadSettings());
+      if (
+        latestSettings.currentProjectId !== input.repoRoot
+        || latestSettings.currentTaskSlug !== input.taskSlug
+        || latestSettings.targetRole !== role
+      ) {
+        return;
+      }
+      const cursorKey = `${input.taskSlug}:${role}:${input.session.claudeSessionId}`;
+      const cursor = latestSettings.pushCursors[cursorKey];
       const nextEvents = selectEventsAfterCursor(events, cursor?.lastTranscriptEventId)
         .filter(isFinalTurnTextEvent);
       if (nextEvents.length === 0) {
         return;
       }
-      const latestReply = toGatewayPmReply(nextEvents[nextEvents.length - 1] as TranscriptTextEvent);
+      const latestReply = toGatewayRoleReply(nextEvents[nextEvents.length - 1] as TranscriptTextEvent);
       const text = latestReply.text.trim();
       if (!text) {
         return;
       }
 
-      await saveLatestPmReply(input, latestReply);
+      await saveLatestRoleReply(input, latestReply);
 
-      const account = toAccount(settings);
-      const boundUserId = settings.binding.boundUserId;
+      const account = toAccount(latestSettings);
+      const boundUserId = latestSettings.binding.boundUserId;
       // A disarmed gateway never touches the channel: skip the outbound push.
-      // The round-final PM reply was already cached above and replays on the next /start.
-      if (!connectionEnabled || !settings.enabled || !account || !boundUserId) {
+      // The selected role's round-final reply was already cached above and replays on the next /start.
+      if (!connectionEnabled || !latestSettings.enabled || !account || !boundUserId) {
         return;
       }
 
       const roundNotice = formatGatewayRoundNotice(round);
-      const originalMessage = formatGatewayPmOriginalReply(text, roundNotice);
-      await sendGatewayText(settings, boundUserId, originalMessage);
+      const originalMessage = formatGatewayRoleOriginalReply(role, text, roundNotice);
+      await sendGatewayText(latestSettings, boundUserId, originalMessage);
 
       let output: GatewayOutputRenderResult | undefined;
-      if (settings.translationEnabled) {
-        output = await renderGatewayPmOutput({
-          settings,
+      if (latestSettings.translationEnabled) {
+        output = await renderGatewayRoleOutput({
+          settings: latestSettings,
           repoRoot: input.repoRoot,
           taskSlug: input.taskSlug,
+          role,
           sourceText: text,
           sourceEntryIds: latestReply.transcriptEventId ? [latestReply.transcriptEventId] : undefined
         });
 
         await sendGatewayText(
-          settings,
+          latestSettings,
           boundUserId,
           output.translationFailed
-            ? formatGatewayPmTranslationFailure(output.translationError)
-            : formatGatewayPmTranslatedReply(output.text)
+            ? formatGatewayRoleTranslationFailure(role, output.translationError)
+            : formatGatewayRoleTranslatedReply(role, output.text)
         );
       } else {
         clearFailedTranslation(input.repoRoot, input.taskSlug);
@@ -1401,16 +1486,16 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
           checkedAt: now(),
           direction: "outbound",
           result: output?.translationFailed ? "error" : "ok",
-          command: "pm-stop",
+          command: `${role}-stop`,
           preview: (output?.text ?? originalMessage).slice(0, 160),
           error: output?.translationError
         },
         updatedAt: now()
       });
       await deps.audit.record({
-        type: "gateway.pm_push",
+        type: "gateway.role_push",
         result: output?.translationFailed ? "error" : "ok",
-        command: "pm-stop",
+        command: `${role}-stop`,
         preview: output ? `${originalMessage}\n\n${output.text}` : originalMessage,
         error: output?.translationError
       });
@@ -1459,18 +1544,26 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     }
   };
 
-  function getLatestPmReply(settings: GatewaySettingsFile): GatewayLatestPmReply | undefined {
+  function getLatestRoleReply(settings: GatewaySettingsFile): GatewayLatestRoleReply | undefined {
     if (!settings.currentProjectId || !settings.currentTaskSlug) {
       return undefined;
     }
-    return settings.latestPmReplies[latestPmReplyKey(settings.currentProjectId, settings.currentTaskSlug)];
+    return settings.latestRoleReplies[latestRoleReplyKey(
+      settings.currentProjectId,
+      settings.currentTaskSlug,
+      settings.targetRole
+    )];
   }
 
-  async function waitForGatewayRoundFinal(repoRoot: string, taskSlug: string): Promise<VcmSessionRoundState | undefined> {
+  async function waitForGatewayRoundFinal(
+    repoRoot: string,
+    taskSlug: string,
+    role: VcmRoleName
+  ): Promise<VcmSessionRoundState | undefined> {
     const startedAt = Date.now();
     while (Date.now() - startedAt <= GATEWAY_ROUND_FINAL_WAIT_MS) {
       const round = await getGatewayRoundState(repoRoot, taskSlug);
-      if (round && isGatewayRoundFinal(round)) {
+      if (round && isGatewayRoundFinal(round) && round.activeRole === role) {
         return round;
       }
       if (round && isGatewayNonFinalTerminalRound(round)) {
@@ -1550,9 +1643,9 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     return trimmed.length > 600 ? `${trimmed.slice(0, 600)}...` : trimmed;
   }
 
-  function formatGatewayPmOriginalReply(text: string, roundNotice?: string): string {
+  function formatGatewayRoleOriginalReply(role: VcmRoleName, text: string, roundNotice?: string): string {
     return [
-      "PM final reply 原文：",
+      `${roleLabel(role)} Round Final Reply 原文：`,
       "",
       text.trim(),
       roundNotice ? "" : undefined,
@@ -1560,45 +1653,46 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     ].filter((line): line is string => line !== undefined).join("\n");
   }
 
-  function formatGatewayPmTranslatedReply(text: string): string {
+  function formatGatewayRoleTranslatedReply(role: VcmRoleName, text: string): string {
     return [
-      "PM final reply 翻译：",
+      `${roleLabel(role)} Round Final Reply 翻译：`,
       "",
       text.trim()
     ].join("\n");
   }
 
-  function formatGatewayPmTranslationFailure(error?: string): string {
+  function formatGatewayRoleTranslationFailure(role: VcmRoleName, error?: string): string {
     return [
-      GATEWAY_TRANSLATION_FAILURE_TEXT,
+      `${roleLabel(role)} ${GATEWAY_TRANSLATION_FAILURE_TEXT}`,
       error ? `原因：${error}` : undefined
     ].filter((line): line is string => line !== undefined).join("\n");
   }
 
-  function formatGatewayInputTranslationSuccess(englishText: string): string {
+  function formatGatewayInputTranslationSuccess(role: VcmRoleName, englishText: string): string {
     return [
-      "翻译完成，已发送给 PM：",
+      `翻译完成，已发送给 ${roleLabel(role)}：`,
       "",
       englishText.trim()
     ].join("\n");
   }
 
-  function formatGatewayInputTranslationFailure(error: string): string {
+  function formatGatewayInputTranslationFailure(role: VcmRoleName, error: string): string {
     return [
-      "翻译失败，消息未发送给 PM。",
+      `翻译失败，消息未发送给 ${roleLabel(role)}。`,
       `原因：${error}`,
       "请重新输入后再试。"
     ].join("\n");
   }
 
-  async function renderLatestPmReply(
+  async function renderLatestRoleReply(
     settings: GatewaySettingsFile,
-    reply: GatewayLatestPmReply
+    reply: GatewayLatestRoleReply
   ): Promise<GatewayOutputRenderResult> {
-    const rendered = await renderGatewayPmOutput({
+    const rendered = await renderGatewayRoleOutput({
       settings,
       repoRoot: reply.repoRoot,
       taskSlug: reply.taskSlug,
+      role: reply.role,
       sourceText: reply.text,
       sourceEntryIds: reply.transcriptEventId ? [reply.transcriptEventId] : undefined
     });
@@ -1608,10 +1702,11 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     };
   }
 
-  async function renderGatewayPmOutput(input: {
+  async function renderGatewayRoleOutput(input: {
     settings: GatewaySettingsFile;
     repoRoot: string;
     taskSlug: string;
+    role: VcmRoleName;
     sourceText: string;
     sourceEntryIds?: string[];
   }): Promise<GatewayOutputRenderResult> {
@@ -1627,7 +1722,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       const text = await deps.translationService.translateGatewayOutput({
         repoRoot: input.repoRoot,
         taskSlug: input.taskSlug,
-        role: "project-manager",
+        role: input.role,
         text: input.sourceText,
         sourceEntryIds: input.sourceEntryIds
       });
@@ -1641,7 +1736,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       lastFailedTranslation = {
         repoRoot: input.repoRoot,
         taskSlug: input.taskSlug,
-        role: "project-manager",
+        role: input.role,
         sourceText: input.sourceText,
         failedAt: now(),
         error: message,
@@ -1688,7 +1783,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     }
   }
 
-  function toGatewayPmReply(event: TranscriptTextEvent): ClaudeTurnReply {
+  function toGatewayRoleReply(event: TranscriptTextEvent): ClaudeTurnReply {
     return {
       text: event.text,
       truncated: false,
@@ -1697,16 +1792,20 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     };
   }
 
-  async function saveLatestPmReply(input: GatewayPmStopInput, reply: ClaudeTurnReply): Promise<void> {
+  async function saveLatestRoleReply(input: GatewayRoleStopInput, reply: ClaudeTurnReply): Promise<void> {
+    if (!isVcmRoleName(input.session.role)) {
+      return;
+    }
     const settings = await deps.settings.loadSettings();
-    const key = latestPmReplyKey(input.repoRoot, input.taskSlug);
+    const key = latestRoleReplyKey(input.repoRoot, input.taskSlug, input.session.role);
     await deps.settings.saveSettings({
       ...settings,
-      latestPmReplies: {
-        ...settings.latestPmReplies,
+      latestRoleReplies: {
+        ...settings.latestRoleReplies,
         [key]: {
           repoRoot: input.repoRoot,
           taskSlug: input.taskSlug,
+          role: input.session.role,
           sessionId: input.session.id,
           claudeSessionId: input.session.claudeSessionId,
           transcriptEventId: reply.transcriptEventId,
@@ -1735,8 +1834,8 @@ function selectEventsAfterCursor(events: TranscriptTextEvent[], cursorId: string
   return events.slice(index + 1);
 }
 
-function latestPmReplyKey(repoRoot: string, taskSlug: string): string {
-  return JSON.stringify([repoRoot, taskSlug]);
+function latestRoleReplyKey(repoRoot: string, taskSlug: string, role: VcmRoleName): string {
+  return JSON.stringify([repoRoot, taskSlug, role]);
 }
 
 function projectsText(projects: string[]): string {
@@ -1756,7 +1855,7 @@ function helpText(enabled: boolean): string {
       "/status",
       "/projects",
       "/tasks",
-      "Send /start to enable PM messages and task-changing commands."
+      "Send /start to enable role messages and task-changing commands."
     ].join("\n");
   }
 
@@ -1766,6 +1865,8 @@ function helpText(enabled: boolean): string {
     "/start",
     "/retry",
     "/status",
+    "/role",
+    "/role <pm|architect|coder|tester|reviewer>",
     "/projects",
     "/use-project <index-or-path>",
     "/pull-current",
@@ -1777,6 +1878,14 @@ function helpText(enabled: boolean): string {
     "/translate on",
     "/translate off"
   ].join("\n");
+}
+
+function roleLabel(role: VcmRoleName): string {
+  return role === "project-manager" ? "PM" : getRoleDefinition(role).label;
+}
+
+function gatewayRoleCommandName(role: VcmRoleName): string {
+  return role === "project-manager" ? "pm" : role;
 }
 
 function formatAheadBehind(project: ProjectSummary): string {

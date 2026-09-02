@@ -1482,7 +1482,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         code: "GATEWAY_TRANSLATION_RESULT_MISSING",
         message: "Gateway output translation is not available in the current translation panel.",
         statusCode: 409,
-        hint: "Wait for the translation panel to finish translating the PM final reply, then retry from Gateway."
+        hint: "Wait for the translation panel to finish translating the selected role's Round Final Reply, then retry from Gateway."
       });
     },
     async shouldDelayFlowPauseNotification(input) {

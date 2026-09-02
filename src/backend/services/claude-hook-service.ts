@@ -89,7 +89,7 @@ export interface ClaudeHookServiceDeps {
     HarnessFeedbackService,
     "handleTaskRetrospectiveHook" | "completeWaitingTaskRetrospective"
   >;
-  gatewayService?: Pick<GatewayService, "handlePmStop" | "handleRoleStopFailure">;
+  gatewayService?: Pick<GatewayService, "handleRoleStop" | "handleRoleStopFailure">;
   jobGuard?: Pick<JobGuardService, "evaluateStop" | "notePromptSubmitted">;
   architectRestartService?: Pick<
     ArchitectRestartService,
@@ -727,8 +727,8 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
         session.id
       );
     }
-    if (options.notifyGateway && session && input.role === "project-manager") {
-      void deps.gatewayService?.handlePmStop({
+    if (options.notifyGateway && session && isVcmRoleName(input.role)) {
+      void deps.gatewayService?.handleRoleStop({
         repoRoot: context.project.repoRoot,
         taskSlug: context.taskSlug,
         session

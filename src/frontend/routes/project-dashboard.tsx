@@ -25,6 +25,7 @@ import type {
 import { GATE_REVIEW_GATES, type GateReviewGate, type GateReviewIndex } from "../../shared/types/gate-review.js";
 import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
 import type { ProjectSummary } from "../../shared/types/project.js";
+import type { VcmRoleName } from "../../shared/types/role.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel, SessionModelOption } from "../../shared/types/session.js";
 import type { TaskRecord } from "../../shared/types/task.js";
@@ -932,6 +933,25 @@ function GatewayPanel({
           <option value="weixin-ilink">Weixin iLink</option>
           <option value="lark">Lark</option>
         </select>
+      </label>
+      <label className="compact-field">
+        <span>Message Target</span>
+        <select
+          disabled={busy || !status || !status.currentTaskSlug}
+          value={status?.targetRole ?? "project-manager"}
+          onChange={(event) => {
+            void onSettingsChange({ targetRole: event.currentTarget.value as VcmRoleName });
+          }}
+        >
+          <option value="project-manager">Project Manager</option>
+          <option value="architect">Architect</option>
+          <option value="coder">Coder</option>
+          <option value="tester">Tester</option>
+          <option value="reviewer">Reviewer</option>
+        </select>
+        <small className="muted">
+          Session: {status?.targetRoleSessionStatus ?? "not selected"}
+        </small>
       </label>
       <div className="gateway-actions">
         <SwitchControl

@@ -1,3 +1,5 @@
+import type { VcmRoleName } from "../../shared/types/role.js";
+
 export type GatewayCommand =
   | { kind: "plain"; text: string }
   | { kind: "help" }
@@ -13,6 +15,7 @@ export type GatewayCommand =
   | { kind: "close-task" }
   | { kind: "close-task-confirm"; taskSlug: string }
   | { kind: "translate"; enabled: boolean }
+  | { kind: "role"; role?: VcmRoleName }
   | { kind: "unknown"; name: string };
 
 export function parseGatewayCommand(input: string): GatewayCommand {
@@ -61,9 +64,27 @@ export function parseGatewayCommand(input: string): GatewayCommand {
         return { kind: "translate", enabled: false };
       }
       return { kind: "unknown", name };
+    case "/role": {
+      if (!rest[0]) {
+        return { kind: "role" };
+      }
+      const role = parseGatewayRole(rest[0]);
+      return role ? { kind: "role", role } : { kind: "unknown", name: `${name} ${rest[0]}` };
+    }
     default:
       return { kind: "unknown", name };
   }
+}
+
+function parseGatewayRole(input: string): VcmRoleName | undefined {
+  const value = input.trim().toLowerCase();
+  if (value === "pm" || value === "project-manager") {
+    return "project-manager";
+  }
+  if (value === "architect" || value === "coder" || value === "tester" || value === "reviewer") {
+    return value;
+  }
+  return undefined;
 }
 
 function splitArgs(input: string): string[] {

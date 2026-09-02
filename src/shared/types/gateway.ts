@@ -1,3 +1,5 @@
+import type { RoleStatus, VcmRoleName } from "./role.js";
+
 export type GatewayChannel = "weixin-ilink" | "lark";
 export type GatewayLarkDomain = "lark" | "feishu";
 
@@ -59,7 +61,7 @@ export interface GatewayStatus {
   /**
    * Runtime channel-connection arming switch. Not persisted; resets to false on
    * every backend start. While false the backend connects no channel (no inbound
-   * poll loop and no outbound PM push); the user must arm it manually. `running`
+   * poll loop and no outbound role push); the user must arm it manually. `running`
    * (the live poll-loop state) can only be true while this is true.
    */
   connectionEnabled: boolean;
@@ -67,12 +69,14 @@ export interface GatewayStatus {
   translationEnabled: boolean;
   currentProjectId: string | null;
   currentTaskSlug: string | null;
+  targetRole: VcmRoleName;
+  targetRoleSessionStatus: RoleStatus | null;
   binding: GatewayBindingStatus;
   pendingConfirmations: GatewayPendingConfirmations;
   lastPollStatus: GatewayPollStatus;
   lastMessageStatus: GatewayMessageStatus | null;
-  /** Latest Gateway message successfully submitted to PM, used to acknowledge web UI pauses. */
-  lastPmInputMessageId?: string | null;
+  /** Latest Gateway message successfully submitted to the selected role, used to acknowledge web UI pauses. */
+  lastGatewayInputMessageId?: string | null;
   /** Backend-owned global preference mirrored here for Gateway-triggered updates. */
   pauseAlertSoundEnabled?: boolean;
   updatedAt: string;
@@ -92,6 +96,7 @@ export interface UpdateGatewaySettingsRequest {
   translationEnabled?: boolean;
   currentProjectId?: string | null;
   currentTaskSlug?: string | null;
+  targetRole?: VcmRoleName;
   baseUrl?: string | null;
 }
 

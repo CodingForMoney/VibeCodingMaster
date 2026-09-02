@@ -50,7 +50,7 @@ export function observeGatewayInboundMessage(
     return { observation: current, dismissPauseAlert: false };
   }
 
-  const messageId = status.lastPmInputMessageId ?? null;
+  const messageId = status.lastGatewayInputMessageId ?? null;
   if (!current.initialized) {
     return {
       observation: { initialized: true, messageId },

@@ -1,8 +1,8 @@
 # Sub-Area Architecture: `src/backend/gateway`
 
 Detailed design for the VCM **mobile gateway** — the backend sub-area that lets a
-user drive a VCM task from a phone chat app (Weixin iLink or Lark/Feishu) and
-that pushes project-manager (PM) replies back to that chat. For the project-wide
+user drive a VCM task from a phone chat app (Weixin iLink or Lark/Feishu), select
+a VCM role, and receive that role's Round Final Reply. For the project-wide
 overview see [`../../../docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md).
 
 ## Boundary
@@ -11,7 +11,7 @@ Files in this sub-area:
 
 | File | Responsibility |
 | --- | --- |
-| `gateway-service.ts` | Orchestrator. Poll lifecycle, inbound command handling, outbound PM push, onboarding (QR/registration), translation integration, status. |
+| `gateway-service.ts` | Orchestrator. Poll lifecycle, inbound command handling, outbound selected-role push, onboarding (QR/registration), translation integration, status. |
 | `gateway-channel.ts` | `GatewayChannelAdapter` contract + `GatewayChannelRegistry` (multi-channel abstraction; first registered channel is the default). |
 | `channels/weixin-ilink-channel.ts` | Weixin iLink adapter over HTTP long-poll (`getupdates`/`sendmessage`) + bot QR login. |
 | `channels/lark-channel.ts` | Lark/Feishu adapter over the `@larksuiteoapi/node-sdk` WebSocket event stream + `im.message` send. |
@@ -34,8 +34,8 @@ Owned:
 - Run a single resilient poll loop per process that pulls inbound messages,
   de-duplicates them, authorizes the sender, parses a command, executes it, and
   replies.
-- On a PM `Stop` hook, wait for a normal Round completion and push only that
-  Round's last PM reply to the bound chat.
+- On a VCM role `Stop` hook, wait for a normal Round completion and push only the
+  selected role's Round Final Reply to the bound chat.
 - Mediate translation of inbound user text (to English for the PM session) and
   outbound PM text (to the user's language), with a `/retry` path on failure.
 
@@ -45,7 +45,7 @@ Not owned (delegated through injected services):
   `sessionService`, `taskLaunchService`, `roundService`).
 - Translation itself (`translationService`), transcript parsing
   (`claude-transcript-service`), and terminal input (`runtime`/`submitTerminalInput`).
-- The decision to call `handlePmStop` (owned by `claude-hook-service`).
+- The decision to call `handleRoleStop` (owned by `claude-hook-service`).
 
 ## Channel Abstraction
 
@@ -81,11 +81,11 @@ configured channel at boot — the user must arm it (desktop toggle →
   self-heal, QR/registration success, `updateSettings()`), gating it in one place
   guarantees the default-off cannot be bypassed by self-heal.
 - **Holistic gate (inbound + outbound).** Arming gates both the inbound poll loop
-  and the outbound PM push: while disarmed, `handlePmStop` still captures
-  `latestPmReplies` for a normally completed Round (a local transcript read +
+  and the outbound role push: while disarmed, `handleRoleStop` still captures
+  `latestRoleReplies` for a normally completed Round (a local transcript read +
   settings write — no channel I/O)
   but does **not** send, so a disarmed gateway never opens or touches the channel.
-  The cached reply is replayed on the next `/start` once armed.
+  The selected role's cached reply is replayed on the next `/start` once armed.
 - **Toggle behavior.** `setConnectionEnabled(true)` arms then `ensurePolling()`
   (connect now if an account is configured); `setConnectionEnabled(false)` disarms
   then `stopPolling()` (abort the loop; the Lark WS closes via the abort path).
@@ -98,7 +98,7 @@ configured channel at boot — the user must arm it (desktop toggle →
   `getUpdates timeoutMs:1`) calls the channel directly, **not** through
   `ensurePolling`, so it runs regardless of the switch. This is intentional — it
   is a user-explicit bind action that does not start the poll loop — and is
-  outside the switch's gate face (which covers the poll loop and PM push).
+  outside the switch's gate face (which covers the poll loop and role push).
 
 ### Lifecycle / polling
 
@@ -129,7 +129,7 @@ configured channel at boot — the user must arm it (desktop toggle →
   Lark binding fields and `ensurePolling()`.
 - `resetBinding()` stops polling, clears in-memory onboarding/translation state,
   and resets the durable binding (preserving Lark app identity fields and
-  `latestPmReplies`).
+  `latestRoleReplies`).
 
 ### Inbound message handling (`handleInbound`)
 
@@ -138,8 +138,9 @@ configured channel at boot — the user must arm it (desktop toggle →
 2. **Bind/identity**: persist sender metadata via `saveInboundMetadata`. Weixin
    binds the sender only if no `boundUserId` exists yet (`if-missing`); Lark binds
    the sender on every message (`always`) and also records `contextToken`/`chatId`
-   per user. After user text is successfully submitted to PM, status exposes its
-   message ID so the desktop can dismiss the active blocking flow-pause modal.
+   per user. After user text is successfully submitted to the selected role,
+   status exposes its message ID so the desktop can dismiss the active blocking
+   flow-pause modal.
 3. **Authorize**: for non-Lark channels, reject (and audit) a sender that is not
    the bound user. (Lark intentionally skips this single-user lock — see
    Security.)
@@ -152,10 +153,12 @@ configured channel at boot — the user must arm it (desktop toggle →
    so a thrown `VcmError` becomes an `Error: <message>` reply rather than killing
    the loop.
 
-Command set (when enabled): `/help /start /retry /status /projects
+Command set (when enabled): `/help /start /retry /status /role /projects
 /use-project /pull-current /tasks /use-task /create-task /close-task
 [/close-task confirm <slug>] /translate on|off`, plus any non-slash text as a
-**plain message to PM**.
+**plain message to the selected VCM role**. `/role` reports the current target;
+`/role <pm|architect|coder|tester|reviewer>` changes it. Project/task changes
+reset the target to PM. Translator and Harness Engineer are not valid targets.
 
 - `/create-task` reuses `taskLaunchService.startTaskRoleSessions` (shared with the
   GUI one-click start) and maps a partial start to `GATEWAY_TASK_PARTIAL_START`.
@@ -164,33 +167,35 @@ Command set (when enabled): `/help /start /retry /status /projects
   logically closed first; all runtime, worktree, branch, and state cleanup is
   forceful and best-effort, with failures returned as warnings rather than
   blocking close.
-- Plain text → `sendPlainTextToPm`: requires a running, idle PM session;
+- Plain text → `sendPlainTextToRole`: requires a running, idle target session;
   when translation is enabled, immediately acknowledges the request, translates
-  the user text to English, writes it into the PM terminal, and then reports the
-  translated text. Translation failure is reported without sending the source
-  text to PM.
+  the user text to English, writes it into the target role terminal, and then
+  reports the translated text. Translation failure is reported without sending
+  the source text to the role.
 - Gateway transition from off to on disables the global pause-alert sound once.
   Later status reads do not force it off again, so the user can re-enable sound
   while Gateway remains on.
 
-### Outbound PM push (`handlePmStop`)
+### Outbound role push (`handleRoleStop`)
 
-Triggered by `claude-hook-service` on a PM `Stop` hook (`notifyGateway: true`,
-project-manager only):
+Triggered by `claude-hook-service` on every VCM role `Stop` hook
+(`notifyGateway: true`):
 
-1. Resolve the PM transcript and parse assistant **text** events.
-2. Wait for backend Round state. Continue only when the Round stopped normally;
+1. Ignore tool roles, non-selected VCM roles, and events outside the selected task.
+2. Resolve the selected role transcript and parse assistant **text** events.
+3. Wait for backend Round state. Continue only when the Round stopped normally
+   with the selected role as `activeRole`;
    manual interruption and failed recovery are not Round-final replies.
-3. Select the latest `end_turn` PM text after the per-session cursor and store
-   it in `latestPmReplies`, bounded by `MAX_LATEST_PM_REPLY_CHARS`, so `/start`
+4. Select the latest `end_turn` role text after the per-role/session cursor and
+   store it in `latestRoleReplies`, bounded by `MAX_LATEST_PM_REPLY_CHARS`, so `/start`
    can replay it when needed.
-4. If **armed** (`connectionEnabled`) + enabled + account + bound user, send the
-   original PM reply with the Round completion notice first.
-5. When Gateway translation is enabled, request the matching existing
+5. If **armed** (`connectionEnabled`) + enabled + account + bound user, send the
+   original role reply with the Round completion notice first.
+6. When Gateway translation is enabled, request the matching existing
    translation-panel result and send it separately. Normal push does not create
    duplicate translation work; a missing result produces a failure notice and
    buffers `/retry`, whose explicit retry may create a new translation.
-6. Advance the transcript cursor and audit the delivery. While disarmed, only
+7. Advance the transcript cursor and audit the delivery. While disarmed, only
    the Round-final reply cache is updated; no channel I/O occurs.
 
 Gateway activation aligns desktop translation preferences to enabled,
@@ -201,10 +206,12 @@ manual Ctrl+C interruption.
 ## State and Persistence
 
 Durable (`GatewaySettingsFile`, normalized on every load/save, atomic writes):
-`enabled`, `channel`, `translationEnabled`, `currentProjectId/Slug`, `binding`
+`enabled`, `channel`, `translationEnabled`, `currentProjectId/Slug`, `targetRole`,
+`binding`
 (account/token/app creds/Lark identity/`getUpdatesBuf` cursor/per-user
 `contextTokens`+`chatIds`), `dedupe.recentInboundMessageIds`,
-`pendingConfirmations.closeTask`, `pushCursors`, `latestPmReplies`,
+`pendingConfirmations.closeTask`, per-role/session `pushCursors`,
+`latestRoleReplies`,
 `lastPollStatus`, `lastMessageStatus`. `expose()` projects this to the
 GUI-facing `GatewayStatus` with **only** `tokenConfigured`/`appSecretConfigured`
 booleans (never the secrets).
@@ -265,8 +272,8 @@ Verified internally consistent:
 - Inbound pipeline (poll → dedupe → bind → authorize → parse → execute → reply →
   audit) is coherent, abort-aware, bounded, and resilient (per-update and
   per-command errors are caught and do not stop the loop).
-- Outbound PM push is correctly gated (enabled + account + bound user), pushes
-  only turn-final text, advances a durable per-session cursor, and degrades
+- Outbound selected-role push is correctly gated (enabled + account + bound user),
+  pushes only Round-final text, advances a durable per-role/session cursor, and degrades
   gracefully on translation failure.
 - Onboarding flows persist the binding before enabling polling; expiry disables
   cleanly and clears the cursor/token.

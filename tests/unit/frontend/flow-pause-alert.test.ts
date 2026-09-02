@@ -109,23 +109,23 @@ describe("flow pause presentation", () => {
   it("dismisses an existing pause only for a new inbound message while Gateway is enabled", () => {
     const initial = observeGatewayInboundMessage(
       { initialized: false, messageId: null },
-      gatewayStatus({ enabled: true, lastPmInputMessageId: "old-message" })
+      gatewayStatus({ enabled: true, lastGatewayInputMessageId: "old-message" })
     );
     expect(initial.dismissPauseAlert).toBe(false);
 
     const next = observeGatewayInboundMessage(
       initial.observation,
-      gatewayStatus({ enabled: true, lastPmInputMessageId: "new-message" })
+      gatewayStatus({ enabled: true, lastGatewayInputMessageId: "new-message" })
     );
     expect(next.dismissPauseAlert).toBe(true);
 
     expect(observeGatewayInboundMessage(next.observation, gatewayStatus({
       enabled: true,
-      lastPmInputMessageId: "new-message"
+      lastGatewayInputMessageId: "new-message"
     })).dismissPauseAlert).toBe(false);
     expect(observeGatewayInboundMessage(next.observation, gatewayStatus({
       enabled: false,
-      lastPmInputMessageId: "newer-message"
+      lastGatewayInputMessageId: "newer-message"
     })).dismissPauseAlert).toBe(false);
   });
 });
@@ -160,7 +160,7 @@ describe("getFlowPauseNotificationKey", () => {
   });
 });
 
-function gatewayStatus(input: Pick<GatewayStatus, "enabled" | "lastPmInputMessageId">): GatewayStatus {
+function gatewayStatus(input: Pick<GatewayStatus, "enabled" | "lastGatewayInputMessageId">): GatewayStatus {
   return {
     version: 1,
     enabled: input.enabled,
@@ -170,6 +170,8 @@ function gatewayStatus(input: Pick<GatewayStatus, "enabled" | "lastPmInputMessag
     translationEnabled: true,
     currentProjectId: "/repo",
     currentTaskSlug: "demo-task",
+    targetRole: "project-manager",
+    targetRoleSessionStatus: "running",
     binding: {
       accountId: null,
       baseUrl: "https://open.larksuite.com",
@@ -184,7 +186,7 @@ function gatewayStatus(input: Pick<GatewayStatus, "enabled" | "lastPmInputMessag
     pendingConfirmations: {},
     lastPollStatus: { state: "running" },
     lastMessageStatus: null,
-    lastPmInputMessageId: input.lastPmInputMessageId,
+    lastGatewayInputMessageId: input.lastGatewayInputMessageId,
     updatedAt: BASE.updatedAt
   };
 }

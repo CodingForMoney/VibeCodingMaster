@@ -93,13 +93,13 @@ describe("backend E2E Gateway with mock channel and mock Claude Code", () => {
     await waitFor(async () => {
       const response = await env.app.inject({ method: "GET", url: "/api/gateway/status" });
       expect(response.statusCode).toBe(200);
-      expect(response.json<GatewayStatus>().lastPmInputMessageId).toBeTruthy();
+      expect(response.json<GatewayStatus>().lastGatewayInputMessageId).toBeTruthy();
     }, GATEWAY_WAIT_TIMEOUT_MS);
 
     await waitFor(() => {
       const sent = sentTexts(env);
-      expect(sent.some((text) => text.includes("PM final reply 原文：") && text.includes("PM final reply from gateway E2E."))).toBe(true);
-      expect(sent.some((text) => text.includes("PM 回复已收到，但翻译失败。"))).toBe(true);
+      expect(sent.some((text) => text.includes("PM Round Final Reply 原文：") && text.includes("PM final reply from gateway E2E."))).toBe(true);
+      expect(sent.some((text) => text.includes("PM 角色回复已收到，但翻译失败。"))).toBe(true);
     }, GATEWAY_WAIT_TIMEOUT_MS);
 
     env.mockGateway.enqueueText("/retry", {
@@ -112,6 +112,59 @@ describe("backend E2E Gateway with mock channel and mock Claude Code", () => {
         text.includes("重新翻译成功：") &&
         text.includes("PM final reply translated.")
       )).toBe(true);
+    }, GATEWAY_WAIT_TIMEOUT_MS);
+  }, 90_000);
+
+  it("routes Gateway messages and Round Final Replies through the selected VCM role", async () => {
+    const env = await createMockClaudeE2eApp();
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "mock-gateway-role");
+
+    env.mockRuntime.onPrompt("translator", "Translate each <VCM_TEXT>", writeGatewayTranslations, { once: false });
+    env.mockRuntime.onPrompt("architect", "Inspect the selected role flow.", async (ctx) => {
+      await ctx.userPromptSubmit();
+      await ctx.appendTranscriptText("Architect Round Final Reply from Gateway E2E.");
+      await ctx.stop();
+    });
+
+    await startRole(env.app, task.taskSlug, "architect");
+    const architectSession = env.mockRuntime.getSessionByRole(task.taskSlug, "architect");
+    expect(architectSession).toBeDefined();
+
+    const bind = await bindGatewayLarkApp(env.app, {
+      appId: "mock-app",
+      appSecret: "mock-secret",
+      larkDomain: "lark"
+    });
+    expect(bind.status).toBe("confirmed");
+
+    await setGatewayConnection(env.app, true);
+    const status = await updateGatewaySettings(env.app, {
+      enabled: true,
+      channel: "lark",
+      translationEnabled: true,
+      targetRole: "architect"
+    });
+    expect(status.targetRole).toBe("architect");
+    expect(status.targetRoleSessionStatus).toBe("running");
+
+    env.mockGateway.enqueueText("Inspect the selected role flow.", {
+      fromUserId: "mock-user",
+      chatId: "mock-chat"
+    });
+
+    await waitFor(() => {
+      expect(env.mockRuntime.getWrites(architectSession!.id).join("\n"))
+        .toContain("Inspect the selected role flow.");
+      const sent = sentTexts(env);
+      expect(sent.some((text) => text.includes("已发送给 Architect"))).toBe(true);
+      expect(sent.some((text) =>
+        text.includes("Architect Round Final Reply 原文：")
+        && text.includes("Architect Round Final Reply from Gateway E2E.")
+      )).toBe(true);
+      expect(sent.some((text) => text.includes("PM Round Final Reply 原文："))).toBe(false);
     }, GATEWAY_WAIT_TIMEOUT_MS);
   }, 90_000);
 });
@@ -131,6 +184,9 @@ function translateForGatewayE2e(sourceText: string): string {
   }
   if (sourceText.includes("PM final reply from gateway E2E.")) {
     return "PM final reply translated.";
+  }
+  if (sourceText.includes("Inspect the selected role flow.")) {
+    return "Inspect the selected role flow.";
   }
   return `Translated: ${sourceText}`;
 }

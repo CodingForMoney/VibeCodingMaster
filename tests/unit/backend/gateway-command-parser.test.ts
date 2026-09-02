@@ -27,10 +27,17 @@ describe("parseGatewayCommand", () => {
     expect(parseGatewayCommand("/translate off")).toEqual({ kind: "translate", enabled: false });
   });
 
-  it("keeps non-command text as a PM prompt", () => {
+  it("keeps non-command text as a role prompt", () => {
     expect(parseGatewayCommand("继续处理这个任务")).toEqual({
       kind: "plain",
       text: "继续处理这个任务"
     });
+  });
+
+  it("parses Gateway role selection commands", () => {
+    expect(parseGatewayCommand("/role")).toEqual({ kind: "role" });
+    expect(parseGatewayCommand("/role pm")).toEqual({ kind: "role", role: "project-manager" });
+    expect(parseGatewayCommand("/role architect")).toEqual({ kind: "role", role: "architect" });
+    expect(parseGatewayCommand("/role translator")).toEqual({ kind: "unknown", name: "/role translator" });
   });
 });

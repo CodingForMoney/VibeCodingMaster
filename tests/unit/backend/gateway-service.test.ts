@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { GatewayStatus, UpdateGatewaySettingsRequest } from "../../../src/shared/types/gateway.js";
 import type { ProjectSummary } from "../../../src/shared/types/project.js";
+import type { VcmRoleName } from "../../../src/shared/types/role.js";
 import type { VcmSessionRoundState } from "../../../src/shared/types/round.js";
 import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 import type { TaskRecord } from "../../../src/shared/types/task.js";
@@ -212,7 +213,49 @@ describe("gateway-service long connection", () => {
 
     expect(runtimeWrites[0]).toContain("please continue");
     expect(runtimeWrites[0]).not.toContain("[VCM Gateway]");
-    expect((await service.getStatus()).lastPmInputMessageId).toBe("m1");
+    expect((await service.getStatus()).lastGatewayInputMessageId).toBe("m1");
+    service.stop();
+  });
+
+  it("selects a VCM role and forwards plain text to that role session", async () => {
+    const settings = createSettings({
+      enabled: true,
+      translationEnabled: true,
+      binding: {
+        token: "token-1",
+        boundUserId: "user-1",
+        loginUserId: "user-1"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const runtimeWrites: string[] = [];
+    const architectSession = createRoleSession("architect");
+    const channel = createChannel([
+      { messageId: "m1", fromUserId: "user-1", text: "/role architect" },
+      { messageId: "m2", fromUserId: "user-1", text: "检查架构边界" }
+    ], sentTexts);
+    const translatedRoles: VcmRoleName[] = [];
+    const service = createService({
+      settings,
+      channel,
+      roleSessions: { architect: architectSession },
+      runtimeWrites,
+      async translateUserInput(input) {
+        translatedRoles.push(input.role);
+        return { englishPreview: "Inspect the architecture boundaries." };
+      }
+    });
+    await service.setConnectionEnabled(true);
+
+    await service.start();
+    await waitFor(() => runtimeWrites.length >= 1 && sentTexts.length >= 3);
+
+    expect(settings.current().targetRole).toBe("architect");
+    expect(sentTexts[0]).toContain("Gateway role: Architect");
+    expect(sentTexts[2]).toContain("已发送给 Architect");
+    expect(runtimeWrites[0]).toContain("Inspect the architecture boundaries.");
+    expect(translatedRoles).toEqual(["architect"]);
+    expect((await service.getStatus()).lastGatewayInputMessageId).toBe("m2");
     service.stop();
   });
 
@@ -310,12 +353,12 @@ describe("gateway-service long connection", () => {
     const service = createService({ settings, channel });
 
     try {
-      await service.handlePmStop({
+      await service.handleRoleStop({
         repoRoot: "/repo",
         taskSlug: "demo-task",
         session: createPmSession(transcriptPath)
       });
-      const latest = Object.values(settings.current().latestPmReplies)[0];
+      const latest = Object.values(settings.current().latestRoleReplies)[0];
       expect(latest?.text).toBe("Current PM reply for the active task.");
 
       // Arm the connection only after the reply is cached; the phone-driven
@@ -370,17 +413,17 @@ describe("gateway-service long connection", () => {
       // Arm first so the disarmed-outbound gate does not suppress the failure
       // notice; the manual channel withholds /retry until the failure is recorded.
       await service.setConnectionEnabled(true);
-      await service.handlePmStop({
+      await service.handleRoleStop({
         repoRoot: "/repo",
         taskSlug: "demo-task",
         session: createPmSession(transcriptPath)
       });
 
-      expect(sentTexts[0]).toContain("PM final reply 原文：");
+      expect(sentTexts[0]).toContain("PM Round Final Reply 原文：");
       expect(sentTexts[0]).toContain("PM English status that needs translation.");
       expect(sentTexts[0]).toContain("第 2 轮已结束");
       expect(sentTexts[0]).toContain("现在需要你给出下一步指令");
-      expect(sentTexts[1]).toContain("PM 回复已收到，但翻译失败。");
+      expect(sentTexts[1]).toContain("PM 角色回复已收到，但翻译失败。");
       expect(sentTexts[1]).toContain("/retry");
       expect(sentTexts[1]).toContain("translation timeout");
       expect(sentTexts[1]).not.toContain("PM English status");
@@ -439,22 +482,139 @@ describe("gateway-service long connection", () => {
 
     try {
       await service.setConnectionEnabled(true);
-      await service.handlePmStop({
+      await service.handleRoleStop({
         repoRoot: "/repo",
         taskSlug: "demo-task",
         session: createPmSession(transcriptPath)
       });
 
       expect(translatedInputs).toEqual(["Final PM reply for the active task."]);
-      expect(sentTexts[0]).toContain("PM final reply 原文：");
+      expect(sentTexts[0]).toContain("PM Round Final Reply 原文：");
       expect(sentTexts[0]).toContain("Final PM reply for the active task.");
       expect(sentTexts[0]).not.toContain("Intermediate PM text");
       expect(sentTexts[0]).toContain("第 2 轮已结束");
-      expect(sentTexts[1]).toContain("PM final reply 翻译：");
+      expect(sentTexts[1]).toContain("PM Round Final Reply 翻译：");
       expect(sentTexts[1]).toContain("ZH: Final PM reply for the active task.");
       expect(sentTexts[1]).not.toContain("Intermediate PM text");
-      const latest = Object.values(settings.current().latestPmReplies)[0];
+      const latest = Object.values(settings.current().latestRoleReplies)[0];
       expect(latest?.text).toBe("Final PM reply for the active task.");
+    } finally {
+      service.stop();
+      await rm(transcriptDir, { recursive: true, force: true });
+    }
+  });
+
+  it("pushes the selected role's Round Final Reply and ignores other roles", async () => {
+    const transcriptDir = await mkdtemp(join(tmpdir(), "vcm-gateway-role-transcript-"));
+    const architectTranscript = join(transcriptDir, "claude-architect-session.jsonl");
+    const coderTranscript = join(transcriptDir, "claude-coder-session.jsonl");
+    await writeFile(architectTranscript, assistantTranscriptLine(
+      "architect-reply",
+      "2026-06-11T00:00:01.000Z",
+      "Architect final reply."
+    ));
+    await writeFile(coderTranscript, assistantTranscriptLine(
+      "coder-reply",
+      "2026-06-11T00:00:01.000Z",
+      "Coder final reply."
+    ));
+    const settings = createSettings({
+      enabled: true,
+      translationEnabled: true,
+      currentProjectId: "/repo",
+      currentTaskSlug: "demo-task",
+      targetRole: "architect",
+      binding: {
+        token: "token-1",
+        boundUserId: "user-1",
+        loginUserId: "user-1"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const translatedRoles: VcmRoleName[] = [];
+    const service = createService({
+      settings,
+      channel: createChannel([], sentTexts),
+      roundState: { activeRole: "architect" },
+      async translateGatewayOutput(input) {
+        translatedRoles.push(input.role);
+        return `ZH: ${input.text}`;
+      }
+    });
+
+    try {
+      await service.setConnectionEnabled(true);
+      await service.handleRoleStop({
+        repoRoot: "/repo",
+        taskSlug: "demo-task",
+        session: createRoleSession("coder", coderTranscript)
+      });
+      expect(sentTexts).toEqual([]);
+
+      await service.handleRoleStop({
+        repoRoot: "/repo",
+        taskSlug: "demo-task",
+        session: createRoleSession("architect", architectTranscript)
+      });
+
+      expect(sentTexts[0]).toContain("Architect Round Final Reply 原文：");
+      expect(sentTexts[0]).toContain("Architect final reply.");
+      expect(sentTexts[1]).toContain("Architect Round Final Reply 翻译：");
+      expect(translatedRoles).toEqual(["architect"]);
+      expect(Object.values(settings.current().latestRoleReplies)[0]).toMatchObject({
+        role: "architect",
+        text: "Architect final reply."
+      });
+    } finally {
+      service.stop();
+      await rm(transcriptDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not push a reply when the Gateway target changes while Round completion is pending", async () => {
+    const transcriptDir = await mkdtemp(join(tmpdir(), "vcm-gateway-role-switch-"));
+    const transcriptPath = join(transcriptDir, "claude-architect-session.jsonl");
+    await writeFile(transcriptPath, assistantTranscriptLine(
+      "architect-reply",
+      "2026-06-11T00:00:01.000Z",
+      "Architect reply from the previous target."
+    ));
+    const roundState: Partial<VcmSessionRoundState> = {
+      status: "running",
+      activeRole: "architect"
+    };
+    const settings = createSettings({
+      enabled: true,
+      translationEnabled: false,
+      currentProjectId: "/repo",
+      currentTaskSlug: "demo-task",
+      targetRole: "architect",
+      binding: {
+        token: "token-1",
+        boundUserId: "user-1",
+        loginUserId: "user-1"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const service = createService({
+      settings,
+      channel: createChannel([], sentTexts),
+      roundState
+    });
+
+    try {
+      await service.setConnectionEnabled(true);
+      const pendingPush = service.handleRoleStop({
+        repoRoot: "/repo",
+        taskSlug: "demo-task",
+        session: createRoleSession("architect", transcriptPath)
+      });
+      await settings.updateSettings({ targetRole: "coder" });
+      roundState.status = "stopped";
+      await pendingPush;
+
+      expect(sentTexts).toEqual([]);
+      expect(Object.values(settings.current().latestRoleReplies)).toEqual([]);
     } finally {
       service.stop();
       await rm(transcriptDir, { recursive: true, force: true });
@@ -514,7 +674,7 @@ describe("gateway-service long connection", () => {
 
     try {
       await service.setConnectionEnabled(true);
-      await service.handlePmStop({
+      await service.handleRoleStop({
         repoRoot: "/repo",
         taskSlug: "demo-task",
         session: createPmSession(transcriptPath)
@@ -570,7 +730,7 @@ describe("gateway-service long connection", () => {
 
     try {
       await service.setConnectionEnabled(true);
-      await service.handlePmStop({
+      await service.handleRoleStop({
         repoRoot: "/repo",
         taskSlug: "demo-task",
         session: createPmSession(transcriptPath)
@@ -578,7 +738,7 @@ describe("gateway-service long connection", () => {
 
       expect(sentTexts).toEqual([]);
       expect(translatedInputs).toEqual([]);
-      expect(Object.values(settings.current().latestPmReplies)).toEqual([]);
+      expect(Object.values(settings.current().latestRoleReplies)).toEqual([]);
       expect(settings.current().pushCursors).toEqual({});
     } finally {
       service.stop();
@@ -1001,7 +1161,7 @@ describe("gateway-service long connection", () => {
   });
 
   it("caches the latest PM reply but sends nothing while disarmed", async () => {
-    // PP4: a disarmed gateway still records latestPmReplies for later replay but
+    // PP4: a disarmed gateway still records latestRoleReplies for later replay but
     // never opens the channel to push.
     const transcriptDir = await mkdtemp(join(tmpdir(), "vcm-gateway-transcript-"));
     const transcriptPath = join(transcriptDir, "claude-pm-session.jsonl");
@@ -1023,14 +1183,14 @@ describe("gateway-service long connection", () => {
     const service = createService({ settings, channel });
 
     try {
-      await service.handlePmStop({
+      await service.handleRoleStop({
         repoRoot: "/repo",
         taskSlug: "demo-task",
         session: createPmSession(transcriptPath)
       });
 
       expect(sentTexts).toEqual([]);
-      const latest = Object.values(settings.current().latestPmReplies)[0];
+      const latest = Object.values(settings.current().latestRoleReplies)[0];
       expect(latest?.text).toBe("Final PM reply while disarmed.");
     } finally {
       service.stop();
@@ -1050,11 +1210,12 @@ function createService(input: {
     flowPauseAlerts?: boolean;
   };
   pmSession?: RoleSessionRecord | null;
+  roleSessions?: Partial<Record<VcmRoleName, RoleSessionRecord | null>>;
   runtimeWrites?: string[];
   translateGatewayOutput?: (input: {
     repoRoot: string;
     taskSlug: string;
-    role: "project-manager";
+    role: VcmRoleName;
     text: string;
     sourceEntryIds?: string[];
     allowCreate?: boolean;
@@ -1063,7 +1224,7 @@ function createService(input: {
     repoRoot: string;
     taskRepoRoot: string;
     taskSlug: string;
-    role: "project-manager";
+    role: VcmRoleName;
     text: string;
     useContext: boolean;
     send: boolean;
@@ -1134,8 +1295,10 @@ function createService(input: {
       }
     },
     sessionService: {
-      async getRoleSession() {
-        return input.pmSession ?? null;
+      async getRoleSession(_repoRoot: string, _taskSlug: string, role: VcmRoleName) {
+        return input.roleSessions?.[role]
+          ?? (role === "project-manager" ? input.pmSession : null)
+          ?? null;
       },
       async listRoleSessions() {
         return [];
@@ -1163,7 +1326,7 @@ function createService(input: {
         repoRoot: string;
         taskRepoRoot: string;
         taskSlug: string;
-        role: "project-manager";
+        role: VcmRoleName;
         text: string;
         useContext: boolean;
         send: boolean;
@@ -1175,7 +1338,7 @@ function createService(input: {
       async translateGatewayOutput(translateInput: {
         repoRoot: string;
         taskSlug: string;
-        role: "project-manager";
+        role: VcmRoleName;
         text: string;
         sourceEntryIds?: string[];
         allowCreate?: boolean;
@@ -1393,6 +1556,7 @@ function createSettings(initial: Partial<GatewaySettingsFile> = {}): GatewaySett
         translationEnabled: input.translationEnabled ?? current.translationEnabled,
         currentProjectId: input.currentProjectId !== undefined ? input.currentProjectId : current.currentProjectId,
         currentTaskSlug: input.currentTaskSlug !== undefined ? input.currentTaskSlug : current.currentTaskSlug,
+        targetRole: input.targetRole ?? current.targetRole,
         binding: {
           ...current.binding,
           baseUrl: input.baseUrl !== undefined ? input.baseUrl ?? current.binding.baseUrl : current.binding.baseUrl
@@ -1419,6 +1583,8 @@ function createSettings(initial: Partial<GatewaySettingsFile> = {}): GatewaySett
         translationEnabled: settings.translationEnabled,
         currentProjectId: settings.currentProjectId,
         currentTaskSlug: settings.currentTaskSlug,
+        targetRole: settings.targetRole,
+        targetRoleSessionStatus: null,
         binding: {
           accountId: settings.binding.accountId,
           baseUrl: settings.binding.baseUrl,
@@ -1497,18 +1663,23 @@ function createRoundState(overrides: Partial<VcmSessionRoundState> = {}): VcmSes
     totalCcActiveMs: 1000,
     currentRoundCcActiveMs: 1000,
     roles: ["project-manager"],
+    activeRole: "project-manager",
     updatedAt: NOW,
     ...overrides
   };
 }
 
 function createPmSession(transcriptPath?: string): RoleSessionRecord {
+  return createRoleSession("project-manager", transcriptPath);
+}
+
+function createRoleSession(role: VcmRoleName, transcriptPath?: string): RoleSessionRecord {
   return {
-    id: "pm-session",
-    claudeSessionId: "claude-pm-session",
+    id: role === "project-manager" ? "pm-session" : `${role}-session`,
+    claudeSessionId: role === "project-manager" ? "claude-pm-session" : `claude-${role}-session`,
     transcriptPath,
     taskSlug: "demo-task",
-    role: "project-manager",
+    role,
     status: "running",
     activityStatus: "idle",
     command: "claude",

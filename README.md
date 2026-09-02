@@ -349,7 +349,7 @@ Progress submission.
 If the flow stops, VCM always shows a blocking pause alert. `Pause alert sound`
 only controls the looping sound. Enabling Gateway turns that preference off once;
 it can be turned back on afterward. A new Gateway command closes an open pause
-alert after its instruction is successfully submitted to PM.
+alert after its instruction is successfully submitted to the selected role.
 
 ## Gate Review Gates
 
@@ -435,12 +435,13 @@ Gateway can:
 - select a project or task
 - create a task
 - close a task with confirmation
-- send plain text to Project Manager
-- push the PM Round-final reply and Round status back to the active chat
+- select Project Manager, Architect, Coder, Tester, or Reviewer
+- send plain text to the selected role
+- push the selected role's Round Final Reply and Round status back to the active chat
 - translate mobile messages when Gateway translation is enabled
 
-Gateway does not expose the embedded terminal and does not send directly to
-Architect, Coder, Tester, or Reviewer.
+Gateway does not expose the embedded terminal. Translator and Harness Engineer
+remain tool roles and cannot be selected as Gateway message targets.
 
 Common commands:
 
@@ -448,6 +449,8 @@ Common commands:
 /help
 /start
 /status
+/role
+/role <pm|architect|coder|tester|reviewer>
 /projects
 /use-project <index-or-path>
 /pull-current
@@ -466,9 +469,11 @@ repositories.
 
 When Gateway starts, VCM enables conversation translation, auto-send, and the
 `Round final reply` scope. On a normal Round end, Gateway sends the PM original
-reply first, then reuses the matching translation already produced for the
-translation panel. `/retry` explicitly creates a new translation only when the
-previous Gateway translation failed or was unavailable.
+reply first by default. After `/role` selects another VCM role, the same rule
+applies to that role's Round Final Reply. Gateway then reuses the matching
+translation already produced for the translation panel. `/retry` explicitly
+creates a new translation only when the previous Gateway translation failed or
+was unavailable.
 
 ## Harness Studio
 
