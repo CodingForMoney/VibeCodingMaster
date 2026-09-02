@@ -2233,7 +2233,8 @@ function normalizeClaudePermissionMode(value: unknown): ClaudePermissionMode {
 
 function normalizeClaudeModel(value: unknown): SessionModel {
   if (
-    value === "opus"
+    value === "claude-fable-5-1"
+    || value === "opus"
     || value === "claude-opus-4-8"
     || value === "sonnet"
     || value === "fable"

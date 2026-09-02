@@ -88,6 +88,28 @@ describe("createClaudeAdapter", () => {
     });
   });
 
+  it("builds role commands with the pinned Fable 5.1 model", () => {
+    expect(adapter.buildRoleStartCommand(
+      "architect",
+      "claude",
+      "default",
+      undefined,
+      false,
+      "claude-fable-5-1"
+    )).toEqual({
+      command: "claude",
+      args: [
+        "--allowedTools",
+        "Glob,Grep",
+        "--agent",
+        "architect",
+        "--model",
+        "claude-fable-5-1"
+      ],
+      display: "claude --allowedTools 'Glob,Grep' --agent architect --model claude-fable-5-1"
+    });
+  });
+
   it("uses the child environment instead of --model for Codex Bridge models", () => {
     expect(adapter.buildRoleStartCommand(
       "coder",

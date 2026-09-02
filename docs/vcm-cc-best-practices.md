@@ -332,7 +332,10 @@ default
 
 `bypassPermissions` is the default because VCM expects users to run in a
 controlled local boundary such as a Dev Container, VM, or trusted task
-worktree. The template also stores task auto-orchestration preference.
+worktree. Native model choices distinguish the explicit `claude-fable-5-1`
+model from the provider-resolved `fable` alias; `opus` and `sonnet` remain
+rolling Claude Code aliases. The template also stores task auto-orchestration
+preference.
 
 One-click start starts or resumes the four core VCM roles. If any Gate Review
 gate is enabled, it also starts or resumes Reviewer with the saved template

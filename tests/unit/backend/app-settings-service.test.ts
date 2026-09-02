@@ -112,7 +112,7 @@ describe("app-settings-service", () => {
     launchTemplate.autoOrchestration = false;
     launchTemplate.roles.coder = {
       permissionMode: "bypassPermissions",
-      model: "claude-opus-4-8",
+      model: "claude-fable-5-1",
       effort: "high"
     };
 

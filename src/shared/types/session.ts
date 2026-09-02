@@ -38,9 +38,16 @@ export const CLAUDE_MODEL_OPTIONS = [
     available: true
   },
   {
+    value: "claude-fable-5-1",
+    label: "Fable 5.1",
+    description: "Pinned Claude Fable 5.1",
+    source: "claude",
+    available: true
+  },
+  {
     value: "fable",
-    label: "Fable",
-    description: "Claude Fable",
+    label: "Fable Alias",
+    description: "Claude Code provider-selected Fable",
     source: "claude",
     available: true
   },
