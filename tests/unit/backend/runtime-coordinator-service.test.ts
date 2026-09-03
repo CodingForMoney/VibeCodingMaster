@@ -342,13 +342,6 @@ function createCoordinator(input: {
         };
       }
     },
-    roleStallDetector: {
-      async reconcileTask(request) {
-        input.calls.push(`role-stall-detector:${request.taskSlug}`);
-      },
-      clearProject() {},
-      stop() {}
-    },
     gatewayService: {
       async getStatus() {
         input.calls.push("gateway-status");

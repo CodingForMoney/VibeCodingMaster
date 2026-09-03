@@ -74,7 +74,6 @@ function createServerDepsStub(calls: string[]): ServerDeps {
     harnessFeedbackService: {} as never,
     commandDispatcher: {} as never,
     claudeHookService: {} as never,
-    roleStallDetector: {} as never,
     messageService: {} as never,
     taskLaunchService: {} as never,
     gateReviewService: {} as never,

@@ -990,16 +990,6 @@ Claude hooks:
 - `PostCompact`: refreshes session metadata without changing running/idle flow
   state.
 - `PermissionRequest`: returns the configured local permission decision.
-- `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PostToolBatch`,
-  `SubagentStart`, `SubagentStop`, and `PreCompact`: provide
-  runtime progress evidence for suspected-stall warnings only. They do not
-  update Turn, Round, routing, or Auto Memory state.
-
-When an expected progress hook does not arrive before the phase deadline, VCM
-shows a warning through the existing task workspace state. Detection does not
-stop or resume Claude Code. Ignore suppresses the current warning; Recover is an
-explicit user action that revalidates the active Session and Round, then resumes
-the same Claude Session with a continuation prompt.
 
 Role retry is enabled by default. Retryable StopFailure events retry up to 20
 times: first after 1 minute, then +1 minute per attempt. Non-retryable errors

@@ -16,7 +16,6 @@ import type { TaskLaunchService } from "../services/task-launch-service.js";
 import type { RoundService } from "../services/round-service.js";
 import type { TaskWorkflowService } from "../services/task-workflow-service.js";
 import type { ArchitectRestartService } from "../services/architect-restart-service.js";
-import type { RoleStallDetectorService } from "../services/role-stall-detector-service.js";
 import type { TranslationService } from "../services/translation-service.js";
 
 export interface TaskRouteDeps {
@@ -29,7 +28,6 @@ export interface TaskRouteDeps {
   roundService: Pick<RoundService, "getSessionRoundState">;
   taskWorkflowService?: Pick<TaskWorkflowService, "getState" | "declare">;
   architectRestartService: Pick<ArchitectRestartService, "getState">;
-  roleStallDetector: Pick<RoleStallDetectorService, "getWarning" | "ignoreWarning" | "recoverWarning">;
   translationService?: Pick<TranslationService, "shouldDelayFlowPauseNotification">;
 }
 
@@ -126,8 +124,7 @@ export function registerTaskRoutes(app: FastifyInstance, deps: TaskRouteDeps): v
         orchestration,
         roundState: displayedRoundState,
         workflowState,
-        architectRestart: deps.architectRestartService.getState(project.repoRoot, taskSlug),
-        roleStallWarning: deps.roleStallDetector.getWarning(project.repoRoot, taskSlug)
+        architectRestart: deps.architectRestartService.getState(project.repoRoot, taskSlug)
       } satisfies TaskWorkspaceState;
     } catch (error) {
       if (isOpenFileLimitError(error)) {
@@ -141,41 +138,11 @@ export function registerTaskRoutes(app: FastifyInstance, deps: TaskRouteDeps): v
           },
           roundState: degradedRoundState(taskSlug),
           workflowState: degradedWorkflowState(taskSlug),
-          architectRestart: deps.architectRestartService.getState(repoRoot, taskSlug),
-          roleStallWarning: deps.roleStallDetector.getWarning(repoRoot, taskSlug)
+          architectRestart: deps.architectRestartService.getState(repoRoot, taskSlug)
         } satisfies TaskWorkspaceState;
       }
       throw error;
     }
-  });
-
-  app.post<{
-    Params: { taskSlug: string };
-    Body: { warningId: string };
-  }>("/api/tasks/:taskSlug/role-stall/ignore", async (request) => {
-    const project = await requireCurrentProject(deps.projectService);
-    return deps.roleStallDetector.ignoreWarning(
-      project.repoRoot,
-      request.params.taskSlug,
-      requireWarningId(request.body?.warningId)
-    );
-  });
-
-  app.post<{
-    Params: { taskSlug: string };
-    Body: { warningId: string };
-  }>("/api/tasks/:taskSlug/role-stall/recover", async (request) => {
-    const project = await requireCurrentProject(deps.projectService);
-    const config = await deps.projectService.loadConfig(project.repoRoot);
-    const task = await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
-    const taskRepoRoot = getTaskRuntimeRepoRoot(task);
-    return deps.roleStallDetector.recoverWarning({
-      repoRoot: project.repoRoot,
-      taskRepoRoot,
-      stateRoot: config.stateRoot,
-      taskSlug: task.taskSlug,
-      warningId: requireWarningId(request.body?.warningId)
-    });
   });
 
   app.post<{
@@ -228,17 +195,6 @@ async function delayFlowPauseForTranslation(
     // Translation-state failures must release, rather than suppress, the pause alert.
     return input.roundState;
   }
-}
-
-function requireWarningId(value: unknown): string {
-  if (typeof value === "string" && value.trim()) {
-    return value.trim();
-  }
-  throw new VcmError({
-    code: "ROLE_STALL_WARNING_ID_REQUIRED",
-    message: "A role stall warning id is required.",
-    statusCode: 400
-  });
 }
 
 async function requireCurrentProject(projectService: ProjectService) {

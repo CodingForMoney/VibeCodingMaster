@@ -6,7 +6,6 @@ import type { GatewayStatus } from "./gateway.js";
 import type { VcmOrchestrationState, VcmRoleMessage } from "./message.js";
 import type { ProjectSummary } from "./project.js";
 import type { DispatchableRole } from "./role.js";
-import type { RoleStallWarning } from "./role-stall.js";
 import type { VcmSessionRoundState } from "./round.js";
 import type { RoleSessionRecord } from "./session.js";
 import type { TaskRecord } from "./task.js";
@@ -35,7 +34,6 @@ export interface TaskWorkspaceState {
   roundState: VcmSessionRoundState;
   workflowState: TaskWorkflowState;
   architectRestart: ArchitectRestartState | null;
-  roleStallWarning: RoleStallWarning | null;
 }
 
 export interface ProjectRuntimeState {

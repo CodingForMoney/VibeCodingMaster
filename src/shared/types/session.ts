@@ -212,7 +212,6 @@ export interface RoleSessionRecord {
   harnessCurrentRevision?: number;
   harnessOutdated?: boolean;
   lastHarnessNotifyAt?: string;
-  expectedRuntimeExitReason?: "role-stall-recovery";
   exitCode?: number | null;
 }
 

@@ -22,7 +22,6 @@ import { createHarnessFeedbackService } from "../../../../src/backend/services/h
 import { createAutoMemoryService } from "../../../../src/backend/services/auto-memory-service.js";
 import { createArchitectRestartService } from "../../../../src/backend/services/architect-restart-service.js";
 import { createRoleContextRestartService } from "../../../../src/backend/services/role-context-restart-service.js";
-import { createRoleStallDetectorService } from "../../../../src/backend/services/role-stall-detector-service.js";
 import { createCommandDispatcher } from "../../../../src/backend/services/command-dispatcher.js";
 import { createStatusService } from "../../../../src/backend/services/status-service.js";
 import { createMessageService } from "../../../../src/backend/services/message-service.js";
@@ -239,13 +238,6 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     sessionService
   });
   const transcripts = createClaudeTranscriptService();
-  const roleStallDetector = createRoleStallDetectorService({
-    sessionService,
-    roundService,
-    modelTimeoutMs: 1,
-    toolTimeoutMs: 1,
-    subagentTimeoutMs: 1
-  });
   const translationService = createTranslationService({
     runtime: mockRuntime,
     sessionRegistry: registry,
@@ -326,7 +318,6 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     translationWorkerService,
     architectRestartService,
     roleContextRestartService,
-    roleStallDetector,
     workflowControlService,
     retrySetTimeout(callback) {
       return globalThis.setTimeout(callback, 0);
@@ -345,7 +336,6 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     harnessFeedbackService,
     autoMemoryService,
     roundService,
-    roleStallDetector,
     gatewayService,
     async getStateRoot(repoRoot) {
       return (await projectService.loadConfig(repoRoot)).stateRoot;
@@ -393,7 +383,6 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     autoMemoryService,
     commandDispatcher,
     claudeHookService,
-    roleStallDetector,
     messageService,
     taskLaunchService,
     gateReviewService,

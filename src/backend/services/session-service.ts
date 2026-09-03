@@ -63,18 +63,6 @@ export interface SessionService {
   recordTerminalProcessExit(repoRoot: string, input: RecordTerminalProcessExitInput): Promise<TerminalProcessExitRecord | undefined>;
   markRoleActivityRunning(repoRoot: string, taskSlug: string, role: RoleName, expectedSessionId?: string): Promise<RoleSessionRecord | undefined>;
   markRoleActivityIdle(repoRoot: string, taskSlug: string, role: RoleName): Promise<RoleSessionRecord | undefined>;
-  recoverRoleSession(
-    repoRoot: string,
-    taskSlug: string,
-    input: RecoverRoleSessionInput
-  ): Promise<RoleSessionRecord>;
-}
-
-export interface RecoverRoleSessionInput {
-  role: RoleName;
-  expectedSessionId: string;
-  expectedRuntimeSessionToken?: string;
-  recoveryPrompt: string;
 }
 
 export interface SessionServiceDeps {
@@ -1043,8 +1031,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     }
 
     const timestamp = now();
-    const turnWasRunning = current.activityStatus === "running"
-      && current.expectedRuntimeExitReason !== "role-stall-recovery";
+    const turnWasRunning = current.activityStatus === "running";
     const updated: RoleSessionRecord = {
       ...current,
       status: input.status,
@@ -1060,90 +1047,6 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const task = await deps.taskService.loadTask(repoRoot, taskSlug);
     await persistRoleSessionRecord(deps.fs, repoRoot, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
     return { record: updated, turnWasRunning };
-  }
-
-  async function persistTaskRoleRecord(
-    repoRoot: string,
-    taskSlug: string,
-    record: RoleSessionRecord
-  ): Promise<RoleSessionRecord> {
-    deps.registry.upsert(record);
-    const config = await deps.projectService.loadConfig(repoRoot);
-    const task = await deps.taskService.loadTask(repoRoot, taskSlug);
-    await persistRoleSessionRecord(
-      deps.fs,
-      repoRoot,
-      getTaskRuntimeRepoRoot(task),
-      config.stateRoot,
-      record
-    );
-    return record;
-  }
-
-  async function recoverRoleSession(
-    repoRoot: string,
-    taskSlug: string,
-    input: RecoverRoleSessionInput
-  ): Promise<RoleSessionRecord> {
-    const current = await getTaskRoleSessionView(repoRoot, taskSlug, input.role);
-    if (!current
-      || current.id !== input.expectedSessionId
-      || current.runtimeSessionToken !== input.expectedRuntimeSessionToken
-      || current.status !== "running"
-      || current.activityStatus !== "running") {
-      throw new VcmError({
-        code: "ROLE_STALL_SESSION_CHANGED",
-        message: `${input.role} session changed before recovery could begin.`,
-        statusCode: 409
-      });
-    }
-    if (!current.claudeSessionId) {
-      throw new VcmError({
-        code: "CLAUDE_SESSION_MISSING",
-        message: `${input.role} does not have a confirmed Claude session id to resume.`,
-        statusCode: 409
-      });
-    }
-
-    const prepared = await persistTaskRoleRecord(repoRoot, taskSlug, {
-      ...current,
-      expectedRuntimeExitReason: "role-stall-recovery",
-      updatedAt: now()
-    });
-    if (deps.runtime.getSession(prepared.id)) {
-      await deps.runtime.stop(prepared.id);
-    }
-    await persistTaskRoleRecord(repoRoot, taskSlug, {
-      ...prepared,
-      status: "exited",
-      activityStatus: "idle",
-      pid: undefined,
-      expectedRuntimeExitReason: undefined,
-      updatedAt: now()
-    });
-
-    const resumed = await launchRoleSession(repoRoot, taskSlug, input.role, {
-      permissionMode: prepared.permissionMode,
-      model: prepared.model,
-      effort: prepared.effort
-    }, "resume");
-    if ((await waitForSessionInputReady(resumed.id)) === "exited") {
-      throw new VcmError({
-        code: "ROLE_STALL_RESUME_FAILED",
-        message: `${input.role} session exited before recovery input could be submitted.`,
-        statusCode: 409
-      });
-    }
-
-    await submitTerminalInput(deps.runtime, resumed.id, input.recoveryPrompt);
-    return persistTaskRoleRecord(repoRoot, taskSlug, {
-      ...resumed,
-      activityStatus: "running",
-      lastTurnStartedAt: now(),
-      lastHookEventAt: now(),
-      expectedRuntimeExitReason: undefined,
-      updatedAt: now()
-    });
   }
 
   return {
@@ -1703,8 +1606,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
           : undefined;
       }
       return markTaskRoleActivityIdle(repoRoot, taskSlug, role);
-    },
-    recoverRoleSession
+    }
   };
 }
 
@@ -1833,7 +1735,6 @@ function withoutRuntimeOnlySessionFields(session: RoleSessionRecord): RoleSessio
   const {
     pid: _pid,
     runtimeSessionToken: _runtimeSessionToken,
-    expectedRuntimeExitReason: _expectedRuntimeExitReason,
     ...persisted
   } = session;
   return persisted;

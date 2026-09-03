@@ -18,7 +18,6 @@ import {
 import { createAutoMemoryService, type AutoMemoryService } from "./services/auto-memory-service.js";
 import { createArchitectRestartService, type ArchitectRestartService } from "./services/architect-restart-service.js";
 import { createRoleContextRestartService, type RoleContextRestartService } from "./services/role-context-restart-service.js";
-import { createRoleStallDetectorService, type RoleStallDetectorService } from "./services/role-stall-detector-service.js";
 import { createClaudeTranscriptService } from "./services/claude-transcript-service.js";
 import { createGateReviewService, type GateReviewService } from "./services/gate-review-service.js";
 import { createHarnessFeedbackService, type HarnessFeedbackService } from "./services/harness-feedback-service.js";
@@ -100,7 +99,6 @@ export interface ServerDeps {
   autoMemoryService: AutoMemoryService;
   commandDispatcher: CommandDispatcher;
   claudeHookService: ClaudeHookService;
-  roleStallDetector: RoleStallDetectorService;
   messageService: MessageService;
   taskLaunchService: TaskLaunchService;
   gateReviewService: GateReviewService;
@@ -191,7 +189,6 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     roundService: deps.roundService,
     taskWorkflowService: deps.taskWorkflowService,
     architectRestartService: deps.architectRestartService,
-    roleStallDetector: deps.roleStallDetector,
     translationService: deps.translationService
   });
   registerSessionRoutes(app, {
@@ -420,10 +417,6 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     sessionService
   });
   const transcripts = createClaudeTranscriptService();
-  const roleStallDetector = createRoleStallDetectorService({
-    sessionService,
-    roundService
-  });
   const translationService = createTranslationService({
     runtime,
     sessionRegistry: registry,
@@ -501,7 +494,6 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     translationWorkerService,
     architectRestartService,
     roleContextRestartService,
-    roleStallDetector,
     workflowControlService
   });
   const runtimeCoordinator = createRuntimeCoordinatorService({
@@ -514,7 +506,6 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     harnessFeedbackService,
     autoMemoryService,
     roundService,
-    roleStallDetector,
     gatewayService,
     async getStateRoot(repoRoot) {
       return (await projectService.loadConfig(repoRoot)).stateRoot;
@@ -557,7 +548,6 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     autoMemoryService,
     commandDispatcher,
     claudeHookService,
-    roleStallDetector,
     messageService,
     taskLaunchService,
     gateReviewService,

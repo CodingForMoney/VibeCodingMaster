@@ -506,14 +506,9 @@ provide the language server for each detected language: `rust-analyzer`,
 relationships. Accessors, backing fields, trait items, implementations, wrappers,
 and aliases are queried as separate symbols; a bounded source-text fallback may
 only locate candidates after the correct LSP query is demonstrably partial.
-Other roles use generated context and ordinary source reads.
-Harness Studio reports
-whether the server executable and plugin can run; the role Session performs the
-real workspace indexing and semantic query retries. VCM uses Claude Code progress
-hooks to detect a model response, tool call, subagent, or compaction that may be
-stalled. Detection only opens a warning; it does not interrupt the Session or
-change the Round. The user can ignore that warning or explicitly stop and resume
-the same Claude Session from the warning dialog.
+Other roles use generated context and ordinary source reads. Harness Studio
+reports whether the server executable and plugin can run; the role Session
+performs the real workspace indexing and semantic query retries.
 
 Harness Engineer is task-scoped and runs from the active task worktree. The
 backend automatically starts a fresh Harness Engineer for each active task or

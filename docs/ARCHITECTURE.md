@@ -30,7 +30,6 @@ layers plus supporting tools.
   endpoint and the gateway), `task-close-service` (backend-owned unconditional
   task close, shared by the GUI endpoint and the gateway), `session-service`, `round-service`,
   `runtime-coordinator-service`, `runtime-recovery-service`,
-  `role-stall-detector-service`,
   `terminal-process-exit-service`, `message-service`, `task-workflow-service`,
   `workflow-control-service`,
   `architect-restart-service`,
@@ -190,8 +189,7 @@ on both native Claude and Codex Bridge launches. Other roles do not load the plu
 Each bundled language server may restart up to three times after a crash. The
 Rust server disables its redundant check-on-save run because VCM roles execute
 the required validation explicitly. Server restart recovers a terminated LSP
-process; it does not resolve an already stalled in-flight tool request, which is
-handled by the separate role-stall warning and user-triggered recovery path.
+process.
 Architect preloads the `vcm-code-navigation` skill through Agent frontmatter.
 
 Architect uses LSP semantic navigation for definitions, references,
@@ -230,17 +228,8 @@ the backend process; detection does not start a persistent language server or
 scan the repository recursively. A successful probe means the server is
 runnable, not that a role workspace is indexed or semantically ready. Architect
 uses bounded workspace-query retries through `vcm-code-navigation`; the skill
-does not issue an unconditional warm-up query. `role-stall-detector-service`
-consumes Claude Code progress hooks for the active workflow role and reports a
-suspected model, tool, subagent, or compaction stall after the phase deadline.
-It keeps warnings in backend runtime memory and never mutates Session activity,
-Round state, routing, or retry state. A newer progress hook clears the warning.
-Ignore suppresses only that warning generation; Recover revalidates the same
-Session token and active Round before stopping the PTY, resuming the same Claude
-Session, and submitting a bounded continuation prompt. The existing aggregated
-task workspace poll carries the warning to the UI; no separate polling loop is
-created. Transcript content is not used for liveness detection.
-Harness Studio renders server availability and the exact backend diagnostic.
+does not issue an unconditional warm-up query. Harness Studio renders server
+availability and the exact backend diagnostic.
 The project runtime, not VCM, owns installation of
 `rust-analyzer`, `typescript-language-server`, `pyright-langserver`, `gopls`,
 `clangd`, or `jdtls`.

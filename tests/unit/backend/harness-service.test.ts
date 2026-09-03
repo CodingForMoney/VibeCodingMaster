@@ -678,6 +678,14 @@ describe("createHarnessService", () => {
               command: "echo keep-user-hook"
             }]
           }
+        ],
+        PostToolUse: [
+          {
+            hooks: [{
+              type: "command",
+              command: "curl http://localhost/api/hooks/claude-code"
+            }]
+          }
         ]
       }
     }, null, 2));
@@ -702,6 +710,7 @@ describe("createHarnessService", () => {
     expect(JSON.stringify(settings.hooks.UserPromptSubmit)).not.toContain("vcmctl");
     expect(JSON.stringify(settings.hooks.Stop)).not.toContain("vcmctl");
     expect(JSON.stringify(settings.hooks.PreToolUse)).toContain("echo keep-user-hook");
+    expect(settings.hooks.PostToolUse).toBeUndefined();
     expect(settings.autoMemoryEnabled).toBe(false);
   });
 
