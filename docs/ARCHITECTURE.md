@@ -315,8 +315,10 @@ interrupted commit before exposing either file. Project recovery also returns
 an unconfirmed `dispatching` approval to `pending` after recovering message
 state, so the approved route can be submitted again instead of remaining
 stuck. Exact user overrides are recorded by the backend and are bound to one
-rejected transition. The same user wording may be used again, but each record
-is consumable only by its own revision, history, flow, target, and evidence. An
+rejected transition. An existing direct user instruction that explicitly
+authorizes that transition is reused without a second confirmation. The same
+user wording may be used again, but each record is consumable only by its own
+revision, history, flow, target, and evidence. An
 override changes only that transition's permission; flow relationships still
 determine whether the existing run is preserved or a genuinely independent
 flow run starts. A separate one-time

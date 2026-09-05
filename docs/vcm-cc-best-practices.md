@@ -551,10 +551,12 @@ workflow approval metadata. The approval is consumed only when the target
 role's matching `UserPromptSubmit` confirms delivery.
 
 If VCM rejects a transition, PM remains in the current turn. A direct user may
-authorize that exact rejected transition. PM first uses `vcm-ask-user`, waits
-for the reply, and then copies the user's exact authorization into the next
-Workflow Progress submission. The authorization is bound to one revision,
-flow, target, evidence, and violated rule and can be consumed only once.
+authorize that exact rejected transition. If the current user instruction
+already gives that exact authorization, PM reuses it verbatim without asking
+again. Otherwise PM uses `vcm-ask-user` and waits for the reply. PM then copies
+the user's exact authorization into the next Workflow Progress submission. The
+authorization is bound to one revision, flow, target, evidence, and violated
+rule and can be consumed only once.
 
 After a passing Test Report and successful validation-adequacy and code-diff
 Gates, the user may approve one additional Tester-owned change in the current

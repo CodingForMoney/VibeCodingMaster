@@ -171,7 +171,7 @@ describe("workflow control service", () => {
     });
   });
 
-  it("binds each direct user authorization to one transition while allowing repeated wording", async () => {
+  it("accepts an already-given direct user authorization and binds each use to one transition", async () => {
     const { context, fs } = await createContext(roots);
     let authorizationSequence = 0;
     const service = createWorkflowControlService({
@@ -183,7 +183,8 @@ describe("workflow control service", () => {
     const proposal = initialProposal("coder");
 
     await expect(service.submitProgress(context, renderWorkflowProgress(proposal))).rejects.toMatchObject({
-      code: "WORKFLOW_TRANSITION_DENIED"
+      code: "WORKFLOW_TRANSITION_DENIED",
+      hint: expect.stringContaining("reuse an existing direct user instruction")
     });
 
     proposal.proposal = {
@@ -233,7 +234,8 @@ describe("workflow control service", () => {
     };
 
     await expect(service.submitProgress(context, renderWorkflowProgress(proposal))).rejects.toMatchObject({
-      code: "WORKFLOW_USER_AUTHORIZATION_INVALID"
+      code: "WORKFLOW_USER_AUTHORIZATION_INVALID",
+      hint: expect.stringContaining("Ask the user only when no such authorization exists")
     });
     expect((await service.getState(context)).userAuthorizations).toEqual([]);
   });

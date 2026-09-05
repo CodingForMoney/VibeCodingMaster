@@ -240,7 +240,7 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
             "WORKFLOW_TRANSITION_DENIED",
             verdict.reason,
             verdict.allowedTransitions.length > 0
-              ? `Allowed next dispatches: ${verdict.allowedTransitions.join(", ")}. Recheck the flow, or ask the user directly for an exact one-time authorization.`
+              ? `Allowed next dispatches: ${verdict.allowedTransitions.join(", ")}. Recheck the flow, reuse an existing direct user instruction that explicitly authorizes this exact transition, or ask the user only when no such authorization exists.`
               : verdict.blockedHint
           );
         }
@@ -248,7 +248,7 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
           throw workflowError(
             "WORKFLOW_USER_AUTHORIZATION_INVALID",
             `User authorization must include the exact authorization text and exact violated rule: ${verdict.reason}`,
-            "Ask the user directly, then copy the user's authorization verbatim into Authorization Text and the rejection reason verbatim into Violated Rule."
+            "Copy an existing direct user instruction that explicitly authorizes this exact transition into Authorization Text. Ask the user only when no such authorization exists. Copy the rejection reason verbatim into Violated Rule."
           );
         }
         userAuthorization = createUserAuthorization(

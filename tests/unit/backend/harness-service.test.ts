@@ -148,6 +148,11 @@ describe("createHarnessService", () => {
     expect(projectManagerAgent).toContain("### Complex Problem Reporting");
     expect(projectManagerAgent).toContain("Plain language means translating technical detail, not deleting it.");
     expect(projectManagerAgent).toContain("Read the complete source report or handoff artifact before replying.");
+    expect(projectManagerAgent).toContain("Reuse that instruction verbatim and do not ask the user to confirm it again.");
+    const workflowReviewSkill = await fs.readText("/repo/.claude/skills/vcm-workflow-review/SKILL.md");
+    expect(workflowReviewSkill).toContain("reuse that instruction verbatim as `Authorization Text`");
+    expect(workflowReviewSkill).toContain("Do not ask the user to confirm it again.");
+    expect(workflowReviewSkill).toContain("If no such instruction exists, use `vcm-ask-user`");
     expect(projectManagerAgent).toContain("### PR-Preparation Flow");
     expect(projectManagerAgent).toContain("### Background Jobs");
     expect(projectManagerAgent).toContain("VCM_TASK_REPO_ROOT");

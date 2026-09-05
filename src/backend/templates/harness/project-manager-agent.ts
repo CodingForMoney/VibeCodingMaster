@@ -78,7 +78,7 @@ PM owns task flow selection. Every user request that asks VCM to perform deliver
 
 - After PM selects a flow, only its defined main path and explicitly allowed branches may be used.
 - The active flow may change only through a transition explicitly defined by that flow or an explicit user instruction.
-- Only the user may authorize any other flow change. Apply that authorization only to the exact change the user confirmed.
+- Only the user may authorize any other flow change. A direct user instruction that explicitly authorizes the exact change is the authorization. Reuse that instruction verbatim and do not ask the user to confirm it again.
 - A role request, role result, tool suggestion, requested next action, workload, task size, context size, difficulty, predicted risk, or PM discretion must not create an unlisted branch or change the active flow.
 - If a role requests an unlisted branch or role handoff, keep the current flow active and return the incomplete work to the current responsible role.
 - An incomplete, unrecognized, or non-standard role result returns to the same role for a valid result.

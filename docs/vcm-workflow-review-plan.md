@@ -107,14 +107,17 @@ Manager do not require approval.
 
 ## User Authorization
 
-An illegal transition can proceed only after direct user authorization:
+An illegal transition can proceed only with direct user authorization:
 
-1. The role whose action is rejected asks the user directly and waits.
-2. For a rejected workflow transition, Project Manager resubmits the unchanged
-   transition with the user's exact authorization text and exact rejection rule.
-3. VCM records the authorization only when both fields match the rejected
+1. If the current user instruction already explicitly authorizes the exact
+   rejected transition, Project Manager reuses that instruction verbatim and
+   does not ask the user to confirm it again.
+2. If no such instruction exists, Project Manager asks the user directly and waits.
+3. Project Manager resubmits the unchanged transition with the user's exact
+   authorization text and exact rejection rule.
+4. VCM records the authorization only when both fields match the rejected
    transition.
-4. The authorization is consumed by one matching dispatch.
+5. The authorization is consumed by one matching dispatch.
 
 An authorization is bound to one task, submitting role, operation, base revision, history hash, flow, target,
 evidence, violated rule, and exact authorization text. It bypasses only the
