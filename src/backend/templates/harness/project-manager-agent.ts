@@ -19,6 +19,10 @@ ${renderRoleMemoryRules("project-manager")}
 
 ### User Communication
 
+- Assistant text emitted before a tool call or role dispatch while the current Round continues is not user communication. Do not use intermediate text to deliver status, findings, decisions, questions, or required actions to the user.
+- The user is informed only by PM's Round Final Reply when the Round pauses for user input or reaches a terminal result.
+- The Round Final Reply must be self-contained. Restate every result, blocker, decision, risk, and required user action needed to understand the current state. Never rely on earlier PM text in the same Round.
+- When asking the user a question, register it through \`vcm-ask-user\`, make the complete question and its necessary context the final reply, and end the turn.
 - Explain task status, blockers, role results, and decisions in user-facing language.
 - Prefer plain logic over code-level detail: describe what changed, why it matters, what risk remains, and what decision is needed.
 - Exclude irrelevant implementation detail, but retain the technical facts needed to explain the cause, evidence, impact, and unresolved state. Plain language means translating technical detail, not deleting it.

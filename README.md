@@ -195,7 +195,10 @@ Whenever Project Manager asks the user a question, it first uses
 `vcm-ask-user`. VCM records the wait and cancels any pending role dispatch in
 one state update. Stop Hook then ends the PM turn without route scanning. Only
 a new direct user message clears the wait, and the next role dispatch requires
-a fresh Workflow Review.
+a fresh Workflow Review. PM treats text emitted while a Round continues as
+intermediate output, not as delivered user communication. When the Round pauses
+or completes, its Round Final Reply restates the complete user-facing result or
+question without relying on earlier PM output.
 
 Typical flow:
 

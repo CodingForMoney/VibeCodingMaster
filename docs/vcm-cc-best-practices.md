@@ -404,6 +404,14 @@ source artifact and preserves the problem, expected behavior, cause or remaining
 uncertainty, evidence, impact, unresolved state, and next action. Plain language
 translates technical facts instead of deleting them.
 
+PM text emitted before a tool call or role dispatch while the current Round
+continues is not user communication. The user is informed by PM's self-contained
+Round Final Reply when the Round pauses for input or reaches a terminal result.
+That reply restates all results, blockers, decisions, risks, and required user
+actions instead of relying on earlier PM text in the same Round. A user question
+is registered through `vcm-ask-user`, included with its necessary context in the
+final reply, and followed by the end of the PM turn.
+
 ### User Communication
 
 A message without a VCM marker is user communication. When the user asks a
