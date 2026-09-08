@@ -901,7 +901,7 @@ async function allowedCodeChange(
   const testerIndex = findLastIndex(segment, (entry) => entry.targetRole === "tester");
   if (resumedFromBranch && coderIndex < 0) {
     if (testerIndex < 0) {
-      return allowedPostImplementationArchitect(fs, input, state, "code-change", segment);
+      return allowedPostImplementationArchitect(fs, input, state, "code-change");
     }
     return allowedAfterTester(fs, input, state, "code-change", resumedFromBranch, {
       testerFailureFlow: "architect-debug",
@@ -910,16 +910,7 @@ async function allowedCodeChange(
     });
   }
   if (coderIndex < 0) {
-    const plan = await artifactState(fs, input, "architecture-plan.md", "architecture-plan");
-    if (!evidenceIsFresh(state, "code-change", "architect", "architecture-plan.md", plan.hash)
-      || plan.value !== "complete") return ["code-change/architect"];
-    const gate = await gateState(fs, input, "architecture-plan");
-    if (freshGateDecision(state, "code-change", "architect", "architecture-plan", gate) === "request_changes") {
-      return ["code-change/architect"];
-    }
-    return gatePassedForDispatch(state, "code-change", "architect", "architecture-plan", gate)
-      ? ["code-change/coder"]
-      : [];
+    return (await allowedFreshArchitecturePlan(fs, input, state)) ?? ["code-change/architect"];
   }
   if (testerIndex < coderIndex) {
     const coder = await artifactState(fs, input, "coder-completion.md", "coder-completion");
@@ -929,9 +920,8 @@ async function allowedCodeChange(
     if (coder.value === "failed") return ["architect-debug/architect"];
     return coder.value === "ready_for_review" ? ["code-change/tester"] : ["code-change/coder"];
   }
-  const architectsAfterTester = segment.filter((entry, index) => index > testerIndex && entry.targetRole === "architect");
-  if (architectsAfterTester.length > 0) {
-    return allowedPostImplementationArchitect(fs, input, state, "code-change", architectsAfterTester);
+  if (segment.some((entry, index) => index > testerIndex && entry.targetRole === "architect")) {
+    return allowedPostImplementationArchitect(fs, input, state, "code-change");
   }
   return allowedAfterTester(fs, input, state, "code-change", "coder", {
     testerFailureFlow: "architect-debug",
@@ -940,17 +930,18 @@ async function allowedCodeChange(
   });
 }
 
-async function allowedArchitectureFollowup(
+async function allowedFreshArchitecturePlan(
   fs: FileSystemAdapter,
   input: WorkflowControlContext,
   state: WorkflowControlState,
-  followupDispatchedAt: string | undefined
-): Promise<string[]> {
+  gateMustPostdate?: string
+): Promise<string[] | undefined> {
+  const baseline = matchingEvidenceBaseline(state, "code-change", "architect");
   const plan = await artifactState(fs, input, "architecture-plan.md", "architecture-plan");
-  if (!evidenceIsFresh(state, "code-change", "architect", "architecture-plan.md", plan.hash)
-    || plan.value !== "complete") return ["code-change/architect"];
+  if (!baseline || baseline.artifactHashes["architecture-plan.md"] === plan.hash) return undefined;
+  if (plan.value !== "complete") return ["code-change/architect"];
   const gate = await gateState(fs, input, "architecture-plan");
-  if (!gate || !followupDispatchedAt || gate.updatedAt <= followupDispatchedAt) return [];
+  if (!gate || (gateMustPostdate && gate.updatedAt <= gateMustPostdate)) return [];
   if (freshGateDecision(state, "code-change", "architect", "architecture-plan", gate) === "request_changes") {
     return ["code-change/architect"];
   }
@@ -971,7 +962,7 @@ async function allowedArchitectFix(
   const architectIndex = findLastIndex(segment, (entry) => entry.targetRole === "architect");
   const testerIndex = findLastIndex(segment, (entry) => entry.targetRole === "tester");
   if (resumedFromBranch && architectIndex >= 0 && testerIndex < 0) {
-    return allowedPostImplementationArchitect(fs, input, state, source, segment);
+    return allowedPostImplementationArchitect(fs, input, state, source);
   }
   if (architectIndex < 0) return [`${source}/architect`];
   if (testerIndex < 0) {
@@ -1022,13 +1013,18 @@ async function allowedPostImplementationArchitect(
   fs: FileSystemAdapter,
   input: WorkflowControlContext,
   state: WorkflowControlState,
-  flow: "code-change" | "architect-debug" | "architecture-diagnosis",
-  architectEntries: WorkflowDispatchHistoryEntry[]
+  flow: "code-change" | "architect-debug" | "architecture-diagnosis"
 ): Promise<string[]> {
   const docs = await artifactState(fs, input, "docs-sync-report.md", "docs-sync-report");
   const acceptance = await artifactState(fs, input, "final-acceptance.md", "final-acceptance");
-  if (flow === "code-change" && architectEntries.length > 1 && acceptance.value === "needs-architect-follow-up") {
-    return allowedArchitectureFollowup(fs, input, state, architectEntries[1]?.confirmedAt);
+  if (flow === "code-change") {
+    const planningTransition = await allowedFreshArchitecturePlan(
+      fs,
+      input,
+      state,
+      matchingEvidenceBaseline(state, "code-change", "architect")?.confirmedAt
+    );
+    if (planningTransition !== undefined) return planningTransition;
   }
   if (evidenceIsFresh(state, flow, "architect", "docs-sync-report.md", docs.hash) && docs.complete) {
     if (docs.value === "synced" || docs.value === "unchanged") {

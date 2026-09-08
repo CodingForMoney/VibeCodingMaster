@@ -1397,6 +1397,93 @@ describe("workflow control service", () => {
     await service.submitProgress(context, renderWorkflowProgress(coderProposal));
     expect((await service.getState(context)).pendingDispatch).toMatchObject({ targetRole: "coder" });
   });
+
+  it("reopens the implementation leg when a fresh approved plan is produced after Tester", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await enterCodeChangeTester(service, fs, context, "initial implementation plan");
+    await writeTestReport(fs, context, "pass");
+    await writeGateIndex(fs, context, {
+      validation: "approve",
+      codeDiff: "approve",
+      codeDiffSource: "coder"
+    }, "2026-08-06T00:00:40.000Z");
+    await advance(service, fs, context, "architect", undefined, "review expanded task scope");
+
+    await writeArchitecturePlan(fs, context, "expanded implementation plan");
+    await writeGateIndex(fs, context, { architecture: "approve" }, "2026-08-06T00:00:50.000Z");
+    await advance(service, fs, context, "coder", undefined, "implement the approved expanded plan");
+
+    const progress = await readProgress(fs, context);
+    expect(progress.history.map((entry) => `${entry.flow}/${entry.targetRole}`)).toEqual([
+      "code-change/architect",
+      "code-change/coder",
+      "code-change/tester",
+      "code-change/architect",
+      "code-change/coder"
+    ]);
+    expect((await service.getState(context)).userAuthorizations).toEqual([]);
+  });
+
+  it("does not reopen the implementation leg until the revised plan has a fresh Gate result", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await enterCodeChangeTester(service, fs, context, "initial implementation plan");
+    await writeTestReport(fs, context, "pass");
+    await writeGateIndex(fs, context, {
+      validation: "approve",
+      codeDiff: "approve",
+      codeDiffSource: "coder"
+    }, "2026-08-06T00:00:40.000Z");
+    await advance(service, fs, context, "architect", undefined, "review expanded task scope");
+    await writeArchitecturePlan(fs, context, "expanded implementation plan");
+
+    await expect(propose(service, fs, context, "coder", undefined, "revised plan with stale Gate"))
+      .rejects.toMatchObject({ code: "WORKFLOW_TRANSITION_DENIED" });
+
+    await writeGateIndex(fs, context, { architecture: "approve" }, "2026-08-06T00:00:50.000Z");
+    await propose(service, fs, context, "coder", undefined, "revised plan with fresh Gate");
+    expect((await service.getState(context)).pendingDispatch).toMatchObject({ targetRole: "coder" });
+  });
+
+  it("returns a revised post-Tester plan to Architect when its fresh Gate requests changes", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await enterCodeChangeTester(service, fs, context, "initial implementation plan");
+    await writeTestReport(fs, context, "pass");
+    await writeGateIndex(fs, context, {
+      validation: "approve",
+      codeDiff: "approve",
+      codeDiffSource: "coder"
+    }, "2026-08-06T00:00:40.000Z");
+    await advance(service, fs, context, "architect", undefined, "review expanded task scope");
+    await writeArchitecturePlan(fs, context, "expanded implementation plan");
+    await writeGateIndex(fs, context, { architecture: "request_changes" }, "2026-08-06T00:00:50.000Z");
+
+    await expect(propose(service, fs, context, "coder", undefined, "implement rejected revised plan"))
+      .rejects.toMatchObject({ code: "WORKFLOW_TRANSITION_DENIED" });
+    await propose(service, fs, context, "architect", undefined, "revise the rejected plan");
+    expect((await service.getState(context)).pendingDispatch).toMatchObject({ targetRole: "architect" });
+  });
+
+  it("does not treat a fresh Gate for an unchanged plan as a new implementation leg", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await enterCodeChangeTester(service, fs, context, "initial implementation plan");
+    await writeTestReport(fs, context, "pass");
+    await writeGateIndex(fs, context, {
+      validation: "approve",
+      codeDiff: "approve",
+      codeDiffSource: "coder"
+    }, "2026-08-06T00:00:40.000Z");
+    await advance(service, fs, context, "architect", undefined, "perform final docs sync");
+    await writeGateIndex(fs, context, { architecture: "approve" }, "2026-08-06T00:00:50.000Z");
+
+    await expect(propose(service, fs, context, "coder", undefined, "reuse the unchanged plan"))
+      .rejects.toMatchObject({ code: "WORKFLOW_TRANSITION_DENIED" });
+    await propose(service, fs, context, "architect", undefined, "finish the required docs sync");
+    expect((await service.getState(context)).pendingDispatch).toMatchObject({ targetRole: "architect" });
+  });
 });
 
 async function createContext(roots: string[]) {
