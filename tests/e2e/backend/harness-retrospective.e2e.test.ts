@@ -246,7 +246,7 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
   });
 
   it("keeps the retrospective open until moved memory is committed to durable documentation", async () => {
-    const env = await createMockClaudeE2eApp();
+    const env = await createMockClaudeE2eApp({ workflowControl: true });
     cleanups.push(() => env.close());
     const repo = await createE2eRepo();
     cleanups.push(() => repo.cleanup());
@@ -273,7 +273,18 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
     env.mockRuntime.onPrompt("harness-engineer", "[VCM Task Harness Retrospective]", async (ctx) => {
       await writeHarnessRetrospectiveWithDurableDocMove(ctx, sourceEntry);
     });
-    env.mockRuntime.onPrompt("architect", "[VCM Durable Documentation Assignment]", writeDurableArchitectureAssignment);
+    env.mockRuntime.onPrompt("architect", "[VCM Durable Documentation Assignment]", async (ctx) => {
+      await writeDurableArchitectureAssignment(ctx, async (content) => {
+        const session = await env.deps.sessionService.getRoleSession(repo.repoRoot, task.taskSlug, "architect");
+        await injectOk(env.app, {
+          method: "POST", url: `/api/tasks/${task.taskSlug}/artifacts/submit`,
+          payload: {
+            kind: "docs-update-report", mode: "final", role: "architect",
+            runtimeSessionToken: session!.runtimeSessionToken, content
+          }
+        });
+      });
+    });
 
     for (const role of ["project-manager", "architect", "coder", "tester"] as const) {
       await startRole(env.app, task.taskSlug, role);
@@ -483,7 +494,7 @@ async function writeHarnessRetrospectiveWithDurableDocMove(
   await ctx.stop();
 }
 
-async function writeDurableArchitectureAssignment(ctx: MockClaudePromptContext): Promise<void> {
+async function writeDurableArchitectureAssignment(ctx: MockClaudePromptContext, submit: (content: string) => Promise<void>): Promise<void> {
   await ctx.userPromptSubmit();
   const assignmentId = matchPromptPath(ctx.prompt, "Assignment ID");
   await ctx.writeFile(
@@ -493,9 +504,8 @@ async function writeDurableArchitectureAssignment(ctx: MockClaudePromptContext):
   await git(ctx.cwd, "add", "--", "docs/ARCHITECTURE.md");
   await git(ctx.cwd, "commit", "-m", "docs: record lifecycle ownership");
   const commit = (await git(ctx.cwd, "rev-parse", "HEAD")).stdout.trim();
-  await ctx.writeFile(
-    ".ai/vcm/handoffs/docs-update-report.md",
-    renderDocsUpdateReportTemplate("durable-doc", assignmentId)
+  await submit(
+    renderDocsUpdateReportTemplate(ctx.taskSlug, assignmentId)
       .replaceAll("TBD", commit)
       .replace("synced|unchanged|blocked", "synced")
   );

@@ -140,6 +140,11 @@ describe("createHarnessService", () => {
     expect(projectManagerAgent).toContain("Use Docs-Only Flow when the accepted task changes documentation");
     expect(projectManagerAgent).toContain("Route Architect, Coder, or Tester according to the document content");
     expect(projectManagerAgent).toContain(".ai/vcm/handoffs/docs-update-report.md");
+    for (const section of ["Code-Change Flow", "Architect Debug Flow And Branch", "Architecture Diagnosis Flow And Branch"]) {
+      const flow = projectManagerAgent.split(`### ${section}\n`, 2)[1]?.split("\n### ", 1)[0];
+      expect(flow, `${section} must name the post-validation docs artifact`).toContain(".ai/vcm/handoffs/docs-sync-report.md");
+      expect(flow).toContain("Correction Owner: none");
+    }
     expect(projectManagerAgent).toContain("Use the `vcm-final-acceptance` skill only to close a complete code-delivery flow");
     expect(projectManagerAgent).toContain("PM confirms the worktree is clean, prepares or updates the PR");
     expect(projectManagerAgent).toContain("Do not perform technical analysis");

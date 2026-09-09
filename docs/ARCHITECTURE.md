@@ -290,6 +290,14 @@ correction evidence. Workflow Control routes that owner and requires the
 affected validation and Gate evidence to be produced again before docs sync
 can complete.
 
+Before writing either documentation report, Artifact Service asks Workflow
+Control to check the confirmed dispatch. Docs-Only requires `docs-update-report`;
+post-validation docs sync in a complete delivery flow requires `docs-sync-report`.
+Wrong-kind submissions leave the existing artifact unchanged. Memory-owned
+documentation assignments and completed flows are outside this stage check.
+Completion still requires a fresh docs-sync report after the final Architect
+dispatch and identifies any newer, wrong-kind docs-update report in the error.
+
 The shared PreToolUse guard blocks workflow-role attempts to write managed
 workflow Markdown directly through Bash, Write, or Edit. Route messages, Coder
 Worker reports, request-scoped Gate reports, memory proposals, and Harness

@@ -3,7 +3,7 @@ import path from "node:path";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import { resolveRepoPath } from "../adapters/filesystem.js";
 import { VcmError } from "../errors.js";
-import type { DispatchableRole } from "../../shared/types/role.js";
+import type { DispatchableRole, RoleName } from "../../shared/types/role.js";
 import type { GateReviewGateRecord, GateReviewIndex } from "../../shared/types/gate-review.js";
 import type {
   WorkflowControlState,
@@ -52,6 +52,7 @@ export interface WorkflowControlService {
   requestUserInput(input: WorkflowControlContext, question: string): Promise<WorkflowControlState>;
   resolveUserInput(input: WorkflowControlContext): Promise<WorkflowControlState>;
   submitProgress(input: WorkflowControlContext, content: string): Promise<WorkflowProgressSubmissionResult>;
+  assertDocsArtifactAllowed(input: WorkflowControlContext, kind: "docs-update-report" | "docs-sync-report", role: RoleName): Promise<void>;
   assertRouteAuthorized(input: WorkflowRouteAuthorizationInput): Promise<void>;
   claimDispatch(input: Required<WorkflowRouteAuthorizationInput>): Promise<void>;
   releaseDispatch(input: WorkflowControlContext, messageId: string): Promise<void>;
@@ -489,6 +490,7 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
     requestUserInput,
     resolveUserInput,
     submitProgress,
+    assertDocsArtifactAllowed,
     assertRouteAuthorized,
     claimDispatch,
     releaseDispatch,
@@ -496,6 +498,44 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
     confirmDispatch,
     recoverTask
   };
+
+  async function assertDocsArtifactAllowed(
+    input: WorkflowControlContext,
+    kind: "docs-update-report" | "docs-sync-report",
+    role: RoleName
+  ): Promise<void> {
+    const state = await getState(input);
+    failOnStateWarnings(state);
+    const progress = await readProgress(deps.fs, input);
+    const active = state.activeDispatch;
+    if (progress.status !== "active" || !active || active.targetRole !== role) return;
+
+    let expected: "docs-update-report" | "docs-sync-report" | undefined;
+    if (progress.flow === "docs-only") {
+      expected = "docs-update-report";
+    } else if (role === "architect" && (progress.flow === "code-change"
+      || progress.flow === "architect-debug" || progress.flow === "architecture-diagnosis")) {
+      const flow = progress.flow;
+      const run = resolveFlowRun(state.flowRun, progress);
+      const hadTester = progress.history.some((entry) => entry.sequence >= run.startedAtSequence
+        && entry.sequence < active.sequence && entry.targetRole === "tester");
+      if (!run.activeBranch && hadTester) {
+        const source = run.resumedFromBranch ?? (flow === "code-change" ? "coder" : flow);
+        const docsTarget = `${flow}/architect`;
+        const allowed = await allowedAfterTester(deps.fs, input, state, flow, source, {
+          successTarget: docsTarget
+        });
+        if (allowed.includes(docsTarget)) expected = "docs-sync-report";
+      }
+    }
+    if (expected && expected !== kind) {
+      throw workflowError(
+        "WORKFLOW_DOCS_ARTIFACT_MISMATCH",
+        `${kind} was not written: the active ${progress.flow} dispatch #${active.sequence} requires ${path.posix.join(input.handoffDir, `${expected}.md`)}.`,
+        `Submit --kind ${expected} through .ai/tools/vcm-artifact. The two documentation reports are not interchangeable.`
+      );
+    }
+  }
 
   async function requestUserInput(
     input: WorkflowControlContext,
@@ -1504,16 +1544,20 @@ async function validateCompleteDeliveryEvidence(
   }
 
   const docs = await artifactState(fs, input, "docs-sync-report.md", "docs-sync-report");
-  if (!docs.complete) {
+  if (!docs.complete || baseline.artifactHashes["docs-sync-report.md"] === docs.hash) {
+    const update = await artifactState(fs, input, "docs-update-report.md", "docs-update-report");
+    const wrongReport = update.hash !== MISSING_EVIDENCE_HASH
+      && baseline.artifactHashes["docs-update-report.md"] !== update.hash;
+    const reason = !docs.complete
+      ? "Docs Sync Report is missing or malformed for this complete delivery flow."
+      : "Docs Sync Report was not produced after the final Architect dispatch.";
     throw workflowError(
       "WORKFLOW_COMPLETION_INVALID",
-      "Docs Sync Report is missing or malformed for this complete delivery flow."
-    );
-  }
-  if (baseline.artifactHashes["docs-sync-report.md"] === docs.hash) {
-    throw workflowError(
-      "WORKFLOW_COMPLETION_INVALID",
-      "Docs Sync Report was not produced after the final Architect dispatch."
+      `${reason} Required file: ${path.posix.join(input.handoffDir, "docs-sync-report.md")}, produced after dispatch #${baseline.sequence} (${baseline.confirmedAt}).`
+        + (wrongReport
+          ? ` ${path.posix.join(input.handoffDir, "docs-update-report.md")} was updated after this dispatch, but cannot replace docs-sync-report.md.`
+          : ""),
+      "Ask Architect to submit --kind docs-sync-report through .ai/tools/vcm-artifact with Decision: synced or unchanged and Correction Owner: none. Report blocked with its correction owner when synchronization is incomplete."
     );
   }
   if (docs.value !== "synced" && docs.value !== "unchanged") {

@@ -106,7 +106,10 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
   const workflowControlService = options.workflowControl
     ? createWorkflowControlService({ fs: fsAdapter, now: options.now })
     : undefined;
-  const artifactService = createArtifactService(fsAdapter, { workflowControlService });
+  const artifactService = createArtifactService(fsAdapter, {
+    workflowControlService,
+    isRoleMemoryTurn: (taskRepoRoot, role) => autoMemoryService.isRoleMemoryTurn(taskRepoRoot, role)
+  });
   const projectService = createProjectService({ fs: fsAdapter, git, appSettings });
   const taskService = createTaskService({ fs: fsAdapter, git, artifactService, projectService });
   const taskWorkflowService = createTaskWorkflowService({ fs: fsAdapter });

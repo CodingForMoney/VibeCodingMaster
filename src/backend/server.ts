@@ -309,7 +309,10 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   const runtime = createNodePtyTerminalRuntime({ fs });
   const registry = createSessionRegistry();
   const workflowControlService = createWorkflowControlService({ fs });
-  const artifactService = createArtifactService(fs, { workflowControlService });
+  const artifactService = createArtifactService(fs, {
+    workflowControlService,
+    isRoleMemoryTurn: (taskRepoRoot, role) => autoMemoryService.isRoleMemoryTurn(taskRepoRoot, role)
+  });
   const projectService = createProjectService({ fs, git, appSettings });
   const taskService = createTaskService({ fs, git, artifactService, projectService });
   const taskWorkflowService = createTaskWorkflowService({ fs });

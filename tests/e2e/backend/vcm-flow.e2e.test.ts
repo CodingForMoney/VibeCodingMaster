@@ -3,9 +3,13 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { parseWorkflowProgress, renderWorkflowProgress } from "../../../src/backend/services/workflow-control-service.js";
 import {
+  renderArchitectDebugTemplate,
+  renderArchitectureDiagnosisTemplate,
   renderArchitecturePlanTemplate,
   renderCoderCompletionTemplate,
   renderDocsUpdateReportTemplate,
+  renderDocsSyncReportTemplate,
+  renderFinalAcceptanceTemplate,
   renderTestReportTemplate
 } from "../../../src/backend/templates/handoff.js";
 import type { DispatchableRole } from "../../../src/shared/types/role.js";
@@ -32,6 +36,99 @@ afterEach(async () => {
 });
 
 describe("backend E2E with mock Claude Code", () => {
+  it.each(["code-change", "architect-debug", "architecture-diagnosis"] as const)("rejects the wrong docs artifact and completes %s with docs-sync through the API", async (flow) => {
+    const env = await createMockClaudeE2eApp({ workflowControl: true });
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, `docs-kind-${flow}`);
+    const service = env.deps.workflowControlService!;
+    const context = {
+      taskRepoRoot: task.worktreePath, taskSlug: task.taskSlug,
+      stateRoot: ".ai/vcm", handoffDir: ".ai/vcm/handoffs"
+    };
+    const write = (file: string, content: string) => fs.writeFile(path.join(task.worktreePath, context.handoffDir, file), content);
+    await advanceWorkflow(service, context, "architect", flow, "accepted delivery");
+    if (flow === "code-change") {
+      await write("architecture-plan.md", completeWorkflowArtifact(renderArchitecturePlanTemplate(task.taskSlug), [
+        ["Planning Result: complete|incomplete|user clarification required", "Planning Result: complete"]
+      ]));
+      await writeWorkflowGateIndex(task.worktreePath, { architecture: "approve" }, "2026-09-09T00:00:00.000Z");
+      await advanceWorkflow(service, context, "coder", undefined, "implement approved plan");
+      await write("coder-completion.md", completeWorkflowArtifact(renderCoderCompletionTemplate(task.taskSlug), [
+        ["ready_for_review|incomplete|failed", "ready_for_review"]
+      ]));
+    } else if (flow === "architect-debug") {
+      await write("architect-debug.md", completeWorkflowArtifact(renderArchitectDebugTemplate(task.taskSlug), [
+        ["pending|completed", "completed"],
+        ["local fix completed|normal architecture plan required|user clarification required", "local fix completed"]
+      ]));
+    } else {
+      await write("architecture-diagnosis.md", completeWorkflowArtifact(renderArchitectureDiagnosisTemplate(task.taskSlug), [
+        ["analysis completed|diagnosis implementation completed|user clarification required", "diagnosis implementation completed"]
+      ]));
+    }
+    await advanceWorkflow(service, context, "tester", undefined, "validate implementation");
+    await write("test-report.md", completeWorkflowArtifact(renderTestReportTemplate(task.taskSlug), [
+      ["pass|fail|incomplete", "pass"], ["L3 Required: yes|no", "L3 Required: no"],
+      ["none|repair-required|repaired|production-change-required", "none"]
+    ]));
+    await writeWorkflowGateIndex(task.worktreePath, {
+      validation: "approve", codeDiff: "approve",
+      codeDiffSource: flow === "code-change" ? "coder" : flow === "architect-debug" ? "architect-debug" : "architect-diagnosis"
+    }, "2026-09-09T00:01:00.000Z");
+    await advanceWorkflow(service, context, "architect", undefined, "synchronize delivery documentation");
+    const architect = await startRole(env.app, task.taskSlug, "architect");
+    const pm = await startRole(env.app, task.taskSlug, "project-manager");
+    const original = await fs.readFile(path.join(task.worktreePath, context.handoffDir, "docs-update-report.md"), "utf8");
+    let reportSubmitted = false;
+    env.mockRuntime.onPrompt("architect", "Synchronize final delivery documentation", async (ctx) => {
+      await ctx.userPromptSubmit();
+      const wrong = await env.app.inject({
+        method: "POST", url: `/api/tasks/${task.taskSlug}/artifacts/submit`,
+        payload: {
+          role: "architect", runtimeSessionToken: architect.runtimeSessionToken,
+          kind: "docs-update-report", mode: "final",
+          content: completeWorkflowArtifact(renderDocsUpdateReportTemplate(task.taskSlug), [["synced|unchanged|blocked", "synced"]])
+        }
+      });
+      expect(wrong.statusCode, wrong.body).toBe(422);
+      expect(wrong.body).toContain("WORKFLOW_DOCS_ARTIFACT_MISMATCH");
+      expect(wrong.body).toContain(".ai/vcm/handoffs/docs-sync-report.md");
+      expect(await fs.readFile(path.join(ctx.cwd, context.handoffDir, "docs-update-report.md"), "utf8")).toBe(original);
+      const correct = await env.app.inject({
+        method: "POST", url: `/api/tasks/${task.taskSlug}/artifacts/submit`,
+        payload: {
+          role: "architect", runtimeSessionToken: architect.runtimeSessionToken,
+          kind: "docs-sync-report", mode: "final",
+          content: completeWorkflowArtifact(renderDocsSyncReportTemplate(task.taskSlug), [
+            ["synced|unchanged|blocked", "synced"], ["none|architect|coder|tester", "none"]
+          ])
+        }
+      });
+      expect(correct.statusCode, correct.body).toBe(200);
+      reportSubmitted = true;
+      await ctx.stop();
+    });
+    env.mockRuntime.write(architect.id, "Synchronize final delivery documentation");
+    await env.mockRuntime.waitForIdle();
+    expect(reportSubmitted).toBe(true);
+    await write("final-acceptance.md", completeWorkflowArtifact(renderFinalAcceptanceTemplate(task.taskSlug), [
+      ["accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|needs-docs-sync|blocked-by-user-decision", "accepted"]
+    ]));
+    const current = await service.getProgress(context);
+    const completed = await env.app.inject({
+      method: "POST", url: `/api/tasks/${task.taskSlug}/artifacts/submit`,
+      payload: {
+        role: "project-manager", runtimeSessionToken: pm.runtimeSessionToken,
+        kind: "workflow-progress", mode: "final",
+        content: renderWorkflowProgress({ ...current, revision: current.revision + 1, status: "completed" })
+      }
+    });
+    expect(completed.statusCode, completed.body).toBe(200);
+    expect((await service.getProgress(context)).status).toBe("completed");
+  });
+
   it("consumes one workflow approval only after the target role accepts the PM route", async () => {
     const env = await createMockClaudeE2eApp({ workflowControl: true });
     cleanups.push(() => env.close());
@@ -1000,6 +1097,7 @@ async function writeWorkflowGateIndex(
     architecture?: "approve" | "request_changes";
     validation?: "approve" | "request_changes";
     codeDiff?: "approve" | "request_changes";
+    codeDiffSource?: "coder" | "architect-debug" | "architect-diagnosis";
   },
   updatedAt: string
 ): Promise<void> {
@@ -1013,7 +1111,7 @@ async function writeWorkflowGateIndex(
     decision,
     requestId: decision ? `request-${gate}-${updatedAt}` : undefined,
     inputHash: decision ? `input-${gate}-${updatedAt}` : undefined,
-    codeDiffSource: gate === "code-diff" && decision ? "coder" : undefined,
+    codeDiffSource: gate === "code-diff" && decision ? decisions.codeDiffSource ?? "coder" : undefined,
     reportPath: `.ai/vcm/gate-reviews/${gate}-review.md`,
     promptPath: `.ai/vcm/gate-reviews/${gate}-prompt.md`,
     completedAt: decision ? updatedAt : undefined,

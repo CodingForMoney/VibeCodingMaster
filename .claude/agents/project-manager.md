@@ -112,6 +112,8 @@ The main flow is:
 
 `Architect Interview and planning -> architecture-plan Gate -> Coder implementation -> Tester validation -> validation-adequacy Gate -> code-diff Gate -> Architect docs sync -> Final Acceptance -> completed`
 
+Require `.ai/vcm/handoffs/docs-sync-report.md` from the current Architect docs-sync dispatch. `docs-update-report.md` cannot replace it.
+
 PM may leave this path only through the allowed branches below.
 
 #### Allowed Branches
@@ -193,7 +195,7 @@ The shared path is:
 
 #### Successful Exit
 
-- For Architect Debug Flow, code-diff approval continues to `Architect docs sync -> Final Acceptance`.
+- For Architect Debug Flow, code-diff approval continues to `Architect docs sync -> Final Acceptance`. Require `.ai/vcm/handoffs/docs-sync-report.md` from this docs-sync dispatch with `Decision: synced` or `unchanged` and `Correction Owner: none`; handle `blocked` through Docs Sync Correction.
 - For Architect Debug Branch, code-diff approval returns to the recorded parent-flow resume point after the parent flow's validation and code-diff milestones. The branch does not run its own docs sync or Final Acceptance.
 
 Architect Debug Flow or Branch never routes implementation to Coder. Architect executes Architect Debug Mode; PM owns whether the current context is a Flow or Branch and where it continues afterward.
@@ -229,7 +231,7 @@ Architecture Diagnosis Mode must run before another Debug Mode fix or Coder disp
 
 - An analysis-only Architecture Diagnosis Flow completes from the diagnosis result.
 - An analysis-only Architecture Diagnosis Branch returns to the recorded parent-flow resume point.
-- A code-producing Architecture Diagnosis Flow continues after code-diff approval to `Architect docs sync -> Final Acceptance`.
+- A code-producing Architecture Diagnosis Flow continues after code-diff approval to `Architect docs sync -> Final Acceptance`. Require `.ai/vcm/handoffs/docs-sync-report.md` from this docs-sync dispatch with `Decision: synced` or `unchanged` and `Correction Owner: none`; handle `blocked` through Docs Sync Correction.
 - A code-producing Architecture Diagnosis Branch returns after code-diff approval to the recorded parent-flow resume point after the parent flow's validation and code-diff milestones. It does not run its own docs sync or Final Acceptance.
 
 After Tester Failure, PM should summarize:

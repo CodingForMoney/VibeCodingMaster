@@ -99,7 +99,8 @@ export interface SubmitArtifactInput {
 }
 
 export interface ArtifactServiceDeps {
-  workflowControlService?: Pick<WorkflowControlService, "submitProgress" | "assertRouteAuthorized">;
+  workflowControlService?: Pick<WorkflowControlService, "submitProgress" | "assertRouteAuthorized" | "assertDocsArtifactAllowed">;
+  isRoleMemoryTurn?: (taskRepoRoot: string, role: RoleName) => Promise<boolean>;
 }
 
 const ARTIFACT_PATH_KEYS: Array<[ArtifactKind, keyof HandoffPaths]> = [
@@ -328,6 +329,20 @@ export function createArtifactService(fs: FileSystemAdapter, deps: ArtifactServi
         });
         if (validation.errors.length > 0) {
           throw artifactRejected(input.kind, validation.errors);
+        }
+        if ((input.kind === "docs-update-report" || input.kind === "docs-sync-report")
+          && deps.workflowControlService) {
+          // Memory-owned documentation work is independent of PM's active dispatch.
+          const memoryUpdate = input.kind === "docs-update-report"
+            && await deps.isRoleMemoryTurn?.(input.repoRoot, input.role);
+          if (!memoryUpdate) {
+            await deps.workflowControlService.assertDocsArtifactAllowed({
+              taskRepoRoot: input.repoRoot,
+              stateRoot: input.stateRoot ?? ".ai/vcm",
+              handoffDir: input.handoffDir,
+              taskSlug: input.taskSlug
+            }, input.kind, input.role);
+          }
         }
         if (input.kind === "workflow-progress") {
           if (input.mode !== "final") {

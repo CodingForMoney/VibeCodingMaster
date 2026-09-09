@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createNodeFileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
+import { createArtifactService } from "../../../src/backend/services/artifact-service.js";
 import {
   createWorkflowControlService,
   parseWorkflowProgress,
@@ -490,6 +491,128 @@ describe("workflow control service", () => {
     }
   );
 
+  describe.each(["code-change", "architect-debug", "architecture-diagnosis"] as const)("%s documentation artifacts", (flow) => {
+    it.each(["draft", "final"] as const)("rejects docs-update in %s mode before writing, then accepts docs-sync", async (mode) => {
+      const { context, fs } = await createContext(roots);
+      const service = createWorkflowControlService({ fs, now: sequenceClock() });
+      if (flow === "code-change") {
+        await enterCodeChangeFinalArchitect(service, fs, context);
+      } else {
+        await advance(service, fs, context, "architect", flow, "accepted repair");
+        if (flow === "architect-debug") await writeArchitectDebug(fs, context, "confirmed repair root cause");
+        else await writeArchitectureDiagnosis(fs, context, "repair completed");
+        await advance(service, fs, context, "tester", undefined, "validate repair");
+        await writeTestReport(fs, context, "pass");
+        await writeGateIndex(fs, context, {
+          validation: "approve", codeDiff: "approve",
+          codeDiffSource: flow === "architect-debug" ? "architect-debug" : "architect-diagnosis"
+        });
+        await advance(service, fs, context, "architect", undefined, "sync delivery docs");
+      }
+      // Recreate the service to verify that the check uses persisted workflow state.
+      const artifacts = createArtifactService(fs, {
+        workflowControlService: createWorkflowControlService({ fs })
+      });
+      const target = path.join(context.taskRepoRoot, context.handoffDir, "docs-update-report.md");
+      await fs.writeText(target, "previous report\n");
+      await expect(artifacts.submitArtifact({
+        ...docsSubmission(context, "docs-update-report"), mode
+      })).rejects.toMatchObject({
+        code: "WORKFLOW_DOCS_ARTIFACT_MISMATCH",
+        message: expect.stringContaining(".ai/vcm/handoffs/docs-sync-report.md"),
+        hint: expect.stringContaining("--kind docs-sync-report")
+      });
+      expect(await fs.readText(target)).toBe("previous report\n");
+      await expect(artifacts.submitArtifact(docsSubmission(context, "docs-sync-report")))
+        .resolves.toMatchObject({ status: "ok" });
+      await writeFinalAcceptance(fs, context);
+      await completeFlow(service, fs, context);
+      expect((await service.getProgress(context)).status).toBe("completed");
+      await expect(artifacts.submitArtifact(docsSubmission(context, "docs-update-report")))
+        .resolves.toMatchObject({ status: "ok" });
+    });
+  });
+
+  it.each(["architect", "coder", "tester"] as const)("accepts %s docs-update reports in Docs-Only Flow", async (role) => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    const artifacts = createArtifactService(fs, { workflowControlService: service });
+    await advance(service, fs, context, role, "docs-only", "update assigned documentation");
+    if (role === "architect") {
+      await expect(artifacts.submitArtifact(docsSubmission(context, "docs-sync-report")))
+        .rejects.toMatchObject({
+          code: "WORKFLOW_DOCS_ARTIFACT_MISMATCH",
+          message: expect.stringContaining(".ai/vcm/handoffs/docs-update-report.md")
+        });
+      expect(await fs.pathExists(path.join(context.taskRepoRoot, context.handoffDir, "docs-sync-report.md")))
+        .toBe(false);
+    }
+    await artifacts.submitArtifact({ ...docsSubmission(context, "docs-update-report"), role });
+    await completeFlow(service, fs, context);
+  });
+
+  it("keeps memory-owned docs updates independent of an active final Architect dispatch", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await enterCodeChangeFinalArchitect(service, fs, context);
+    const before = await service.getProgress(context);
+    const artifacts = createArtifactService(fs, {
+      workflowControlService: service,
+      isRoleMemoryTurn: async (root, role) => root === context.taskRepoRoot && role === "architect"
+    });
+    await expect(artifacts.submitArtifact(docsSubmission(context, "docs-update-report")))
+      .resolves.toMatchObject({ status: "ok" });
+    expect(await service.getProgress(context)).toEqual(before);
+    await expect(completeFlow(service, fs, context)).rejects.toMatchObject({
+      code: "WORKFLOW_COMPLETION_INVALID",
+      message: expect.stringContaining("cannot replace docs-sync-report.md")
+    });
+  });
+
+  it.each(["architect-debug", "architecture-diagnosis"] as const)("requires docs-sync after returning from a %s branch", async (branch) => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    const artifacts = createArtifactService(fs, { workflowControlService: service });
+    await enterCodeChangeTester(service, fs, context);
+    await writeTestReport(fs, context, "fail");
+    await advance(service, fs, context, "architect", "architect-debug", "repair failed validation");
+    await writeArchitectDebug(fs, context, "confirmed repair root cause");
+    await advance(service, fs, context, "tester", undefined, "validate Debug repair");
+    if (branch === "architecture-diagnosis") {
+      await writeTestReport(fs, context, "fail");
+      await advance(service, fs, context, "architect", branch, "diagnose failed Debug repair");
+      await writeArchitectureDiagnosis(fs, context, "diagnosis repair completed");
+      await advance(service, fs, context, "tester", undefined, "validate Diagnosis repair");
+    }
+    await writeTestReport(fs, context, "pass");
+    await writeGateIndex(fs, context, {
+      validation: "approve", codeDiff: "approve",
+      codeDiffSource: branch === "architect-debug" ? "architect-debug" : "architect-diagnosis"
+    });
+    await advance(service, fs, context, "architect", "code-change", "resume parent docs sync");
+    await expect(artifacts.submitArtifact(docsSubmission(context, "docs-update-report")))
+      .rejects.toMatchObject({ code: "WORKFLOW_DOCS_ARTIFACT_MISMATCH" });
+    await artifacts.submitArtifact(docsSubmission(context, "docs-sync-report"));
+    await writeFinalAcceptance(fs, context);
+    await completeFlow(service, fs, context);
+  });
+
+  it("does not turn an initial Debug repair or a code-diff revision into a docs-sync dispatch", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    const artifacts = createArtifactService(fs, { workflowControlService: service });
+    await advance(service, fs, context, "architect", "architect-debug", "repair defect");
+    await artifacts.submitArtifact(docsSubmission(context, "docs-update-report"));
+    await writeArchitectDebug(fs, context, "confirmed repair root cause");
+    await advance(service, fs, context, "tester", undefined, "validate repair");
+    await writeTestReport(fs, context, "pass");
+    await writeGateIndex(fs, context, {
+      validation: "approve", codeDiff: "request_changes", codeDiffSource: "architect-debug"
+    });
+    await advance(service, fs, context, "architect", undefined, "correct implementation findings");
+    await artifacts.submitArtifact(docsSubmission(context, "docs-update-report"));
+  });
+
   it("rejects a stale Docs Sync Report after the final Architect dispatch", async () => {
     const { context, fs } = await createContext(roots);
     const service = createWorkflowControlService({ fs, now: sequenceClock() });
@@ -504,10 +627,16 @@ describe("workflow control service", () => {
     await writeDocsSyncReport(fs, context, "synced", "stale pre-dispatch report");
     await advance(service, fs, context, "architect", undefined, "perform final docs sync");
     await writeFinalAcceptance(fs, context);
+    // Simulate a wrong report accepted by an older VCM version.
+    await writeDocsUpdateReport(fs, context, "synced", "fresh but wrong report kind");
 
     await expect(completeFlow(service, fs, context)).rejects.toMatchObject({
       code: "WORKFLOW_COMPLETION_INVALID",
       message: expect.stringContaining("Docs Sync Report was not produced after")
+    });
+    await expect(completeFlow(service, fs, context)).rejects.toMatchObject({
+      message: expect.stringContaining("docs-update-report.md was updated after this dispatch, but cannot replace docs-sync-report.md"),
+      hint: expect.stringContaining("--kind docs-sync-report")
     });
   });
 
@@ -1519,6 +1648,23 @@ describe("workflow control service", () => {
     expect((await service.getState(context)).pendingDispatch).toMatchObject({ targetRole: "architect" });
   });
 });
+
+function docsSubmission(context: WorkflowControlContext, kind: "docs-update-report" | "docs-sync-report") {
+  const template = kind === "docs-update-report"
+    ? renderDocsUpdateReportTemplate(context.taskSlug)
+    : renderDocsSyncReportTemplate(context.taskSlug);
+  return {
+    repoRoot: context.taskRepoRoot,
+    baseRepoRoot: context.taskRepoRoot,
+    ...context,
+    kind,
+    role: "architect" as const,
+    mode: "final" as const,
+    content: template.replace("synced|unchanged|blocked", "unchanged")
+      .replace("none|architect|coder|tester", "none")
+      .replaceAll("TBD", "Verified task evidence.")
+  };
+}
 
 async function createContext(roots: string[]) {
   const taskRepoRoot = await mkdtemp(path.join(os.tmpdir(), "vcm-workflow-control-"));

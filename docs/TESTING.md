@@ -217,6 +217,14 @@ tests/
 
 ### Backend E2E (implemented: `tests/e2e/backend/`)
 
+Documentation-artifact regressions cover Code-Change, Architect Debug, and
+code-producing Architecture Diagnosis delivery: submitting `docs-update-report`
+during final docs sync is rejected without overwriting the previous file, then a
+fresh `docs-sync-report` allows completion. Service tests also cover branch
+resumption, stale-report diagnostics, draft submissions, Docs-Only owners, and
+completed workflows. The memory-to-durable-doc E2E submits its assigned report
+through the Artifact API with Workflow Control enabled.
+
 The backend suite currently covers these journeys through real routes and
 services with controlled runtime doubles:
 
