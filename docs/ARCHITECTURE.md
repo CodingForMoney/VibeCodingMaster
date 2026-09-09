@@ -356,9 +356,17 @@ during documentation may switch to the matching full flow.
 User-question waiting is owned by the same workflow-control record. The
 `vcm-ask-user` tool writes the exact question and clears both `pendingDispatch`
 and its unconsumed Workflow Progress proposal in one recoverable transaction.
-While `awaitingUser` exists, Workflow Progress
-submission and route authorization fail closed. PM Stop processing records the
-turn end without route dispatch or Round settle scanning. A PM
+While `awaitingUser` exists, Workflow Progress submission (including completion),
+route authorization, and new/retried Gate requests fail closed. Gate submission
+and question registration share the workflow lock; already-running work is not
+interrupted. PM Stop processing records the turn end without route dispatch or
+Round settle scanning and persists a canonical question reply in
+`workflow-control.json`. Its stable ID and session/turn window let translation
+and Gateway replace the corresponding transcript final without modifying Claude
+transcripts or translating/sending both versions. Completed question replies
+remain available after the wait clears, so replay cannot restore the omitted PM
+closing text. Workspace state supplies the registered question to the existing
+Pause Alert even with translation disabled; the frontend only displays it. A PM
 `UserPromptSubmit` clears the wait only when its prompt is a direct user message
 without a VCM marker; internal role messages and callbacks cannot unlock it.
 The canceled approval is never restored.

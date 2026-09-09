@@ -53,6 +53,7 @@ import {
   observeGatewayInboundMessage,
   selectFlowPauseAlarmMode,
   selectFlowPauseAlertMessage,
+  shouldShowFlowPauseNotice,
   type GatewayInboundObservation
 } from "./state/flow-pause-alert.js";
 import { apiClient } from "./state/api-client.js";
@@ -1769,23 +1770,6 @@ type AudioContextWindow = Window & typeof globalThis & {
 };
 
 let flowPauseAudioContext: AudioContext | null = null;
-
-function shouldShowFlowPauseNotice(
-  roundState: VcmSessionRoundState,
-  previousObservation: { status: VcmRoundStatus } | undefined,
-  taskViewStartedAtMs: number | undefined
-): boolean {
-  if (previousObservation?.status === "running") {
-    return true;
-  }
-
-  const stoppedAtMs = Date.parse(roundState.stoppedAt ?? roundState.lastTurnEndedAt ?? "");
-  return Boolean(
-    taskViewStartedAtMs &&
-    Number.isFinite(stoppedAtMs) &&
-    stoppedAtMs > taskViewStartedAtMs
-  );
-}
 
 function getRoleRecoveryNoticeKey(taskSlug: string, recovery: VcmRoleRecoveryState): string {
   return `${taskSlug}:${recovery.role}:${recovery.lastFailureAt}`;

@@ -7,7 +7,8 @@ import type { ClaudeStopHookResponse } from "../../../src/shared/types/claude-ho
 import type { WorkflowFlow } from "../../../src/shared/types/workflow.js";
 import {
   connectAndCreateTask, getGateState, requestGateReview, startRole,
-  updateGateSettings, waitFor, writeCompleteArchitecturePlan, writeConfirmedArchitectureBrief
+  updateGateSettings, waitFor, writeCompleteArchitecturePlan, writeConfirmedArchitectureBrief,
+  pollTranslationFeed, updatePreferences, bindGatewayLarkApp, setGatewayConnection, updateGatewaySettings, getWorkspaceState
 } from "./helpers/e2e-actions.js";
 import { createMockClaudeE2eApp } from "./helpers/e2e-app.js";
 import { createE2eRepo } from "./helpers/e2e-repo.js";
@@ -30,6 +31,108 @@ const statusReport = [
 ].join("\n");
 
 describe("PM question detection through the Stop hook API", () => {
+  it("delivers the registered question without a transcript reply and blocks all advancement until direct user input", async () => {
+    const env = await createScenario("question-delivery-off");
+    await updatePreferences(env.app, { translationEnabled: false });
+    await env.approveArchitect("code-change");
+    await env.beginPmTurn();
+    const question = "The two storage formats cannot interoperate. Which format should this task support?";
+    const response = await env.app.inject({ method: "POST", url: `/api/tasks/${env.task.taskSlug}/ask-user`, payload: { question } });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(await env.stopPm("Waiting for your answer.")).toEqual({});
+
+    const first = await pollTranslationFeed(env.app, env.task.taskSlug);
+    const questions = first.events.filter((item) => item.event.type === "entry" && item.event.entry.sourceText === question);
+    expect(questions).toHaveLength(1);
+    expect(questions[0]?.event).toMatchObject({ entry: { status: "preserved", role: "project-manager" } });
+    expect((await env.state()).userQuestionReplies).toHaveLength(1);
+    await waitFor(async () => expect((await getWorkspaceState(env.app, env.task.taskSlug)).roundState.flowPause)
+      .toMatchObject({ paused: true, message: question }));
+    expect(first.events.some((item) => item.event.type === "entry" && item.event.entry.sourceText === "Waiting for your answer.")).toBe(false);
+
+    const beforeGate = await getGateState(env.app, env.task.taskSlug);
+    for (const gate of ["architecture-plan", "validation-adequacy", "code-diff"]) {
+      for (const operation of ["request", "retry"]) {
+        const result = await env.app.inject({ method: "POST", url: `/api/tasks/${env.task.taskSlug}/gate-review/${gate}/${operation}`, payload: {} });
+        expect(result.statusCode, result.body).toBe(409);
+        expect(result.body).toContain("WORKFLOW_AWAITING_USER");
+      }
+    }
+    const afterGate = await getGateState(env.app, env.task.taskSlug);
+    expect(afterGate.activeGate).toBe(beforeGate.activeGate);
+    for (const gate of ["architecture-plan", "validation-adequacy", "code-diff"] as const) {
+      expect(afterGate.gates[gate]).toEqual({ ...beforeGate.gates[gate], updatedAt: expect.any(String) });
+    }
+    await expect(env.service.submitProgress(env.context, "Status: completed")).rejects.toMatchObject({ code: "WORKFLOW_AWAITING_USER" });
+    await expect(env.service.assertRouteAuthorized({ ...env.context, routePath: ".ai/vcm/handoffs/messages/project-manager-architect.md", targetRole: "architect" }))
+      .rejects.toMatchObject({ code: "WORKFLOW_AWAITING_USER" });
+
+    await env.beginPmTurn(); // Internal callback cannot unlock the wait.
+    expect((await env.state()).awaitingUser?.question).toBe(question);
+    await env.stopPm("Internal status received.");
+    const replay = await pollTranslationFeed(env.app, env.task.taskSlug, first.nextCursor);
+    expect(replay.events.filter((item) => item.event.type === "entry" && item.event.entry.sourceText === question)).toHaveLength(0);
+    await env.directUserPrompt("Use the existing storage format.");
+    expect((await env.state()).awaitingUser).toBeNull();
+    expect((await env.state()).pendingDispatch).toBeNull();
+    await expect(env.service.assertRouteAuthorized({ ...env.context, routePath: ".ai/vcm/handoffs/messages/project-manager-architect.md", targetRole: "architect" })).rejects.toThrow();
+    await env.approveArchitect("code-change");
+    expect((await env.state()).pendingDispatch?.targetRole).toBe("architect");
+  });
+
+  it.each([
+    ["round-final", false], ["pm-final-only", false], ["round-final", true]
+  ] as const)("shares exactly one question with the Gateway in %s mode (translation failure: %s)", async (mode, failTranslation) => {
+    const env = await createScenario(`question-gateway-${mode}-${failTranslation}`);
+    const question = "The import must keep existing records. Should duplicate rows be rejected or merged?";
+    const translated = "ZH: " + question;
+    const translatedSources: string[] = [];
+    env.mockRuntime.onPrompt("translator", "Translate each <VCM_TEXT>", async (ctx) => {
+      await ctx.userPromptSubmit();
+      for (const match of ctx.prompt.matchAll(/Result Path \d+:\s*(.+?)\n<VCM_TEXT\d+>\n([\s\S]*?)\n<\/VCM_TEXT\d+>/g)) {
+        translatedSources.push(match[2]!);
+        if (!failTranslation) await ctx.writeAbsoluteFile(match[1]!.trim(), "ZH: " + match[2]);
+      }
+      await ctx.stop();
+    }, { once: false });
+    await bindGatewayLarkApp(env.app, { appId: "mock-app", appSecret: "mock-secret", larkDomain: "lark" });
+    await setGatewayConnection(env.app, true);
+    await updateGatewaySettings(env.app, { enabled: true, channel: "lark", translationEnabled: true });
+    env.mockGateway.enqueueText("/status", { fromUserId: "question-user", chatId: "question-chat" });
+    await waitFor(async () => expect((await env.deps.gatewayService.getStatus()).binding.boundUserId).toBeTruthy(), 10_000);
+    await updatePreferences(env.app, { translationEnabled: true, translationOutputMode: mode, translationTargetLanguage: "zh-CN" });
+    const ensure = await env.app.inject({ method: "POST", url: "/api/translation/session/ensure", payload: { taskSlug: env.task.taskSlug } });
+    expect(ensure.statusCode, ensure.body).toBe(200);
+
+    env.mockRuntime.onPrompt("project-manager", "Ask about import", async (ctx) => {
+      await ctx.userPromptSubmit();
+      const registered = await env.app.inject({ method: "POST", url: `/api/tasks/${env.task.taskSlug}/ask-user`, payload: { question } });
+      expect(registered.statusCode, registered.body).toBe(200);
+      await ctx.appendTranscriptText("Waiting for your answer.");
+      await ctx.stop();
+    });
+    const pm = env.mockRuntime.getSessionByRole(env.task.taskSlug, "project-manager")!;
+    env.mockRuntime.write(pm.id, "Ask about import");
+    await env.mockRuntime.waitForIdle();
+    await waitFor(async () => {
+      const feed = await pollTranslationFeed(env.app, env.task.taskSlug);
+      expect(feed.events.some((item) => item.event.type === "entry" && item.event.entry.sourceText === question
+        && (failTranslation ? item.event.entry.status === "failed" : item.event.entry.translatedText === translated))).toBe(true);
+      expect(feed.events.some((item) => item.event.type === "entry" && item.event.entry.sourceText === "Waiting for your answer.")).toBe(false);
+      expect(env.mockGateway.sentTexts.some((item) => item.text.includes(failTranslation ? "PM 角色回复已收到，但翻译失败。" : translated))).toBe(true);
+      expect((await getWorkspaceState(env.app, env.task.taskSlug)).roundState.flowPause)
+        .toMatchObject({ paused: true, message: question });
+    }, 15_000);
+    const session = (await env.pmSession())!;
+    await env.deps.gatewayService.handleRoleStop({ repoRoot: env.repo.repoRoot, taskSlug: env.task.taskSlug, session });
+    await pollTranslationFeed(env.app, env.task.taskSlug);
+    expect(translatedSources.filter((text) => text === question)).toHaveLength(1);
+    expect(translatedSources).not.toContain("Waiting for your answer.");
+    expect(env.mockGateway.sentTexts.filter((item) => item.text.includes("Round Final Reply 原文：") && item.text.includes(question))).toHaveLength(1);
+    expect(env.mockGateway.sentTexts.filter((item) => item.text.includes(failTranslation ? "PM 角色回复已收到，但翻译失败。" : translated))).toHaveLength(1);
+    expect(env.mockGateway.sentTexts.some((item) => item.text.includes("Waiting for your answer."))).toBe(false);
+  }, 45_000);
+
   it("preserves approval, dispatches normally, and accepts reports while Architect is still running", async () => {
     const env = await createScenario("question-role-report");
     await env.approveArchitect("code-change");
@@ -200,6 +303,7 @@ async function createScenario(taskSlug: string) {
     state: () => service.getState(context),
     pmSession: () => env.deps.sessionService.getRoleSession(repo.repoRoot, taskSlug, "project-manager"),
     beginPmTurn: () => hook({ hook_event_name: "UserPromptSubmit", prompt: "[VCM] Report current status." }),
+    directUserPrompt: (prompt: string) => hook({ hook_event_name: "UserPromptSubmit", prompt }),
     async stopPm(message: string, stopHookActive = false): Promise<ClaudeStopHookResponse> {
       return (await hook({ hook_event_name: "Stop", last_assistant_message: message, stop_hook_active: stopHookActive }, true)).json();
     },

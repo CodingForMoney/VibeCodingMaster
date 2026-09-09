@@ -154,7 +154,8 @@ describe("createHarnessService", () => {
     expect(projectManagerAgent).toContain("while the current Round continues is not user communication");
     expect(projectManagerAgent).toContain("The user is informed only by PM's Round Final Reply");
     expect(projectManagerAgent).toContain("Never rely on earlier PM text in the same Round.");
-    expect(projectManagerAgent).toContain("make the complete question and its necessary context the final reply");
+    expect(projectManagerAgent).toContain("submit the complete user-facing question and its necessary context");
+    expect(projectManagerAgent).toContain("VCM delivers the registered question as the Round Final Reply");
     expect(projectManagerAgent).toContain("Plain language means translating technical detail, not deleting it.");
     expect(projectManagerAgent).toContain("Read the complete source report or handoff artifact before replying.");
     expect(projectManagerAgent).toContain("Reuse that instruction verbatim and do not ask the user to confirm it again.");

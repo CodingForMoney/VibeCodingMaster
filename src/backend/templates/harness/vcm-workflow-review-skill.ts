@@ -52,7 +52,7 @@ Only the user's explicit instruction may authorize a rejected transition.
 
 If the current user instruction already explicitly authorizes the exact rejected transition, reuse that instruction verbatim as \`Authorization Text\`. Do not ask the user to confirm it again.
 
-If no such instruction exists, use \`vcm-ask-user\` with the exact authorization question, ask it, and wait.
+If no such instruction exists, use \`vcm-ask-user\` with the complete authorization question and end the turn.
 
 Resubmit the unchanged transition with:
 

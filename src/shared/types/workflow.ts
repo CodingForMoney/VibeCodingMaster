@@ -128,10 +128,18 @@ export interface WorkflowAwaitingUser {
   requestedAt: string;
 }
 
+export interface WorkflowUserQuestionReply extends WorkflowAwaitingUser {
+  id: string;
+  sessionId: string;
+  turnStartedAt: string;
+  completedAt: string;
+}
+
 export interface WorkflowControlState {
   version: 1;
   taskSlug: string;
   awaitingUser: WorkflowAwaitingUser | null;
+  userQuestionReplies?: WorkflowUserQuestionReply[];
   pendingDispatch: WorkflowPendingDispatch | null;
   activeDispatch: WorkflowDispatchEvidenceBaseline | null;
   flowRun: WorkflowFlowRun | null;

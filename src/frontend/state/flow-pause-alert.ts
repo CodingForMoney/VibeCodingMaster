@@ -1,5 +1,5 @@
 import type { GatewayStatus } from "../../shared/types/gateway.js";
-import type { VcmRoleRecoveryState, VcmSessionRoundState } from "../../shared/types/round.js";
+import type { VcmRoleRecoveryState, VcmRoundStatus, VcmSessionRoundState } from "../../shared/types/round.js";
 
 export interface GatewayInboundObservation {
   initialized: boolean;
@@ -25,7 +25,7 @@ export function selectFlowPauseAlertMessage(
   if (roundState.flowPause.reason === "role-recovery-failed" && recovery) {
     return formatRecoveryFailure(recovery, roleLabel);
   }
-  return `No new turn started after ${roleLabel} stopped.`;
+  return roundState.flowPause.message ?? `No new turn started after ${roleLabel} stopped.`;
 }
 
 /**
@@ -36,6 +36,17 @@ export function getFlowPauseNotificationKey(roundState: VcmSessionRoundState): s
   const roundKey = roundState.roundId ?? roundState.startedAt ?? roundState.taskSlug;
   const stoppedKey = roundState.stoppedAt ?? roundState.lastTurnEndedAt ?? "stopped";
   return `${roundKey}:${stoppedKey}`;
+}
+
+export function shouldShowFlowPauseNotice(
+  roundState: VcmSessionRoundState,
+  previousObservation: { status: VcmRoundStatus } | undefined,
+  taskViewStartedAtMs: number | undefined
+): boolean {
+  if (roundState.flowPause?.paused && roundState.flowPause.message) return true;
+  if (previousObservation?.status === "running") return true;
+  const stoppedAtMs = Date.parse(roundState.stoppedAt ?? roundState.lastTurnEndedAt ?? "");
+  return Boolean(taskViewStartedAtMs && Number.isFinite(stoppedAtMs) && stoppedAtMs > taskViewStartedAtMs);
 }
 
 export function selectFlowPauseAlarmMode(soundEnabled: boolean): "none" | "strong" {

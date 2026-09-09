@@ -261,8 +261,10 @@ dispatch. Workflow permission comes from the append-only
 `workflow-progress.md` record and one backend-owned pending approval. Round,
 Turn, Session, and Gate Review state remain separate observed runtime facts.
 User-question waiting is a hard workflow-control state: `vcm-ask-user` records
-the exact question and cancels the pending approval before PM asks it. Only a
-new direct user prompt clears that wait.
+the complete user-facing question and cancels the pending approval. On PM Stop,
+VCM uses the registered question as the official reply for the Pause Alert,
+translation panel, and Gateway. New dispatches, Gate requests/retries, and
+workflow completion are blocked until a new direct user prompt clears the wait.
 
 ## 6. Task and Worktree Model
 
@@ -409,8 +411,9 @@ continues is not user communication. The user is informed by PM's self-contained
 Round Final Reply when the Round pauses for input or reaches a terminal result.
 That reply restates all results, blockers, decisions, risks, and required user
 actions instead of relying on earlier PM text in the same Round. A user question
-is registered through `vcm-ask-user`, included with its necessary context in the
-final reply, and followed by the end of the PM turn.
+and its necessary context are submitted through `vcm-ask-user`, then PM ends the
+turn. VCM delivers that registered content as the final reply; PM does not need
+to repeat it in a separate closing message.
 
 ### User Communication
 

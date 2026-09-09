@@ -189,7 +189,8 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     roundService: deps.roundService,
     taskWorkflowService: deps.taskWorkflowService,
     architectRestartService: deps.architectRestartService,
-    translationService: deps.translationService
+    translationService: deps.translationService,
+    workflowControlService: deps.workflowControlService
   });
   registerSessionRoutes(app, {
     projectService: deps.projectService,
@@ -421,6 +422,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   });
   const transcripts = createClaudeTranscriptService();
   const translationService = createTranslationService({
+    workflowControlService,
     runtime,
     sessionRegistry: registry,
     transcripts,
@@ -456,6 +458,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     roleContextRestartService
   });
   const gatewayService = createGatewayService({
+    workflowControlService,
     fs,
     settings: gatewaySettings,
     audit: gatewayAudit,

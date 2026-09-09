@@ -3,7 +3,8 @@ import {
   getFlowPauseNotificationKey,
   observeGatewayInboundMessage,
   selectFlowPauseAlarmMode,
-  selectFlowPauseAlertMessage
+  selectFlowPauseAlertMessage,
+  shouldShowFlowPauseNotice
 } from "../../../src/frontend/state/flow-pause-alert.js";
 import type { GatewayStatus } from "../../../src/shared/types/gateway.js";
 import type { VcmSessionRoundState } from "../../../src/shared/types/round.js";
@@ -23,6 +24,11 @@ const BASE: VcmSessionRoundState = {
 };
 
 describe("selectFlowPauseAlertMessage", () => {
+  it("displays the complete backend question without deriving workflow decisions", () => {
+    const question = "Existing records must remain readable.\nShould duplicate rows be rejected or merged?";
+    expect(selectFlowPauseAlertMessage({ ...BASE, flowPause: { paused: true, message: question } }, vi.fn())).toBe(question);
+    expect(selectFlowPauseAlertMessage({ ...BASE, flowPause: { paused: false, message: question } }, vi.fn())).toBeNull();
+  });
   it("returns null when the backend reports no pause", () => {
     const formatRecoveryFailure = vi.fn();
     expect(selectFlowPauseAlertMessage({ ...BASE }, formatRecoveryFailure)).toBeNull();
@@ -95,6 +101,13 @@ describe("selectFlowPauseAlertMessage", () => {
 });
 
 describe("flow pause presentation", () => {
+  it("restores an unanswered question after refresh without reviving ordinary historical alerts", () => {
+    const state = { ...BASE, stoppedAt: "2026-09-09T00:00:00.000Z", flowPause: { paused: true } };
+    const openedAt = Date.parse("2026-09-09T00:01:00.000Z");
+    expect(shouldShowFlowPauseNotice(state, undefined, openedAt)).toBe(false);
+    expect(shouldShowFlowPauseNotice({ ...state, flowPause: { paused: true, message: "Please choose." } }, undefined, openedAt)).toBe(true);
+    expect(shouldShowFlowPauseNotice(state, { status: "running" }, openedAt)).toBe(true);
+  });
   it("always keeps the modal decision separate from the sound preference", () => {
     const pausedState: VcmSessionRoundState = {
       ...BASE,

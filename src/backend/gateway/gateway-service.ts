@@ -29,6 +29,8 @@ import { getTaskRuntimeRepoRoot, type TaskService } from "../services/task-servi
 import type { TaskCloseService } from "../services/task-close-service.js";
 import type { TaskLaunchService } from "../services/task-launch-service.js";
 import type { TranslationService } from "../services/translation-service.js";
+import type { WorkflowControlService } from "../services/workflow-control-service.js";
+import { findUserQuestionReply } from "../services/user-question-reply.js";
 import type { AppSettingsService } from "../services/app-settings-service.js";
 import { resolveExistingClaudeTranscriptPath } from "../services/claude-transcript-service.js";
 import {
@@ -109,6 +111,7 @@ export interface GatewayServiceDeps {
   taskLaunchService: Pick<TaskLaunchService, "startTaskRoleSessions">;
   translationService: Pick<TranslationService, "translateUserInput" | "translateGatewayOutput">;
   roundService: Pick<RoundService, "getSessionRoundState">;
+  workflowControlService?: Pick<WorkflowControlService, "getState">;
   runtime: Pick<TerminalRuntime, "write">;
   appSettings: Pick<AppSettingsService, "getPreferences" | "updatePreferences">;
   larkRegistration?: LarkRegistrationClient;
@@ -1407,11 +1410,15 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         return;
       }
 
+      const questionReply = role === "project-manager" && deps.workflowControlService
+        ? await readRegisteredQuestionReply(input)
+        : undefined;
       const transcriptPath = resolveExistingClaudeTranscriptPath(input.session);
-      if (!transcriptPath) {
-        return;
-      }
-      const events = await readTranscriptTextEvents(transcriptPath);
+      if (!questionReply && !transcriptPath) return;
+      const events: TranscriptTextEvent[] = questionReply ? [{
+        id: questionReply.id, timestamp: questionReply.completedAt,
+        text: questionReply.question, stopReason: "end_turn"
+      }] : await readTranscriptTextEvents(transcriptPath!);
       const round = await waitForGatewayRoundFinal(input.repoRoot, input.taskSlug, role);
       if (!round) {
         return;
@@ -1543,6 +1550,16 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       };
     }
   };
+
+  async function readRegisteredQuestionReply(input: GatewayRoleStopInput) {
+    const task = await deps.taskService.loadTask(input.repoRoot, input.taskSlug);
+    const config = await deps.projectService.loadConfig(input.repoRoot);
+    const state = await deps.workflowControlService!.getState({
+      taskRepoRoot: getTaskRuntimeRepoRoot(task), taskSlug: input.taskSlug,
+      stateRoot: config.stateRoot, handoffDir: task.handoffDir
+    });
+    return findUserQuestionReply(state, input.session.id, input.session.lastTurnEndedAt ?? input.session.updatedAt);
+  }
 
   function getLatestRoleReply(settings: GatewaySettingsFile): GatewayLatestRoleReply | undefined {
     if (!settings.currentProjectId || !settings.currentTaskSlug) {

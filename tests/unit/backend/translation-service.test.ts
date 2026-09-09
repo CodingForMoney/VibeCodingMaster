@@ -1165,7 +1165,7 @@ describe("translation-service", () => {
       fs,
       settingsPath: "/settings.json",
     });
-    await appSettings.updatePreferences({ translationOutputMode: "round-final" });
+    await appSettings.updatePreferences({ translationEnabled: true, translationOutputMode: "round-final" });
     const coderSession = createRoleSessionRecord({
       id: "session-coder",
       role: "coder",

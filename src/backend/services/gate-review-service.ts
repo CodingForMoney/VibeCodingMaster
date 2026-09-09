@@ -60,7 +60,8 @@ export interface GateReviewServiceDeps {
     "getRoleSession" | "markRoleActivityRunning" | "restartRoleSession" | "resumeRoleSession" | "startRoleSession"
   >;
   roundService: Pick<RoundService, "recordRoleTurnEvent">;
-  workflowControlService?: Pick<WorkflowControlService, "getProgress" | "getState">;
+  workflowControlService?: Pick<WorkflowControlService, "getProgress" | "getState">
+    & Partial<Pick<WorkflowControlService, "runWhileNotAwaitingUser">>;
   onArchitecturePlanDisposition?: (input: {
     repoRoot: string;
     taskSlug: string;
@@ -180,7 +181,10 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     options: { force?: boolean; codeDiffSource?: CodeDiffSource } = {}
   ): Promise<GateReviewRequestResult> {
     const context = await getContext(repoRoot, taskSlug);
-    return withGateStateLock(context, () => requestReviewGateLocked(context, gate, options));
+    const run = () => withGateStateLock(context, () => requestReviewGateLocked(context, gate, options));
+    return deps.workflowControlService?.runWhileNotAwaitingUser
+      ? deps.workflowControlService.runWhileNotAwaitingUser(context, run)
+      : run();
   }
 
   async function requestReviewGateLocked(

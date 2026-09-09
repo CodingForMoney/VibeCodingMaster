@@ -72,7 +72,8 @@ export interface ClaudeHookServiceDeps {
   sessionService: SessionService;
   messageService: MessageService;
   roundService: RoundService;
-  translationService: Pick<TranslationService, "recordConversationBoundary">;
+  translationService: Pick<TranslationService, "recordConversationBoundary">
+    & Partial<Pick<TranslationService, "recordUserQuestionReply">>;
   translationWorkerService?: Pick<TranslationWorkerService, "handleTranslatorHook">;
   appSettings: Pick<AppSettingsService, "getPreferences">;
   runtime?: Pick<TerminalRuntime, "write">;
@@ -98,7 +99,7 @@ export interface ClaudeHookServiceDeps {
   workflowControlService?: Pick<
     WorkflowControlService,
     "getState" | "resolveUserInput"
-  >;
+  > & Partial<Pick<WorkflowControlService, "completeUserQuestion">>;
 }
 
 export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHookService {
@@ -472,7 +473,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
             dispatchedCount: 0,
             stopDecision: {
               behavior: "block",
-              reason: `Possible unregistered user question: ${JSON.stringify(question.slice(0, 600))}. If you are asking the user, use vcm-ask-user with the exact question, then ask it and end the turn without advancing or routing the workflow. If this only reports or quotes another question, clarify that context and end normally; do not invent a user question or register a false wait.`
+              reason: `Possible unregistered user question: ${JSON.stringify(question.slice(0, 600))}. If you are asking the user, use vcm-ask-user with the complete question and necessary context, then end the turn without advancing or routing the workflow. VCM delivers the registered question. If this only reports or quotes another question, clarify that context and end normally; do not invent a user question or register a false wait.`
             }
           };
         }
@@ -656,6 +657,21 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     });
     if (!session) {
       return completedHookResult(input, eventName);
+    }
+    if (eventName === "Stop" && input.role === "project-manager") {
+      const reply = await deps.workflowControlService?.completeUserQuestion?.(createWorkflowControlContext(context), {
+        sessionId: session.id,
+        startedAt: session.lastTurnStartedAt ?? session.updatedAt,
+        endedAt: session.lastTurnEndedAt ?? session.updatedAt
+      });
+      if (reply) {
+        await deps.translationService.recordUserQuestionReply?.({
+          repoRoot: context.project.repoRoot,
+          taskRepoRoot: context.taskRepoRoot,
+          taskSlug: context.taskSlug,
+          reply
+        });
+      }
     }
     const boundToTask = await isHookSessionBoundToTask(context, input.role);
     if (boundToTask) {

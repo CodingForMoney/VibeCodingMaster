@@ -426,6 +426,8 @@ h2 {
   display: grid;
   gap: 12px;
   width: min(460px, 100%);
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
   border: 1px solid #2f6f73;
   border-radius: 8px;
   background: #e8f4f2;
@@ -452,6 +454,11 @@ h2 {
   margin: 0;
   font-size: 14px;
   line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+#flow-pause-alert-body {
+  white-space: pre-wrap;
 }
 
 .flow-pause-alert-hint {

@@ -192,13 +192,18 @@ artifacts, Gate Review state, Round/Turn state, and the role rules remain
 authoritative.
 
 Whenever Project Manager asks the user a question, it first uses
-`vcm-ask-user`. VCM records the wait and cancels any pending role dispatch in
-one state update. Stop Hook then ends the PM turn without route scanning. Only
+`vcm-ask-user` with the complete question and necessary context. VCM records the
+wait and cancels any pending role dispatch in one state update. Stop Hook then
+ends the PM turn without route scanning and records the question as the official
+reply. The existing Pause Alert displays it even when translation is off; the
+translation panel and Gateway reuse that same reply instead of PM's separate
+closing text. While waiting, new dispatches, Gate requests/retries, and workflow
+completion are blocked; already-running roles may still return results. Only
 a new direct user message clears the wait, and the next role dispatch requires
 a fresh Workflow Review. PM treats text emitted while a Round continues as
 intermediate output, not as delivered user communication. When the Round pauses
-or completes, its Round Final Reply restates the complete user-facing result or
-question without relying on earlier PM output.
+or completes, its Round Final Reply contains the complete user-facing result or
+registered question without relying on earlier PM output.
 
 Typical flow:
 

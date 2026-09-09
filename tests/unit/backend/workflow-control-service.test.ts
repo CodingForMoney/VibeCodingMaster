@@ -66,6 +66,49 @@ describe("workflow control service", () => {
     expect((await service.getState(context)).pendingDispatch).toBeNull();
   });
 
+  it("preserves a single completed question across duplicate Stop, an answer, and service restart", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: () => "2026-09-09T00:00:01.000Z" });
+    const question = "Please choose the required behavior.\n" + "Full context. ".repeat(1000);
+    await service.requestUserInput(context, question);
+    const turn = { sessionId: "pm-1", startedAt: "2026-09-09T00:00:00.000Z", endedAt: "2026-09-09T00:00:02.000Z" };
+    const reply = await service.completeUserQuestion(context, turn);
+    expect(reply?.question).toBe(question.trim());
+    expect(await service.completeUserQuestion(context, turn)).toEqual(reply);
+    await service.resolveUserInput(context);
+    const restored = createWorkflowControlService({ fs });
+    expect((await restored.getState(context)).userQuestionReplies).toEqual([reply]);
+    expect(await restored.completeUserQuestion(context, { ...turn, endedAt: "2026-09-09T00:00:03.000Z" })).toBeUndefined();
+    expect((await restored.getState(context)).awaitingUser).toBeNull();
+  });
+
+  it("serializes a Gate submission with question registration and rejects later advancement", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs });
+    let release!: () => void;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const finish = new Promise<void>((resolve) => { release = resolve; });
+    const gate = service.runWhileNotAwaitingUser(context, async () => {
+      entered();
+      await finish;
+      return "submitted";
+    });
+    await started;
+    const question = service.requestUserInput(context, "Please choose.");
+    expect((await service.getState(context)).awaitingUser).toBeNull();
+    release();
+    expect(await gate).toBe("submitted");
+    await question;
+    let advanced = false;
+    await expect(service.runWhileNotAwaitingUser(context, async () => { advanced = true; }))
+      .rejects.toMatchObject({ code: "WORKFLOW_AWAITING_USER" });
+    expect(advanced).toBe(false);
+    await service.resolveUserInput(context);
+    await service.runWhileNotAwaitingUser(context, async () => { advanced = true; });
+    expect(advanced).toBe(true);
+  });
+
   it("replays an interrupted Workflow Progress commit before exposing state", async () => {
     const { context, fs: baseFs } = await createContext(roots);
     const failure = failureInjectingFs(baseFs);

@@ -47,6 +47,8 @@ export type VcmRoundStopReason =
  */
 export interface VcmFlowPauseState {
   paused: boolean;
+  /** Complete backend-owned user question, when this pause is waiting for an answer. */
+  message?: string;
   reason?: VcmFlowPauseReason;
   /** Role the flow paused on (authoritative; e.g. the active role at pause). */
   role?: RoleName;
