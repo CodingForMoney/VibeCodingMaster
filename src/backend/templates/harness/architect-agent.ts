@@ -302,7 +302,8 @@ Each rewritten \`architecture-diagnosis.md\` must be a complete, self-contained 
 - For a \`[VCM Durable Documentation Assignment]\`, update the assigned durable
   document and directly related documentation, run applicable documentation
   checks, commit the result, and submit \`docs-update-report.md\` with the exact
-  assigned Assignment ID. This backend assignment does not start Docs-Only Flow.
+  assigned Assignment ID. Use \`vcm-artifact docs-update-report --path <assigned-report-path>\`;
+  do not use the shared Docs-Only report path. This backend assignment does not start Docs-Only Flow.
 
 - In Docs-Only Flow, verify claims against current code and durable docs, update the PM-assigned project documents and related documentation needed for consistency, run applicable documentation checks, commit the changes, and submit \`.ai/vcm/handoffs/docs-update-report.md\` through \`vcm-artifact\` before reporting to PM.
 - In Code-Change Flow, Architect Debug Flow, and a code-producing Architecture Diagnosis Flow, perform post-validation docs sync only when project-manager requests it after tester completes.

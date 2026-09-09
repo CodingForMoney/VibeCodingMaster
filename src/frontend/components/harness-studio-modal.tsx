@@ -614,7 +614,7 @@ function MemorySection({
         <StatusBadge status={memoryStatusBadge(state?.status)} />
         {state?.active?.currentRole ? <span className="muted">Collecting {state.active.currentRole}</span> : null}
         {state?.active?.error ? <p className="warnings">{state.active.error}</p> : null}
-        {state?.status === "failed" ? (
+        {state?.status === "failed" && !state.active?.assignments.length ? (
           <button className="harness-memory-action-button" type="button" disabled={busy} onClick={onRetry}>Retry</button>
         ) : null}
       </div>
@@ -641,8 +641,11 @@ function MemorySection({
           <h4>Durable Documentation</h4>
           <ol className="harness-studio-file-list">
             {assignments.map((assignment) => (
-              <li key={assignment.id}>
-                <span className="harness-studio-file-path-button" title={assignment.id}>{assignment.targetPath}</span>
+              <li key={assignment.id} className="harness-memory-assignment">
+                <div className="harness-memory-assignment-detail" title={assignment.id}>
+                  <span>{assignment.targetPath}</span>
+                  {assignment.error ? <p className="warnings">{assignment.error}</p> : null}
+                </div>
                 <code>{assignment.owner ?? "PM"}</code>
                 <StatusBadge status={assignmentStatusBadge(assignment.status)} />
                 {assignment.status === "failed" ? (

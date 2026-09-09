@@ -60,8 +60,8 @@ when VCM explicitly assigns a memory proposal or candidate path, use
 - For a `[VCM Durable Documentation Assignment]`, verify and update the assigned
   durable document and directly related documentation, run applicable
   documentation checks, commit the result, and submit `docs-update-report.md`
-  with the exact assigned Assignment ID. This backend assignment does not start
-  Docs-Only Flow.
+  with the exact assigned Assignment ID. Use `vcm-artifact docs-update-report --path <assigned-report-path>`;
+  do not use the shared Docs-Only report path. This backend assignment does not start Docs-Only Flow.
 
 - Verify the assigned documentation against current project evidence, update the required documentation, run applicable documentation checks, and commit the changes.
 - Submit `.ai/vcm/handoffs/docs-update-report.md` through `vcm-artifact` with the decision, changed and reviewed documents, evidence, checks, commit, and remaining documentation issues.

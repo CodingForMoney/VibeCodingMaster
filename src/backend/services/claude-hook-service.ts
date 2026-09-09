@@ -250,6 +250,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
             taskSlug: activeTask.taskSlug,
             eventName,
             memoryReviewStatus: memoryState?.status ?? "idle",
+            memoryReviewHasAssignments: Boolean(memoryState?.active?.assignments.length),
             memoryReviewError: memoryState?.active?.error
           }
         )

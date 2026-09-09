@@ -108,7 +108,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     : undefined;
   const artifactService = createArtifactService(fsAdapter, {
     workflowControlService,
-    isRoleMemoryTurn: (taskRepoRoot, role) => autoMemoryService.isRoleMemoryTurn(taskRepoRoot, role)
+    getDurableDocAssignment: (taskRepoRoot, role) => autoMemoryService.getDurableDocAssignment(taskRepoRoot, role)
   });
   const projectService = createProjectService({ fs: fsAdapter, git, appSettings });
   const taskService = createTaskService({ fs: fsAdapter, git, artifactService, projectService });

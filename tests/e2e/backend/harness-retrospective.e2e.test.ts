@@ -280,7 +280,8 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
           method: "POST", url: `/api/tasks/${task.taskSlug}/artifacts/submit`,
           payload: {
             kind: "docs-update-report", mode: "final", role: "architect",
-            runtimeSessionToken: session!.runtimeSessionToken, content
+            runtimeSessionToken: session!.runtimeSessionToken, content,
+            path: matchPromptPath(ctx.prompt, "Assigned report path")
           }
         });
       });
@@ -321,6 +322,105 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
       "utf8"
     ));
     expect(marker.status).toBe("completed");
+  });
+  it.each([false, true])("recovers a failed multi-document move across a backend restart (disable Auto Memory: %s)", async (disableMemory) => {
+    let env = await createMockClaudeE2eApp({ workflowControl: true });
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "memory-queue-recovery");
+    await updatePreferences(env.app, { autoMemoryEnabled: true });
+    const entries = ["## Architecture\nLifecycle ownership is durable knowledge.", "## Testing\nTesting contracts are durable knowledge."];
+    const sharedPath = path.join(task.worktreePath, "CLAUDE.md");
+    await fs.writeFile(sharedPath, replaceVcmMemoryBlock(await fs.readFile(sharedPath, "utf8"), entries.join("\n\n")));
+    await git(task.worktreePath, "add", "CLAUDE.md");
+    await git(task.worktreePath, "commit", "-m", "test: seed two memory entries");
+    for (const role of ["project-manager", "architect", "coder", "tester"] as const) {
+      env.mockRuntime.onPrompt(role, "[VCM Task Harness Review: Memory Proposal]", writeNoChangeMemoryDraft);
+      await startRole(env.app, task.taskSlug, role);
+    }
+    env.mockRuntime.onPrompt("project-manager", "Finish recovery test", async (ctx) => {
+      await ctx.userPromptSubmit();
+      await ctx.writeFile(".ai/vcm/handoffs/final-acceptance.md", acceptedFinalAcceptance(task.taskSlug));
+      await ctx.stop();
+    });
+    env.mockRuntime.onPrompt("harness-engineer", "[VCM Task Harness Retrospective]", async (ctx) => {
+      await writeHarnessRetrospectiveWithDurableDocMove(ctx, entries[0], ["docs/ARCHITECTURE.md", "docs/TESTING.md"]);
+    });
+    let architectureCommit = "";
+    const delivered: string[] = [];
+    const submitReport = async (ctx: MockClaudePromptContext, content: string) => {
+      const session = await env.deps.sessionService.getRoleSession(repo.repoRoot, task.taskSlug, ctx.role);
+      return injectOk(env.app, {
+        method: "POST", url: `/api/tasks/${task.taskSlug}/artifacts/submit`,
+        payload: { kind: "docs-update-report", mode: "final", role: ctx.role, runtimeSessionToken: session!.runtimeSessionToken,
+          path: matchPromptPath(ctx.prompt, "Assigned report path"), content }
+      });
+    };
+    for (const role of ["architect", "tester"] as const) {
+      env.mockRuntime.onPrompt(role, "[VCM Durable Documentation Assignment]", async (ctx) => {
+        await ctx.userPromptSubmit();
+        const target = matchPromptPath(ctx.prompt, "Target document");
+        delivered.push(target);
+        await ctx.writeFile(target, `# Documentation\n\n${matchPromptPath(ctx.prompt, "Content to preserve")}\n`);
+        await git(ctx.cwd, "add", "--", target);
+        await git(ctx.cwd, "commit", "-m", `docs: update ${target}`);
+        const commit = (await git(ctx.cwd, "rev-parse", "HEAD")).stdout.trim();
+        if (role === "architect") {
+          architectureCommit = commit;
+          if (disableMemory) await updatePreferences(env.app, { autoMemoryEnabled: false });
+        }
+        const report = renderDocsUpdateReportTemplate(task.taskSlug, matchPromptPath(ctx.prompt, "Assignment ID"))
+          .replaceAll("TBD", role === "architect" ? "deadbeef" : commit)
+          .replace("synced|unchanged|blocked", "synced");
+        await submitReport(ctx, report);
+        await ctx.stop();
+      });
+    }
+    await startHarnessEngineer(env.app, task.taskSlug);
+    const pm = env.mockRuntime.getSessionByRole(task.taskSlug, "project-manager")!;
+    env.mockRuntime.write(pm.id, "Finish recovery test");
+    await env.mockRuntime.waitForIdle();
+    await startTaskHarnessRetrospective(env.app, task.taskSlug);
+    await env.mockRuntime.waitForIdle();
+    await env.deps.runtimeCoordinator.reconcileProject(repo.repoRoot, { taskSlug: task.taskSlug });
+    await env.mockRuntime.waitForIdle();
+    const state = (await injectOk(env.app, { method: "GET", url: `/api/projects/harness/memory?taskSlug=${task.taskSlug}` })).json();
+    expect(delivered, JSON.stringify(state.active)).toEqual(["docs/ARCHITECTURE.md", "docs/TESTING.md"]);
+    expect(state.status).toBe("failed");
+    expect(state.active.assignments.map((item: { status: string }) => item.status)).toEqual(["failed", "completed"]);
+    const failed = state.active.assignments[0];
+    const markerPath = path.join(repo.repoRoot, ".ai/vcm/harness-feedback/task-retrospectives", `${task.taskSlug}.json`);
+    expect(JSON.parse(await fs.readFile(markerPath, "utf8")).status).toBe("failed");
+    expect(await fs.readFile(sharedPath, "utf8")).not.toContain(entries[0]);
+    await fs.writeFile(path.join(task.worktreePath, ".ai/vcm/handoffs/docs-update-report.md"), "Unrelated Docs-Only report");
+    const headBeforeRetry = (await git(task.worktreePath, "rev-parse", "HEAD")).stdout.trim();
+    expect(headBeforeRetry).not.toBe(architectureCommit);
+
+    const tempRoot = env.tempRoot;
+    await env.close({ preserveTempRoot: true });
+    env = await createMockClaudeE2eApp({ tempRoot, workflowControl: true });
+    await injectOk(env.app, { method: "POST", url: "/api/projects/connect", payload: { repoPath: repo.repoRoot } });
+    env.mockRuntime.onPrompt("architect", "[VCM Durable Documentation Assignment]", async (ctx) => {
+      await ctx.userPromptSubmit();
+      const report = renderDocsUpdateReportTemplate(task.taskSlug, failed.id)
+        .replaceAll("TBD", architectureCommit).replace("synced|unchanged|blocked", "synced");
+      await submitReport(ctx, report);
+      await ctx.stop();
+    });
+    await injectOk(env.app, { method: "POST", url: "/api/projects/harness/memory/assignments/retry",
+      payload: { taskSlug: task.taskSlug, assignmentId: failed.id } });
+    await env.mockRuntime.waitForIdle();
+    await env.deps.runtimeCoordinator.reconcileProject(repo.repoRoot, { taskSlug: task.taskSlug });
+    await env.mockRuntime.waitForIdle();
+    const recovered = (await injectOk(env.app, { method: "GET", url: `/api/projects/harness/memory?taskSlug=${task.taskSlug}` })).json();
+    expect(recovered.status, JSON.stringify(recovered.active)).toBe("idle");
+    expect(recovered.runs[0].assignments.map((item: { status: string }) => item.status)).toEqual(["completed", "completed"]);
+    expect(recovered.runs[0].assignments[0]).toMatchObject({ baseCommit: failed.baseCommit, commit: architectureCommit });
+    expect((await git(task.worktreePath, "rev-parse", "HEAD")).stdout.trim()).toBe(headBeforeRetry);
+    expect(JSON.parse(await fs.readFile(markerPath, "utf8"))).toMatchObject({ status: "completed" });
+    expect(await fs.readFile(path.join(task.worktreePath, ".ai/vcm/handoffs/docs-update-report.md"), "utf8"))
+      .toBe("Unrelated Docs-Only report");
   });
 });
 
@@ -435,17 +535,19 @@ async function writeHarnessRetrospective(ctx: MockClaudePromptContext): Promise<
 
 async function writeHarnessRetrospectiveWithDurableDocMove(
   ctx: MockClaudePromptContext,
-  sourceEntry: string
+  sourceEntry: string,
+  targets = ["docs/ARCHITECTURE.md"]
 ): Promise<void> {
   await ctx.userPromptSubmit();
   const resultPath = matchPromptPath(ctx.prompt, "Write the analysis to Result Path");
   const reviewResultPath = matchPromptPath(ctx.prompt, "Write the complete machine-readable review to");
   const manifest = await readExistingMemoryManifest(ctx.prompt);
+  const sharedEntries = manifest.entries.filter((entry) => entry.target === "shared");
   const decisions = manifest.entries.map((assigned) => {
     return assigned.target === "shared"
       ? {
           ...e2eExistingDecision(assigned.itemId, assigned.target, assigned.entry, "move-to-durable-doc", "none"),
-          durableDocPath: "docs/ARCHITECTURE.md"
+          durableDocPath: targets[sharedEntries.indexOf(assigned)]
         }
       : e2eExistingDecision(assigned.itemId, assigned.target, assigned.entry, "retain", assigned.entry);
   });
@@ -461,14 +563,14 @@ async function writeHarnessRetrospectiveWithDurableDocMove(
     runId: path.basename(path.dirname(reviewResultPath)),
     memoryCommit,
     decisions,
-    durableDocAssignments: [{
+    durableDocAssignments: sharedEntries.map((entry, index) => ({
       sourceMemoryPath: "CLAUDE.md",
-      sourceEntry,
-      targetPath: "docs/ARCHITECTURE.md",
-      content: "Lifecycle ownership is maintained by backend hooks.",
+      sourceEntry: index === 0 ? sourceEntry : entry.entry,
+      targetPath: targets[index],
+      content: index === 0 ? "Lifecycle ownership is maintained by backend hooks." : "Testing contracts are validated by integration tests.",
       reason: "Architecture ownership belongs in the durable architecture overview.",
       evidence: ["src/backend/services/claude-hook-service.ts"]
-    }]
+    }))
   }, null, 2)}\n`);
   await ctx.writeAbsoluteFile(resultPath, [
     "# Task Harness Retrospective: durable-doc",
@@ -488,7 +590,7 @@ async function writeHarnessRetrospectiveWithDurableDocMove(
     "## Memory Review",
     `Memory commit: ${memoryCommit}`,
     `Review result: ${reviewResultPath}`,
-    "Durable document assignments: 1",
+    `Durable document assignments: ${targets.length}`,
     ""
   ].join("\n"));
   await ctx.stop();

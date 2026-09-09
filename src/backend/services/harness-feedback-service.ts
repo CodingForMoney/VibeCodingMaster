@@ -49,6 +49,7 @@ export interface TaskRetrospectiveHookInput {
   taskSlug: string;
   eventName: ClaudeHookEventName;
   memoryReviewStatus: AutoMemoryReviewStatus;
+  memoryReviewHasAssignments?: boolean;
   memoryReviewError?: string;
 }
 
@@ -80,6 +81,7 @@ interface TaskRetrospectiveMarker {
   finalAcceptanceHash: string;
   pendingFeedbackPaths: string[];
   memoryRunId?: string;
+  durableDocFailure?: boolean;
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
@@ -268,6 +270,7 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
       await persistTaskRetrospectiveMarker(repoRoot, {
         ...processedMarker,
         status: "failed",
+        durableDocFailure: input.memoryReviewHasAssignments,
         failedAt: timestamp,
         updatedAt: timestamp,
         error: input.memoryReviewError
@@ -294,17 +297,26 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
     memoryStatus: AutoMemoryReviewStatus
   ): Promise<boolean> {
     const marker = await loadTaskRetrospectiveMarker(repoRoot, taskSlug);
-    if (!marker || marker.status !== "waiting-docs") {
+    if (!marker || (marker.status !== "waiting-docs" && !(marker.status === "failed" && marker.durableDocFailure))) {
       return false;
     }
     if (memoryStatus === "documenting") {
+      if (marker.status === "failed") {
+        await persistTaskRetrospectiveMarker(repoRoot, {
+          ...marker, status: "waiting-docs", updatedAt: now(), error: undefined, failedAt: undefined
+        });
+      }
       return true;
     }
     if (memoryStatus === "failed") {
+      if (marker.status === "failed") {
+        return true;
+      }
       const timestamp = now();
       await persistTaskRetrospectiveMarker(repoRoot, {
         ...marker,
         status: "failed",
+        durableDocFailure: true,
         failedAt: timestamp,
         updatedAt: timestamp,
         error: "Task Harness Retrospective durable-document assignment failed."
@@ -324,6 +336,9 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
     await persistTaskRetrospectiveMarker(repoRoot, {
       ...processedMarker,
       status: "completed",
+      durableDocFailure: undefined,
+      error: undefined,
+      failedAt: undefined,
       completedAt: timestamp,
       updatedAt: timestamp
     });

@@ -88,7 +88,9 @@ export class MockClaudeRuntime implements TerminalRuntime {
   async createSession(input: CreateTerminalSessionInput): Promise<TerminalSession> {
     const seq = ++this.sessionSeq;
     const id = `mock-terminal-${seq}`;
-    const claudeSessionId = `mock-claude-${input.role}-${seq}`;
+    const resumeIndex = input.args.indexOf("--resume");
+    const resumedSessionId = resumeIndex >= 0 ? input.args[resumeIndex + 1] : undefined;
+    const claudeSessionId = resumedSessionId ?? `mock-claude-${input.role}-${seq}`;
     const transcriptPath = path.join(this.options.transcriptRoot, `${claudeSessionId}.jsonl`);
     const startedAt = this.now();
     const session: TerminalSession = {
@@ -112,7 +114,11 @@ export class MockClaudeRuntime implements TerminalRuntime {
       transcriptPath
     });
     await mkdir(path.dirname(transcriptPath), { recursive: true });
-    await writeFile(transcriptPath, "", "utf8");
+    if (resumedSessionId) {
+      await appendFile(transcriptPath, "", "utf8");
+    } else {
+      await writeFile(transcriptPath, "", "utf8");
+    }
     return { ...session };
   }
 

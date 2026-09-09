@@ -599,12 +599,23 @@ describe("workflow control service", () => {
     const service = createWorkflowControlService({ fs, now: sequenceClock() });
     await enterCodeChangeFinalArchitect(service, fs, context);
     const before = await service.getProgress(context);
+    const reportPath = ".ai/vcm/memory-review/runs/run/assignments/doc-1/report.md";
+    const docsOnlyReport = docsSubmission(context, "docs-update-report");
+    await fs.writeText(path.join(context.taskRepoRoot, context.handoffDir, "docs-update-report.md"), docsOnlyReport.content);
     const artifacts = createArtifactService(fs, {
       workflowControlService: service,
-      isRoleMemoryTurn: async (root, role) => root === context.taskRepoRoot && role === "architect"
+      getDurableDocAssignment: async (root, role) => root === context.taskRepoRoot && role === "architect" ? {
+        id: "doc-1", runId: "run", sourceMemoryPath: "CLAUDE.md", sourceEntry: "Fact",
+        content: "Fact", reason: "Durable knowledge", evidence: ["src/app.ts"], targetPath: "docs/ARCHITECTURE.md",
+        owner: "architect", status: "running", reportPath, createdAt: "2026-09-09", updatedAt: "2026-09-09"
+      } : undefined
     });
-    await expect(artifacts.submitArtifact(docsSubmission(context, "docs-update-report")))
+    await expect(artifacts.submitArtifact({
+      ...docsSubmission(context, "docs-update-report", "doc-1"), artifactPath: reportPath
+    }))
       .resolves.toMatchObject({ status: "ok" });
+    expect(await fs.readText(path.join(context.taskRepoRoot, context.handoffDir, "docs-update-report.md")))
+      .toBe(docsOnlyReport.content);
     expect(await service.getProgress(context)).toEqual(before);
     await expect(completeFlow(service, fs, context)).rejects.toMatchObject({
       code: "WORKFLOW_COMPLETION_INVALID",
@@ -1692,9 +1703,9 @@ describe("workflow control service", () => {
   });
 });
 
-function docsSubmission(context: WorkflowControlContext, kind: "docs-update-report" | "docs-sync-report") {
+function docsSubmission(context: WorkflowControlContext, kind: "docs-update-report" | "docs-sync-report", assignmentId = "docs-only") {
   const template = kind === "docs-update-report"
-    ? renderDocsUpdateReportTemplate(context.taskSlug)
+    ? renderDocsUpdateReportTemplate(context.taskSlug, assignmentId)
     : renderDocsSyncReportTemplate(context.taskSlug);
   return {
     repoRoot: context.taskRepoRoot,

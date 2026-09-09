@@ -452,8 +452,21 @@ memory work delays retrospective analysis; `reviewing` means proposals are
 ready and the retrospective may start; `documenting` means reviewed memory is
 already committed while durable-document assignments remain. The retrospective
 reviews the proposals, current memory snapshot, task evidence, and pending
-Harness Feedback in one turn, but its completion and pending-feedback cleanup
-wait until every assignment completes. A missing retrospective report or review
+Harness Feedback in one turn. Document assignments execute sequentially and
+skip terminal failures, allowing later items to finish. Once no executable item
+remains, failed assignments produce a terminal failure summary rather than an
+indefinite `documenting` state. Retrospective reports that failure and completes
+after the assignments are successfully retried. Accepted feedback dispositions
+are consumed independently of later document completion.
+
+Each assignment owns a report under its memory-review run and retains its
+original commit baseline across retries and recovery. Artifact submission binds
+the report path and Assignment ID to the currently assigned owner; Docs-Only
+reports remain separate. Completion validates the reported commit in the
+original baseline-to-HEAD range and its target-file change, not equality with
+HEAD. Assignment mutation and dispatch are serialized per task. Reviewed memory
+remains applied; failed migration content and snapshots stay in the run, even
+when Auto Memory is switched off. A missing retrospective report or review
 result, incomplete decision coverage, assignment mismatch, uncommitted memory
 edit, out-of-scope commit, or edit outside a memory block prevents completion.
 Backend validation does not judge whether a memory decision is genuinely useful.

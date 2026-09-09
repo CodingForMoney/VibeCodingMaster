@@ -34,6 +34,7 @@ import type { AppSettingsService } from "./app-settings-service.js";
 import {
   ARCHITECT_PLANNING_MEMORY_CANDIDATE_PATH,
   architectPlanningCandidateSnapshotPath,
+  durableDocAssignmentReportPath,
   memoryReviewRoleDraftPath,
   MEMORY_REVIEW_RUNS_ROOT,
   MEMORY_REVIEW_STATE_PATH
@@ -190,6 +191,7 @@ export interface AutoMemoryService {
   ): Promise<TaskRetrospectiveMemoryReviewContext | undefined>;
   cancelTaskRetrospectiveReview(taskRepoRoot: string, runId: string): Promise<void>;
   isRoleMemoryTurn(taskRepoRoot: string, role: RoleName): Promise<boolean>;
+  getDurableDocAssignment(taskRepoRoot: string, role: RoleName): Promise<DurableDocAssignmentState | undefined>;
   handleRoleHook(input: AutoMemoryRoleHookInput): Promise<boolean>;
   handleHarnessEngineerHook(input: AutoMemoryHarnessHookInput): Promise<boolean>;
   assertHarnessEngineerAvailable(taskRepoRoot: string): Promise<void>;
@@ -223,7 +225,7 @@ export interface AutoMemoryHarnessHookInput {
 
 export interface AutoMemoryServiceDeps {
   fs: FileSystemAdapter;
-  git: Pick<GitAdapter, "commitPaths" | "getDiff" | "getHeadCommit" | "getChangedPaths">;
+  git: Pick<GitAdapter, "commitPaths" | "getDiff" | "getHeadCommit" | "getChangedPaths" | "getCommitList">;
   runtime: Pick<TerminalRuntime, "getSession" | "write">;
   sessionService: Pick<
     SessionService,
@@ -238,6 +240,20 @@ export interface AutoMemoryServiceDeps {
 
 export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemoryService {
   const now = deps.now ?? (() => new Date().toISOString());
+  const taskLocks = new Map<string, Promise<unknown>>();
+
+  async function withTaskLock<T>(taskRepoRoot: string, operation: () => Promise<T>): Promise<T> {
+    const previous = taskLocks.get(taskRepoRoot) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(operation);
+    taskLocks.set(taskRepoRoot, current);
+    try {
+      return await current;
+    } finally {
+      if (taskLocks.get(taskRepoRoot) === current) {
+        taskLocks.delete(taskRepoRoot);
+      }
+    }
+  }
 
   async function readMemorySet(repoRoot: string): Promise<MemorySet> {
     const memory: MemorySet = {};
@@ -402,7 +418,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
         await dispatchCurrentDurableDocAssignment(input.baseRepoRoot, input.taskRepoRoot, active);
       } else if (active?.status === "reviewing" && active.reviewPromptDispatchedAt) {
         return getState(input.baseRepoRoot, input.taskRepoRoot);
-      } else if (active) {
+      } else if (active && !preserveDisabledReview(active)) {
         await discardActiveReview(input.taskRepoRoot, active);
       }
       return getState(input.baseRepoRoot, input.taskRepoRoot);
@@ -627,6 +643,12 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     return assignment.status === "running" && assignment.owner === role;
   }
 
+  async function getDurableDocAssignment(taskRepoRoot: string, role: RoleName): Promise<DurableDocAssignmentState | undefined> {
+    const state = await loadActiveState(taskRepoRoot);
+    const assignment = state?.status === "documenting" ? currentDurableDocAssignment(state) : undefined;
+    return assignment?.status === "running" && assignment.owner === role ? assignment : undefined;
+  }
+
   async function handleRoleHook(input: AutoMemoryRoleHookInput): Promise<boolean> {
     const state = await loadActiveState(input.taskRepoRoot);
     if (!(await deps.appSettings.getPreferences()).autoMemoryEnabled && !preserveDisabledReview(state)) {
@@ -815,6 +837,13 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
         statusCode: 409
       });
     }
+    if (state.assignments.length > 0) {
+      throw new VcmError({
+        code: "DURABLE_DOC_ASSIGNMENTS_FAILED",
+        message: "Memory was already applied. Retry the failed durable-document assignments individually.",
+        statusCode: 409
+      });
+    }
     await clearActiveState(taskRepoRoot);
     return getState(baseRepoRoot, taskRepoRoot);
   }
@@ -825,7 +854,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     assignmentId: string
   ): Promise<AutoMemoryStateReport> {
     const state = await loadActiveState(taskRepoRoot);
-    const assignment = state?.status === "documenting"
+    const assignment = state && (state.status === "documenting" || state.status === "failed")
       ? state.assignments.find((candidate) => candidate.id === assignmentId)
       : undefined;
     if (!state || !assignment || assignment.status !== "failed") {
@@ -837,11 +866,10 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     }
     assignment.status = assignment.owner ? "pending" : "waiting-owner";
     assignment.updatedAt = now();
-    delete assignment.error;
     delete assignment.requestedOwner;
     delete assignment.dispatchedAt;
-    delete assignment.baseCommit;
-    delete assignment.reportHashBefore;
+    state.status = "documenting";
+    delete state.error;
     await persistMemoryAssignmentState(taskRepoRoot, state);
     await dispatchCurrentDurableDocAssignment(baseRepoRoot, taskRepoRoot, state);
     return getState(baseRepoRoot, taskRepoRoot);
@@ -930,6 +958,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       assignment.error = `${input.role} durable-document assignment turn failed.`;
       assignment.updatedAt = now();
       await persistMemoryAssignmentState(input.taskRepoRoot, state);
+      await dispatchCurrentDurableDocAssignment(input.baseRepoRoot, input.taskRepoRoot, state);
       return true;
     }
     if (input.eventName !== "Stop") {
@@ -956,18 +985,13 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       assignment.updatedAt = assignment.completedAt;
       delete assignment.error;
       await persistMemoryAssignmentState(input.taskRepoRoot, state);
-      const next = currentDurableDocAssignment(state);
-      if (next) {
-        await dispatchCurrentDurableDocAssignment(input.baseRepoRoot, input.taskRepoRoot, state);
-      } else {
-        await clearActiveState(input.taskRepoRoot);
-      }
     } catch (error) {
       assignment.status = "failed";
       assignment.error = `Durable-document assignment could not be completed: ${errorMessage(error)}`;
       assignment.updatedAt = now();
       await persistMemoryAssignmentState(input.taskRepoRoot, state);
     }
+    await dispatchCurrentDurableDocAssignment(input.baseRepoRoot, input.taskRepoRoot, state);
     return true;
   }
 
@@ -976,8 +1000,9 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     taskRepoRoot: string,
     state: StoredMemoryReviewState
   ): Promise<void> {
-    const assignment = currentDurableDocAssignment(state);
-    if (!assignment || assignment.status === "failed") {
+    let assignment = currentDurableDocAssignment(state);
+    if (!assignment) {
+      await finishDurableDocAssignments(taskRepoRoot, state);
       return;
     }
 
@@ -995,31 +1020,53 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       await persistMemoryAssignmentState(taskRepoRoot, state);
     }
 
-    const role = assignment.owner ?? "project-manager";
-    try {
-      const session = await ensureWorkflowRoleSession(baseRepoRoot, state.taskSlug, role);
-      if (session.activityStatus === "running") {
+    while (assignment) {
+      try {
+        await dispatchDurableDocAssignment(baseRepoRoot, taskRepoRoot, state, assignment);
         return;
+      } catch (error) {
+        assignment.status = "failed";
+        assignment.error = `Unable to dispatch durable-document assignment: ${errorMessage(error)}`;
+        assignment.updatedAt = now();
+        await persistMemoryAssignmentState(taskRepoRoot, state);
+        assignment = currentDurableDocAssignment(state);
       }
-      assignment.status = assignment.owner ? "running" : "resolving-owner";
+    }
+    await finishDurableDocAssignments(taskRepoRoot, state);
+  }
+
+  async function dispatchDurableDocAssignment(
+    baseRepoRoot: string, taskRepoRoot: string, state: StoredMemoryReviewState, assignment: DurableDocAssignmentState
+  ): Promise<void> {
+    const session = await ensureWorkflowRoleSession(baseRepoRoot, state.taskSlug, assignment.owner ?? "project-manager");
+    if (session.activityStatus === "running") {
+      return;
+    }
+    assignment.status = assignment.owner ? "running" : "resolving-owner";
+    assignment.reportPath = durableDocAssignmentReportPath(assignment.runId, assignment.id);
+    if (!assignment.baseCommit) {
       assignment.baseCommit = await deps.git.getHeadCommit(taskRepoRoot);
       assignment.reportHashBefore = await hashOptionalFile(taskRepoRoot, assignment.reportPath);
-      assignment.dispatchedAt = now();
-      assignment.updatedAt = assignment.dispatchedAt;
-      await persistMemoryAssignmentState(taskRepoRoot, state);
-      await submitTerminalInput(
-        deps.runtime,
-        session.id,
-        assignment.owner
-          ? buildDurableDocAssignmentPrompt(taskRepoRoot, assignment)
-          : buildDurableDocOwnerPrompt(taskRepoRoot, assignment)
-      );
-    } catch (error) {
-      assignment.status = "failed";
-      assignment.error = `Unable to dispatch durable-document assignment: ${errorMessage(error)}`;
-      assignment.updatedAt = now();
-      await persistMemoryAssignmentState(taskRepoRoot, state);
     }
+    assignment.dispatchedAt = now();
+    assignment.updatedAt = assignment.dispatchedAt;
+    await persistMemoryAssignmentState(taskRepoRoot, state);
+    await submitTerminalInput(deps.runtime, session.id, assignment.owner
+      ? buildDurableDocAssignmentPrompt(taskRepoRoot, assignment)
+      : buildDurableDocOwnerPrompt(taskRepoRoot, assignment));
+  }
+
+  async function finishDurableDocAssignments(taskRepoRoot: string, state: StoredMemoryReviewState): Promise<void> {
+    const failed = state.assignments.filter((assignment) => assignment.status === "failed");
+    if (failed.length > 0) {
+      state.status = "failed";
+      state.error = `Memory was applied, but ${failed.length} durable-document assignment(s) failed: ${failed.map((assignment) => assignment.targetPath).join(", ")}. Retry the failed assignments; their content is retained in the memory review run.`;
+      await persistMemoryAssignmentState(taskRepoRoot, state);
+      return;
+    }
+    delete state.error;
+    await persistMemoryAssignmentState(taskRepoRoot, state);
+    await clearActiveState(taskRepoRoot);
   }
 
   async function validateDurableDocAssignmentCompletion(
@@ -1051,21 +1098,38 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     if (decision !== "synced" && decision !== "unchanged") {
       throw new Error("Decision must be synced or unchanged");
     }
+    if (!(await deps.fs.pathExists(resolveRepoPath(taskRepoRoot, assignment.targetPath)))) {
+      throw new Error(`target document is missing: ${assignment.targetPath}`);
+    }
     const currentHead = await deps.git.getHeadCommit(taskRepoRoot);
     if (decision === "synced") {
-      if (!assignment.baseCommit || currentHead === assignment.baseCommit) {
-        throw new Error("documentation changes were not committed");
-      }
-      const changedPaths = await deps.git.getChangedPaths(taskRepoRoot, assignment.baseCommit, currentHead);
-      if (!changedPaths.includes(assignment.targetPath)) {
-        throw new Error(`documentation commit does not include ${assignment.targetPath}`);
-      }
-      const reportedCommit = readArtifactSectionValue(reportContent, "Commit")?.trim();
-      if (!reportedCommit || reportedCommit === "TBD" || !currentHead.startsWith(reportedCommit)) {
-        throw new Error(`Commit must identify the current documentation commit ${currentHead}`);
-      }
+      return validateDurableDocCommit(taskRepoRoot, assignment, reportContent, currentHead);
     }
     return currentHead;
+  }
+
+  async function validateDurableDocCommit(
+    taskRepoRoot: string, assignment: DurableDocAssignmentState, reportContent: string, currentHead: string
+  ): Promise<string> {
+    if (!assignment.baseCommit || currentHead === assignment.baseCommit) {
+      throw new Error("documentation changes were not committed");
+    }
+    const changedPaths = await deps.git.getChangedPaths(taskRepoRoot, assignment.baseCommit, currentHead);
+    if (!changedPaths.includes(assignment.targetPath)) {
+      throw new Error(`documentation commit does not include ${assignment.targetPath}`);
+    }
+    const reportedCommit = readArtifactSectionValue(reportContent, "Commit")?.trim();
+    const commits = await deps.git.getCommitList(taskRepoRoot, `${assignment.baseCommit}..${currentHead}`);
+    const matches = reportedCommit ? commits.filter((commit) => commit.sha.startsWith(reportedCommit)) : [];
+    if (matches.length !== 1) {
+      throw new Error(`Commit must uniquely identify a documentation commit in ${assignment.baseCommit}..${currentHead}; received ${reportedCommit || "empty"}`);
+    }
+    const commit = matches[0].sha;
+    const commitPaths = await deps.git.getChangedPaths(taskRepoRoot, `${commit}^`, commit);
+    if (!commitPaths.includes(assignment.targetPath)) {
+      throw new Error(`reported commit ${commit} does not modify ${assignment.targetPath}`);
+    }
+    return commit;
   }
 
   async function hashOptionalFile(taskRepoRoot: string, relativePath: string): Promise<string | undefined> {
@@ -1085,6 +1149,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     await persistRun(taskRepoRoot, {
       ...run,
       assignments: state.assignments,
+      error: state.error,
       updatedAt: state.updatedAt
     });
   }
@@ -1262,7 +1327,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
         evidence: assignment.evidence,
         ...(owner ? { owner } : {}),
         status: owner ? "pending" : "waiting-owner",
-        reportPath: ".ai/vcm/handoffs/docs-update-report.md",
+        reportPath: durableDocAssignmentReportPath(state.runId, `${state.runId}-doc-${index + 1}`),
         createdAt: timestamp,
         updatedAt: timestamp
       } satisfies DurableDocAssignmentState;
@@ -1757,20 +1822,21 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
   }
 
   return {
-    reconcileTask,
+    reconcileTask: (input) => withTaskLock(input.taskRepoRoot, () => reconcileTask(input)),
     getState,
     getTaskRetrospectiveReadiness,
     getFile,
     updateFile,
     revertRun,
     retryFailedReview,
-    retryDurableDocAssignment,
-    resolveDurableDocAssignmentOwner,
+    retryDurableDocAssignment: (base, task, id) => withTaskLock(task, () => retryDurableDocAssignment(base, task, id)),
+    resolveDurableDocAssignmentOwner: (base, task, id, owner) => withTaskLock(task, () => resolveDurableDocAssignmentOwner(base, task, id, owner)),
     prepareTaskRetrospectiveReview,
     cancelTaskRetrospectiveReview,
     isRoleMemoryTurn,
-    handleRoleHook,
-    handleHarnessEngineerHook,
+    getDurableDocAssignment,
+    handleRoleHook: (input) => withTaskLock(input.taskRepoRoot, () => handleRoleHook(input)),
+    handleHarnessEngineerHook: (input) => withTaskLock(input.taskRepoRoot, () => handleHarnessEngineerHook(input)),
     assertHarnessEngineerAvailable
   };
 }
@@ -1796,12 +1862,13 @@ function currentDraft(state: StoredMemoryReviewState): MemoryDraftState | undefi
 }
 
 function preserveDisabledReview(state: StoredMemoryReviewState | undefined): boolean {
-  return state?.status === "documenting"
+  return Boolean(state?.assignments.length)
     || (state?.status === "reviewing" && Boolean(state.reviewPromptDispatchedAt));
 }
 
 function currentDurableDocAssignment(state: StoredMemoryReviewState): DurableDocAssignmentState | undefined {
-  return state.assignments.find((assignment) => assignment.status !== "completed");
+  return state.assignments.find((assignment) => assignment.status === "running" || assignment.status === "resolving-owner")
+    ?? state.assignments.find((assignment) => assignment.status === "pending" || assignment.status === "waiting-owner");
 }
 
 function toReviewCandidates(
@@ -1902,7 +1969,11 @@ function buildDurableDocAssignmentPrompt(
     ...assignment.evidence.map((item) => `- ${item}`),
     "",
     "Verify the content, update the target and any directly related durable documentation, run applicable documentation checks, and commit the documentation changes.",
-    "Submit .ai/vcm/handoffs/docs-update-report.md through vcm-artifact. Set its Assignment ID to the exact ID above and record the final commit.",
+    `Assigned report path: ${assignment.reportPath}`,
+    `Submit with .ai/tools/vcm-artifact docs-update-report --file <candidate> --path ${assignment.reportPath} --mode final`,
+    "Set Assignment ID to the exact ID above.",
+    "For synced, record the commit that changed the target document; it need not be HEAD. If the document already preserves the content, use unchanged with evidence; do not create a redundant commit.",
+    ...(assignment.error ? [`Previous failure: ${assignment.error}`] : []),
     "End the turn after VCM accepts the report."
   ].join("\n");
 }

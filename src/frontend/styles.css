@@ -2762,6 +2762,24 @@ h2 {
   font-size: 12px;
 }
 
+.harness-studio-file-list .harness-memory-assignment {
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+}
+
+.harness-memory-assignment-detail {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.harness-memory-assignment-detail span:first-child {
+  white-space: normal;
+}
+
+.harness-memory-assignment-detail .warnings {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+}
+
 .harness-studio-file-list .harness-memory-action-button,
 .harness-memory-action-button {
   border: 1px solid #3d444d;

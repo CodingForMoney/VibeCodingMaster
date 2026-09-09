@@ -889,10 +889,14 @@ backend-owned sequence of durable-document assignments. Architect owns
 architecture and known-issues documents; Tester owns testing documentation; PM
 chooses Architect, Coder, or Tester for an unknown path and asks the user only
 when ownership remains uncertain. Each role commits the documentation and
-submits the exact Assignment ID in `docs-update-report.md`. This work is not a
-Docs-Only Flow. The retrospective remains open until every assignment succeeds;
-failed assignments remain available for retry and are resumed after backend
-restart.
+submits `docs-update-report` with the assigned `--path` and Assignment ID.
+Each assignment has its own report in the memory-review run, separate from
+Docs-Only Flow. The documentation commit need not be HEAD, and retries retain
+the original baseline. Failed assignments do not block later items; the
+retrospective reports any remaining failures after the queue drains and can
+complete after retry. Migration content remains in the task-local run without
+being automatically put back into memory. Already-applied migrations survive
+backend restart and disabling Auto Memory.
 
 ## 16. Final Acceptance
 

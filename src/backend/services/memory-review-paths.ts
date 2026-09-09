@@ -14,6 +14,10 @@ export function memoryReviewRoleDraftPath(runId: string, role: VcmRoleName): str
   return `${MEMORY_REVIEW_RUNS_ROOT}/${runId}/drafts/${role}.md`;
 }
 
+export function durableDocAssignmentReportPath(runId: string, assignmentId: string): string {
+  return `${MEMORY_REVIEW_RUNS_ROOT}/${runId}/assignments/${assignmentId}/report.md`;
+}
+
 export function isMemoryProposalSubmissionPath(artifactPath: string, role: VcmRoleName): boolean {
   if (artifactPath === ARCHITECT_PLANNING_MEMORY_CANDIDATE_PATH) {
     return role === "architect";

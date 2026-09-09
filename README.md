@@ -589,10 +589,20 @@ before documentation work starts. VCM assigns architecture and known-issues
 documents to Architect and testing documentation to Tester. For another target,
 PM selects Architect, Coder, or Tester and asks the user only when ownership
 cannot be determined. These assignments are backend-dispatched work rather than
-a Docs-Only Flow. Each owner updates and commits the document, submits the exact
-assignment ID in `docs-update-report.md`, and finishes before the next assignment
-starts. Harness Studio shows assignment status and allows failed work to be
-retried.
+a Docs-Only Flow. Each owner submits `docs-update-report` through `vcm-artifact`
+with the exact assigned `--path` and Assignment ID. Reports are isolated under
+`.ai/vcm/memory-review/runs/<run-id>/assignments/<assignment-id>/report.md`.
+The reported commit must modify the target document within the assignment's
+original commit range; unrelated later commits do not invalidate it. Existing
+correct documentation can be reported as `unchanged` without a new commit.
+
+Assignments run one at a time. A failed assignment does not block later items.
+After the remaining items finish, unresolved failures are reported in Harness
+Studio with their causes and individual Retry buttons. Retry preserves earlier
+committed work and the original baseline, including after a backend restart.
+Migration content and review snapshots remain in the task-local run directory;
+failures do not automatically restore removed memory. Turning Auto Memory off
+does not discard or cancel already-applied document migrations.
 
 When Auto Memory is disabled, Review Task Harness does not collect proposals or
 ask Harness Engineer to update memory. When enabled, both automatic and manual

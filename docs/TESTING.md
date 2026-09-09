@@ -275,7 +275,13 @@ services with controlled runtime doubles:
   excluded. It covers strict review-result decisions, immediate memory removal,
   fixed and PM-resolved durable-document ownership, sequential role delivery,
   exact Assignment ID and commit validation, retry, and delayed Retrospective
-  completion. Unit coverage verifies strict proposal fields, direct memory-block
+  completion. Multi-document cases cover a first-item failure followed by a
+  successful later item, failure visibility, backend restart, Auto Memory
+  disabled during migration, and retry against an earlier documentation commit
+  without producing a new commit. Unit cases cover report path/owner isolation,
+  wrong or ambiguous commit references, unrelated HEAD advancement, preserved
+  migration content, dispatch failure, and retry while another item is running.
+  Unit coverage verifies strict proposal fields, direct memory-block
   ownership, committed-result recording, and rejection of uncommitted or
   out-of-scope memory edits. Architect restart coverage verifies
   that Auto Memory assigns and preserves a planning-session candidate through

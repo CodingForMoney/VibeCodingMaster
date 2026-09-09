@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import { createArtifactService } from "../../../src/backend/services/artifact-service.js";
-import { renderArchitectDebugTemplate } from "../../../src/backend/templates/handoff.js";
+import { renderArchitectDebugTemplate, renderDocsUpdateReportTemplate } from "../../../src/backend/templates/handoff.js";
+import type { DurableDocAssignmentState } from "../../../src/shared/types/memory.js";
 import {
   GATE_ANALYSIS_FIELDS,
   parseGateReviewReportArtifact
@@ -9,6 +10,7 @@ import {
 import {
   ARCHITECT_PLANNING_MEMORY_CANDIDATE_PATH,
   architectPlanningCandidateSnapshotPath,
+  durableDocAssignmentReportPath,
   memoryReviewRoleDraftPath
 } from "../../../src/backend/services/memory-review-paths.js";
 
@@ -298,6 +300,42 @@ describe("createArtifactService", () => {
       role: "reviewer",
       content
     })).rejects.toMatchObject({ code: "ARTIFACT_OWNER_MISMATCH" });
+  });
+
+  it("isolates memory assignment reports and binds submission to the assigned role, path and ID", async () => {
+    const fs = createMemoryFs();
+    const assignment: DurableDocAssignmentState = {
+      id: "run-doc-1", runId: "run", sourceMemoryPath: "CLAUDE.md", sourceEntry: "Fact",
+      content: "Fact", reason: "Durable fact", evidence: ["src/app.ts"], targetPath: "docs/ARCHITECTURE.md",
+      owner: "architect", status: "running", reportPath: durableDocAssignmentReportPath("run", "run-doc-1"),
+      createdAt: "2026-09-09", updatedAt: "2026-09-09"
+    };
+    let active = true;
+    const service = createArtifactService(fs, {
+      getDurableDocAssignment: async (_repo, role) => active && role === assignment.owner ? assignment : undefined
+    });
+    const content = renderDocsUpdateReportTemplate("demo-task", assignment.id)
+      .replaceAll("TBD", "Verified docs").replace("synced|unchanged|blocked", "synced");
+    const request = {
+      repoRoot: "/repo", baseRepoRoot: "/repo", handoffDir: ".ai/vcm/handoffs", taskSlug: "demo-task",
+      kind: "docs-update-report", mode: "final" as const, role: "architect" as const, content,
+      artifactPath: assignment.reportPath
+    };
+    await fs.writeText("/repo/.ai/vcm/handoffs/docs-update-report.md", "Unrelated Docs-Only report");
+    await expect(service.submitArtifact(request)).resolves.toMatchObject({ path: assignment.reportPath, status: "ok" });
+    expect(await fs.readText("/repo/.ai/vcm/handoffs/docs-update-report.md")).toBe("Unrelated Docs-Only report");
+    for (const changes of [
+      { artifactPath: undefined },
+      { artifactPath: durableDocAssignmentReportPath("run", "run-doc-2") },
+      { artifactPath: "../outside.md" },
+      { content: content.replace(assignment.id, "wrong-id") },
+      { role: "coder" as const }
+    ]) {
+      await expect(service.submitArtifact({ ...request, ...changes })).rejects.toMatchObject({ code: "ARTIFACT_VALIDATION_FAILED" });
+    }
+    expect(await fs.readText(`/repo/${assignment.reportPath}`)).toBe(content);
+    active = false;
+    await expect(service.submitArtifact(request)).rejects.toMatchObject({ code: "ARTIFACT_VALIDATION_FAILED" });
   });
 
   it("accepts incomplete coder evidence only as a draft", async () => {

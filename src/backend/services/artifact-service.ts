@@ -9,7 +9,8 @@ import type {
   HandoffPaths
 } from "../../shared/types/artifact.js";
 import type { DispatchableRole, RoleName, VcmRoleName } from "../../shared/types/role.js";
-import { checkMarkdownArtifact } from "../../shared/validation/artifact-check.js";
+import type { DurableDocAssignmentState } from "../../shared/types/memory.js";
+import { checkMarkdownArtifact, readArtifactSectionValue } from "../../shared/validation/artifact-check.js";
 import {
   getManagedArtifactDefinition,
   isArtifactKind,
@@ -100,7 +101,7 @@ export interface SubmitArtifactInput {
 
 export interface ArtifactServiceDeps {
   workflowControlService?: Pick<WorkflowControlService, "submitProgress" | "assertRouteAuthorized" | "assertDocsArtifactAllowed">;
-  isRoleMemoryTurn?: (taskRepoRoot: string, role: RoleName) => Promise<boolean>;
+  getDurableDocAssignment?: (taskRepoRoot: string, role: RoleName) => Promise<DurableDocAssignmentState | undefined>;
 }
 
 const ARTIFACT_PATH_KEYS: Array<[ArtifactKind, keyof HandoffPaths]> = [
@@ -319,10 +320,20 @@ export function createArtifactService(fs: FileSystemAdapter, deps: ArtifactServi
       }
 
       if (isArtifactKind(input.kind)) {
-        if (input.artifactPath?.trim()) {
+        const assignment = input.kind === "docs-update-report"
+          ? await deps.getDurableDocAssignment?.(input.repoRoot, input.role)
+          : undefined;
+        if (assignment) {
+          if (input.artifactPath !== assignment.reportPath) {
+            throw artifactRejected(input.kind, [`Use the assigned --path ${assignment.reportPath}.`]);
+          }
+          if (readArtifactSectionValue(normalized, "Assignment ID")?.trim() !== assignment.id) {
+            throw artifactRejected(input.kind, [`Assignment ID must be exactly ${assignment.id}.`]);
+          }
+        } else if (input.artifactPath?.trim()) {
           throw artifactRejected(input.kind, ["--path is not allowed for fixed artifact kinds."]);
         }
-        const artifactPath = path.posix.join(input.handoffDir, definition.fileName ?? "");
+        const artifactPath = assignment?.reportPath ?? path.posix.join(input.handoffDir, definition.fileName ?? "");
         const validation = validateManagedArtifactContent(input.kind, normalized, {
           path: artifactPath,
           mode: input.mode
@@ -333,9 +344,7 @@ export function createArtifactService(fs: FileSystemAdapter, deps: ArtifactServi
         if ((input.kind === "docs-update-report" || input.kind === "docs-sync-report")
           && deps.workflowControlService) {
           // Memory-owned documentation work is independent of PM's active dispatch.
-          const memoryUpdate = input.kind === "docs-update-report"
-            && await deps.isRoleMemoryTurn?.(input.repoRoot, input.role);
-          if (!memoryUpdate) {
+          if (!assignment) {
             await deps.workflowControlService.assertDocsArtifactAllowed({
               taskRepoRoot: input.repoRoot,
               stateRoot: input.stateRoot ?? ".ai/vcm",
