@@ -233,6 +233,8 @@ describe("createClaudeHookService", () => {
       behavior: "block",
       reason: expect.stringContaining("vcm-ask-user")
     });
+    expect(result.stopDecision?.reason).toContain('"Should I continue with option A?"');
+    expect(result.stopDecision?.reason).toContain("do not invent a user question or register a false wait");
     expect(calls).toEqual([]);
   });
 

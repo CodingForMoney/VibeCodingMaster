@@ -88,6 +88,13 @@ Notes:
   resubmission, transition-bound route authorization, interrupted paired-write
   replay, missing-state reconstruction, PM user-question waits, canceled
   approvals, direct-user unlock, and VCM-message non-unlock.
+- PM question-detection changes: run `pm-user-question.test.ts`,
+  `claude-hook-service.test.ts`, and `pm-user-question.e2e.test.ts`. Quoted
+  questions, code, URL parameters, evidence tables, and analytical headings must
+  not create false waits or prevent Stop, approval consumption, or route delivery.
+  Direct requests remain detectable in headings, lists, and tables, including
+  while a role or Gate is running and after a flow completes. Stop diagnostics
+  identify the matched text without requiring a fabricated question.
 - `src/frontend/**` change: L0 + the affected `tests/unit/frontend/**` files; add
   L3 (`npm run e2e`) when changing a core user journey (connect repo, create task,
   start/resume a role session, send a message, translation panel).
@@ -240,7 +247,10 @@ services with controlled runtime doubles:
 - PM-to-role routing, round completion, retryable failures, and manual
   interruption without retry.
 - PM question hard pause, pending-approval cancellation, direct-user reply
-  unlock, and refusal to dispatch a stale route after the answer.
+  unlock, and refusal to dispatch a stale route after the answer. False-positive
+  regressions cover normal Stop and routing, reports while Architect or a Gate
+  is running, and completed-flow summaries with a retained dispatch baseline;
+  genuine requests still block until registered, including repeated Stop hooks.
 - Session ID persistence, restart/close behavior, backend restart recovery, and
   resuming a recovered Claude session.
 - Restart With Context for all five workflow roles, explicit tool-Agent

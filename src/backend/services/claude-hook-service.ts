@@ -8,6 +8,7 @@ import type {
 import { isHarnessEngineerToolRoleName, isReviewerRoleName, isTranslatorToolRoleName, isVcmRoleName } from "../../shared/constants.js";
 import { VcmError } from "../errors.js";
 import { readTranscriptTurnEvidence } from "./claude-transcript-reply.js";
+import { findPmUserQuestion } from "./pm-user-question.js";
 import type { GatewayService } from "../gateway/gateway-service.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
@@ -458,7 +459,10 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
         pmAwaitingUser = true;
       } else {
         const lastAssistantMessage = stringOrUndefined(input.event.last_assistant_message);
-        if (options.allowBlock && lastAssistantMessage && asksUserQuestion(lastAssistantMessage)) {
+        const question = options.allowBlock && lastAssistantMessage
+          ? findPmUserQuestion(lastAssistantMessage)
+          : undefined;
+        if (question) {
           return {
             ok: true,
             eventName,
@@ -468,7 +472,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
             dispatchedCount: 0,
             stopDecision: {
               behavior: "block",
-              reason: "You asked the user a question without registering the wait. Use vcm-ask-user with the exact question, then ask that question and stop. Do not advance or route the workflow."
+              reason: `Possible unregistered user question: ${JSON.stringify(question.slice(0, 600))}. If you are asking the user, use vcm-ask-user with the exact question, then ask it and end the turn without advancing or routing the workflow. If this only reports or quotes another question, clarify that context and end normally; do not invent a user question or register a false wait.`
             }
           };
         }
@@ -1259,18 +1263,4 @@ function stringOrUndefined(value: unknown): string | undefined {
 function isDirectUserPrompt(prompt: string): boolean {
   const normalized = prompt.trim();
   return normalized.length > 0 && !/^\[VCM(?:\s|\])/i.test(normalized);
-}
-
-function asksUserQuestion(message: string): boolean {
-  const withoutCodeBlocks = message.replace(/```[\s\S]*?```/g, "");
-  const lines = withoutCodeBlocks
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  return lines.some((line) =>
-    /[?？]/.test(line)
-    || /^(?:please\s+(?:answer|choose|confirm|decide|provide|select|tell)|(?:can|could|do|does|is|are|should|will|would)\s+you\b)/i.test(line)
-    || /\b(?:please\s+(?:reply|respond|choose|confirm|decide|provide|select|tell|give)|i\s+need\s+your\s+(?:decision|choice|confirmation|answer)|let\s+me\s+know|your\s+(?:decision|choice|confirmation|answer)\s+is\s+required|waiting\s+for\s+your)\b/i.test(line)
-    || /(?:请(?:回答|回复|选择|确认|决定|提供|告知|给出|说明)|你(?:是否|能否|要不要|可否)|是否需要你|需要你(?:选择|确认|决定|提供|告知)|需要您的(?:选择|确认|决定|回复)|等待您的(?:选择|确认|决定|回复)|告诉我|告知我)/.test(line)
-  );
 }
