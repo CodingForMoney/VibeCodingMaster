@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -254,7 +254,7 @@ describe("harness generated-context tools", () => {
 describe("long-running validation tools", () => {
   async function startLongCheck(
     command: string[],
-    options: { timeout?: string; env?: NodeJS.ProcessEnv } = {}
+    options: { timeout?: string; env?: NodeJS.ProcessEnv; cwd?: string } = {}
   ) {
     const result = await execFileAsync(
       "python3",
@@ -265,7 +265,7 @@ describe("long-running validation tools", () => {
         "--",
         ...command
       ],
-      { cwd: tmpRepo, env: { ...process.env, ...options.env } }
+      { cwd: options.cwd ?? tmpRepo, env: { ...process.env, ...options.env } }
     );
     const jobId = result.stdout.match(/^job: (.+)$/m)?.[1];
     expect(jobId).toBeTruthy();
@@ -328,6 +328,145 @@ describe("long-running validation tools", () => {
     }
     throw new Error(`${filePath} was not removed`);
   }
+
+  it.each([
+    "missing PATH command", "missing absolute path", "missing relative path", "non-executable file", "directory"
+  ])("rejects %s before creating a job", async (scenario) => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-long-check-"));
+    await installHarnessTools(tmpRepo);
+    let executable = path.join(tmpRepo, "missing-check");
+    let reason = "executable does not exist";
+    if (scenario === "missing PATH command") {
+      executable = "vcm-missing-executable-issue-91";
+      reason = "not found or not executable on PATH";
+    } else if (scenario === "missing relative path") {
+      executable = "./missing-check";
+    } else if (scenario === "non-executable file") {
+      executable = path.join(tmpRepo, "check.sh");
+      await writeSource(executable, "#!/bin/sh\nexit 0");
+      await chmod(executable, 0o644);
+      reason = "file is not executable";
+    } else if (scenario === "directory") {
+      executable = path.join(tmpRepo, "checks");
+      await mkdir(executable);
+      reason = "not a regular file";
+    }
+    await expect(startLongCheck([executable])).rejects.toMatchObject({
+      code: 2,
+      stderr: expect.stringContaining(reason)
+    });
+    await expect(access(path.join(tmpRepo, ".ai/vcm/jobs"))).rejects.toBeTruthy();
+  });
+
+  it.each(["relative path", "relative PATH entry"])("resolves a %s from the worktree root, not the caller directory", async (lookup) => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm long check "));
+    await installHarnessTools(tmpRepo);
+    await mkdir(path.join(tmpRepo, "bin with spaces"));
+    await mkdir(path.join(tmpRepo, "nested"));
+    await symlink(process.execPath, path.join(tmpRepo, "bin with spaces/check-node"));
+    const jobId = await startLongCheck([
+      lookup === "relative path" ? "./bin with spaces/check-node" : "check-node",
+      "-e", "console.log(process.cwd()); console.log(process.argv[1])", "argument with spaces"
+    ], {
+      cwd: path.join(tmpRepo, "nested"),
+      env: { PATH: `bin with spaces${path.delimiter}${process.env.PATH}` }
+    });
+    expect((await watchLongCheck(jobId)).exitCode).toBe(0);
+    const jobRoot = path.join(tmpRepo, ".ai/vcm/jobs", jobId);
+    const command = JSON.parse(await readFile(path.join(jobRoot, "command.json"), "utf8"));
+    expect(command.command[0]).toBe(path.join(await realpath(tmpRepo), "bin with spaces/check-node"));
+    expect(await readFile(path.join(jobRoot, "stdout.log"), "utf8"))
+      .toBe(`${await realpath(tmpRepo)}\nargument with spaces\n`);
+  });
+
+  it.each(["missing interpreter", "invalid executable format"])("records %s as an immediate failed job with diagnostic output", async (scenario) => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-long-check-"));
+    await installHarnessTools(tmpRepo);
+    const executable = path.join(tmpRepo, "broken-check");
+    await writeSource(executable, scenario === "missing interpreter"
+      ? `#!${path.join(tmpRepo, "missing-interpreter")}\nexit 0`
+      : "not an executable program");
+    await chmod(executable, 0o755);
+    const jobId = await startLongCheck([executable], { timeout: "55m" });
+    const watched = await watchLongCheck(jobId, "3s");
+    expect(watched).toMatchObject({
+      exitCode: 1,
+      stdout: expect.stringContaining("status: failed")
+    });
+    expect(watched.stdout).toContain("Unable to start validation command");
+    expect(watched.stdout).toContain("broken-check");
+    expect(watched.stdout).toContain(`cwd=${await realpath(tmpRepo)}`);
+    expect(watched.stdout).toMatch(/\[Errno \d+\]/);
+    expect(await readJobStatus(jobId)).toMatchObject({
+      status: "failed", exitCode: null, processId: null, startedAt: null,
+      finishedAt: expect.any(String), workerPid: expect.any(Number)
+    });
+    expect(await readFile(path.join(tmpRepo, ".ai/vcm/jobs", jobId, "stderr.log"), "utf8"))
+      .toContain("Unable to start validation command");
+    const nextJob = await startLongCheck([process.execPath, "-e", "process.exit(0)"]);
+    expect((await watchLongCheck(nextJob)).exitCode).toBe(0);
+  }, 10_000);
+
+  it("records failure if the executable disappears after preflight", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-long-check-"));
+    await installHarnessTools(tmpRepo);
+    const executable = path.join(tmpRepo, "check-node");
+    await symlink(process.execPath, executable);
+    const submitted = await execFileAsync("python3", ["-c", [
+      "import pathlib, runpy, subprocess, sys",
+      "from unittest.mock import patch",
+      "tool = runpy.run_path(sys.argv[1])",
+      "popen = subprocess.Popen",
+      "def delete_then_spawn(*args, **kwargs):",
+      "    pathlib.Path(sys.argv[2]).unlink()",
+      "    return popen(*args, **kwargs)",
+      "with patch('subprocess.Popen', side_effect=delete_then_spawn):",
+      "    sys.exit(tool['start_job']([sys.argv[2]], 3300))"
+    ].join("\n"), path.join(tmpRepo, ".ai/tools/run-long-check"), executable], { cwd: tmpRepo });
+    const jobId = submitted.stdout.match(/^job: (.+)$/m)?.[1];
+    expect(jobId).toBeTruthy();
+    const watched = await watchLongCheck(jobId!, "3s");
+    expect(watched.exitCode).toBe(1);
+    expect(watched.stdout).toContain("Unable to start validation command");
+    expect(watched.stdout).toContain("check-node");
+    expect(await readJobStatus(jobId!)).toMatchObject({ status: "failed", exitCode: null, processId: null });
+  });
+
+  it("records worker-process launch failure and rejects submission without leaving a queued job", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-long-check-"));
+    await installHarnessTools(tmpRepo);
+    await expect(execFileAsync("python3", ["-c", [
+      "import errno, runpy, sys",
+      "from unittest.mock import patch",
+      "tool = runpy.run_path(sys.argv[1])",
+      "with patch('subprocess.Popen', side_effect=OSError(errno.EAGAIN, 'injected process limit')):",
+      "    sys.exit(tool['start_job']([sys.argv[2]], 3300))"
+    ].join("\n"), path.join(tmpRepo, ".ai/tools/run-long-check"), process.execPath], { cwd: tmpRepo }))
+      .rejects.toMatchObject({ code: 1, stderr: expect.stringContaining("Unable to start job worker") });
+    const jobs = await readdir(path.join(tmpRepo, ".ai/vcm/jobs"));
+    expect(jobs).toHaveLength(1);
+    expect(await readJobStatus(jobs[0])).toMatchObject({
+      status: "failed", exitCode: null, processId: null, workerPid: null,
+      startedAt: null, finishedAt: expect.any(String)
+    });
+    const watched = await watchLongCheck(jobs[0], "1s");
+    expect(watched.exitCode).toBe(1);
+    expect(watched.stdout).toContain("injected process limit");
+    const nextJob = await startLongCheck([process.execPath, "-e", "process.exit(0)"]);
+    expect((await watchLongCheck(nextJob)).exitCode).toBe(0);
+  }, 10_000);
+
+  it("keeps interpreter argument errors as command failures with real exit codes", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-long-check-"));
+    await installHarnessTools(tmpRepo);
+    const jobId = await startLongCheck(["python3", "missing-script.py"]);
+    const watched = await watchLongCheck(jobId);
+    expect(watched.exitCode).toBe(1);
+    expect(watched.stdout).toContain("missing-script.py");
+    expect(await readJobStatus(jobId)).toMatchObject({
+      status: "failed", exitCode: 2, processId: expect.any(Number), startedAt: expect.any(String)
+    });
+  });
 
   it("preserves direct validation command success and failure exit codes", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-long-check-"));

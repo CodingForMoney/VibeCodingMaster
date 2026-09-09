@@ -144,6 +144,15 @@ calls so their exit codes remain authoritative; inspect logs in a later call.
 When a watch window returns 125, its bounded handoff keeps the job supervised
 while the next watcher call is generated; call `watch-job` again immediately.
 
+Submission resolves the executable using the task worktree root and its PATH
+before creating a job. Missing or non-executable commands are rejected directly.
+Worker-launch and command-launch OS errors produce `failed` with `exitCode: null`
+and the command, execution directory, and OS error in `stderr.log`; `watch-job`
+returns 1 and shows that diagnostic. Commands that actually run retain their
+real exit codes. Harness-tool regression tests cover invalid executables,
+relative paths/PATH entries, launch races, worker-launch failures, and starting
+the next job after a failed launch, alongside timeout and lease handling.
+
 ## Release Gate (L4)
 
 Run this gate for any version release before `npm publish`. The release is
