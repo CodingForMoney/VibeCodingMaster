@@ -9,9 +9,32 @@ import {
   renderTestReportTemplate
 } from "../../../src/backend/templates/handoff.js";
 import { checkMarkdownArtifact } from "../../../src/shared/validation/artifact-check.js";
-import { ARCHITECT_DEBUG_DISPOSITIONS } from "../../../src/shared/validation/artifact-contract.js";
+import { ARCHITECT_DEBUG_DISPOSITIONS, DOCS_UPDATE_COMMIT_RULE } from "../../../src/shared/validation/artifact-contract.js";
 
 describe("checkMarkdownArtifact", () => {
+  it.each(["abc1234", "a".repeat(40), "0123456789abcdef"])("accepts a bare docs commit %s", (commit) => {
+    const content = docsCommitReport(commit);
+    expect(content).toContain(DOCS_UPDATE_COMMIT_RULE);
+    expect(checkMarkdownArtifact("docs-update-report", "report.md", content).status).toBe("ok");
+  });
+
+  it.each([
+    "`abc1234`", "`abc1234` - docs: updated", "abc1234 docs: updated", "- abc1234",
+    "[abc1234](https://example.com/commit)", "abc1234\nExplanation", "abc1234\ndef5678",
+    "abc123", "a".repeat(41), "ABC1234", "", "HEAD", "TBD"
+  ])("rejects malformed docs Commit at final validation: %j", (commit) => {
+    const content = docsCommitReport(commit);
+    const result = checkMarkdownArtifact("docs-update-report", "report.md", content);
+    expect(result.status).toBe("incomplete");
+    expect(result.invalidFields).toContain(`${DOCS_UPDATE_COMMIT_RULE} Received Commit: ${JSON.stringify(commit)}.`);
+    expect(checkMarkdownArtifact("docs-update-report", "report.md", content, { mode: "draft" }).status).toBe("ok");
+  });
+
+  it.each(["unchanged", "blocked"])("does not demand a commit for %s documentation", (decision) => {
+    const content = docsCommitReport("None.").replace("## Decision\n\nsynced", `## Decision\n\n${decision}`);
+    expect(checkMarkdownArtifact("docs-update-report", "report.md", content).status).toBe("ok");
+  });
+
   it("reports missing artifacts", () => {
     const result = checkMarkdownArtifact("architecture-plan", "architecture-plan.md", null);
     expect(result.status).toBe("missing");
@@ -794,6 +817,13 @@ looks-good
     );
   });
 });
+
+function docsCommitReport(commit: string): string {
+  return renderDocsUpdateReportTemplate("demo", "doc-1")
+    .replaceAll("TBD", "Verified evidence.")
+    .replace("## Commit\n\nVerified evidence.", `## Commit\n\n${commit}`)
+    .replace("synced|unchanged|blocked", "synced");
+}
 
 function completeTemplate(
   kind: "architecture-brief" | "architect-debug" | "architecture-plan" | "test-report" | "docs-update-report" | "docs-sync-report" | "final-acceptance",

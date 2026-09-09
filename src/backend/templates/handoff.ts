@@ -7,6 +7,7 @@ import {
   ARCHITECTURE_PLAN_RESULTS,
   CODER_COMPLETION_DECISIONS,
   DOCS_REPORT_DECISIONS,
+  DOCS_UPDATE_COMMIT_RULE,
   DOCS_SYNC_CORRECTION_OWNERS,
   FINAL_ACCEPTANCE_DECISIONS,
   L3_ACTIONS,
@@ -563,6 +564,8 @@ export function renderDocsUpdateReportTemplate(taskSlug: string, assignmentId = 
   return `# Docs Update Report: ${taskSlug}
 
 ${CURRENT_HANDOFF_NOTICE}
+
+${DOCS_UPDATE_COMMIT_RULE}
 
 ## Summary
 

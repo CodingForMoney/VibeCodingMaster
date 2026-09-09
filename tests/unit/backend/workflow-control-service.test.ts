@@ -2044,7 +2044,9 @@ async function writeFinalArtifact(
 ): Promise<void> {
   let content = replacements.reduce(
     (current, [from, to]) => current.replace(from, to),
-    template
+    fileName === "docs-update-report.md"
+      ? template.replace("## Commit\n\nTBD", "## Commit\n\nabc1234")
+      : template
   ).replaceAll("TBD", "Verified task evidence.");
   if (fileName === "docs-sync-report.md") {
     content = content.replace("none|architect|coder|tester", "none");

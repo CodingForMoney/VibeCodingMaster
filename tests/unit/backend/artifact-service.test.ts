@@ -269,7 +269,7 @@ describe("createArtifactService", () => {
       "## Checks Performed",
       "Documentation audit passed.",
       "## Commit",
-      "abc123",
+      "abc1234",
       "## Remaining Documentation Issues",
       "None.",
       "## Decision",
@@ -315,6 +315,7 @@ describe("createArtifactService", () => {
       getDurableDocAssignment: async (_repo, role) => active && role === assignment.owner ? assignment : undefined
     });
     const content = renderDocsUpdateReportTemplate("demo-task", assignment.id)
+      .replace("## Commit\n\nTBD", "## Commit\n\nabc1234")
       .replaceAll("TBD", "Verified docs").replace("synced|unchanged|blocked", "synced");
     const request = {
       repoRoot: "/repo", baseRepoRoot: "/repo", handoffDir: ".ai/vcm/handoffs", taskSlug: "demo-task",
@@ -334,6 +335,15 @@ describe("createArtifactService", () => {
       await expect(service.submitArtifact({ ...request, ...changes })).rejects.toMatchObject({ code: "ARTIFACT_VALIDATION_FAILED" });
     }
     expect(await fs.readText(`/repo/${assignment.reportPath}`)).toBe(content);
+    for (const commit of ["`abc1234`", "abc1234 docs: updated", "abc1234\nExplanation", "abc1234\ndef5678"]) {
+      await expect(service.submitArtifact({ ...request,
+        content: content.replace("## Commit\n\nabc1234", `## Commit\n\n${commit}`)
+      })).rejects.toMatchObject({
+        code: "ARTIFACT_VALIDATION_FAILED", message: expect.stringContaining(`Received Commit: ${JSON.stringify(commit)}`)
+      });
+      expect(await fs.readText(`/repo/${assignment.reportPath}`)).toBe(content);
+    }
+    await expect(service.submitArtifact(request)).resolves.toMatchObject({ status: "ok" });
     active = false;
     await expect(service.submitArtifact(request)).rejects.toMatchObject({ code: "ARTIFACT_VALIDATION_FAILED" });
   });

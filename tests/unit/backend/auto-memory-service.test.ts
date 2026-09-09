@@ -336,11 +336,11 @@ describe("auto-memory-service", () => {
       replaceVcmMemoryBlock(await readFile(sharedPath, "utf8"), "No accumulated project memory yet.\n"),
       "utf8"
     );
-    context.recordHarnessCommit(["CLAUDE.md"], "memory-move-commit");
+    context.recordHarnessCommit(["CLAUDE.md"], "fade000");
     await writeFile(review.reviewResultPath, `${JSON.stringify({
       version: 1,
       runId: review.runId,
-      memoryCommit: "memory-move-commit",
+      memoryCommit: "fade000",
       decisions: [
         {
           ...existingDecision("shared", sourceEntry, "move-to-durable-doc", "none"),
@@ -398,13 +398,13 @@ describe("auto-memory-service", () => {
       "# Architecture\n\nLifecycle ownership is backend-owned.\n",
       "utf8"
     );
-    context.recordHarnessCommit(["docs/ARCHITECTURE.md"], "docs-commit");
+    context.recordHarnessCommit(["docs/ARCHITECTURE.md"], "d0c0001");
     const assignmentId = state.active!.assignments[0].id;
     await mkdir(path.dirname(path.join(context.taskRepoRoot, state.active!.assignments[0].reportPath)), { recursive: true });
     await writeFile(
       path.join(context.taskRepoRoot, state.active!.assignments[0].reportPath),
       renderDocsUpdateReportTemplate("demo", assignmentId)
-        .replaceAll("TBD", "docs-commit")
+        .replaceAll("TBD", "d0c0001")
         .replace("synced|unchanged|blocked", "synced"),
       "utf8"
     );
@@ -422,7 +422,7 @@ describe("auto-memory-service", () => {
     expect(state.runs[0].assignments[0]).toMatchObject({
       id: assignmentId,
       status: "completed",
-      commit: "docs-commit"
+      commit: "d0c0001"
     });
   });
 
@@ -509,7 +509,7 @@ describe("auto-memory-service", () => {
     let state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
     expect(state.status).toBe("documenting");
     expect(state.active!.assignments.map((item) => item.status)).toEqual(["failed", "running"]);
-    await writeDocResult(context, assignments[1], "testing-commit");
+    await writeDocResult(context, assignments[1], "7e57000");
     await context.service.handleRoleHook(docHook(context, "tester"));
     state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
     expect(state.status).toBe("failed");
@@ -537,7 +537,7 @@ describe("auto-memory-service", () => {
     context.setRoleBusy("tester", true);
     await context.service.retryDurableDocAssignment(context.baseRepoRoot, context.taskRepoRoot, assignments[0].id);
     context.setRoleBusy("tester", false);
-    await writeDocResult(context, assignments[1], "testing-commit");
+    await writeDocResult(context, assignments[1], "7e57000");
     await context.service.handleRoleHook(docHook(context, "tester"));
     const state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
     expect(state.status).toBe("failed");
@@ -548,32 +548,94 @@ describe("auto-memory-service", () => {
   it("accepts the actual documentation commit after HEAD advances", async () => {
     const context = await createContext(true);
     const [assignment] = await prepareDocAssignments(context, ["docs/ARCHITECTURE.md"]);
-    await writeDocResult(context, assignment, "docs-commit-123");
+    await writeDocResult(context, assignment, "d0c0123");
     context.recordHarnessCommit(["src/unrelated.ts"], "unrelated-commit");
     await context.service.handleRoleHook(docHook(context, "architect"));
     const state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
     expect(state.status).toBe("idle");
-    expect(state.runs[0].assignments[0].commit).toBe("docs-commit-123");
+    expect(state.runs[0].assignments[0].commit).toBe("d0c0123");
   });
 
   it.each(["missing", "wrong-file", "ambiguous", "before-baseline"])("rejects a %s commit without losing the assignment", async (failure) => {
     const context = await createContext(true);
     const [assignment] = await prepareDocAssignments(context, ["docs/ARCHITECTURE.md"]);
-    await writeDocResult(context, assignment, "doc-123");
-    context.recordHarnessCommit(["src/unrelated.ts"], "doc-456");
-    const reported = { missing: "unknown", "wrong-file": "doc-456", ambiguous: "doc-", "before-baseline": "memory-move-commit" }[failure];
+    await writeDocResult(context, assignment, "d0c00001");
+    context.recordHarnessCommit(["src/unrelated.ts"], "d0c00002");
+    const reported = { missing: "bad0000", "wrong-file": "d0c00002", ambiguous: "d0c0000", "before-baseline": "fade000" }[failure];
     await writeAssignmentReport(context, assignment, reported!);
     await context.service.handleRoleHook(docHook(context, "architect"));
     const state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
     expect(state.status).toBe("failed");
-    expect(state.active!.assignments[0].error).toContain(failure === "wrong-file" ? "does not modify" : "must uniquely identify");
+    const reason = failure === "wrong-file" ? "does not modify"
+      : failure === "before-baseline" ? "exists but is outside assignment range" : "could not be resolved to a unique Git commit";
+    expect(state.active!.assignments[0].error).toContain(reason);
+    expect(state.active!.assignments[0].error).toContain(reported);
+  });
+
+  it.each(["`abc1234`", "abc1234 docs: updated", "abc1234\nExplanation"])("rejects Commit format %j consistently at Stop", async (commit) => {
+    const context = await createContext(true);
+    const [assignment] = await prepareDocAssignments(context, ["docs/ARCHITECTURE.md"]);
+    await writeDocResult(context, assignment, "abc1234");
+    await writeAssignmentReport(context, assignment, commit);
+    await context.service.handleRoleHook(docHook(context, "architect"));
+    const state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.status).toBe("failed");
+    expect(state.active!.assignments[0].error).toContain(`Received Commit: ${JSON.stringify(commit)}`);
+    await context.service.retryDurableDocAssignment(context.baseRepoRoot, context.taskRepoRoot, assignment.id);
+    await writeAssignmentReport(context, assignment, "abc1234");
+    await context.service.handleRoleHook(docHook(context, "architect"));
+    expect((await context.service.getState(context.baseRepoRoot, context.taskRepoRoot)).status).toBe("idle");
+  });
+
+  it("accepts a byte-identical report after StopFailure and repeated retry without rebaselining", async () => {
+    const context = await createContext(true);
+    const [assignment] = await prepareDocAssignments(context, ["docs/ARCHITECTURE.md"]);
+    await writeDocResult(context, assignment, "abc1234");
+    const report = await readText(context.taskRepoRoot, assignment.reportPath);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await context.service.handleRoleHook({ ...docHook(context, "architect"), eventName: "StopFailure" });
+      await context.service.retryDurableDocAssignment(context.baseRepoRoot, context.taskRepoRoot, assignment.id);
+      const active = (await context.service.getState(context.baseRepoRoot, context.taskRepoRoot)).active!.assignments[0];
+      expect(active.baseCommit).toBe(assignment.baseCommit);
+      expect(active.reportHashBefore).toBe(assignment.reportHashBefore);
+      expect(await readText(context.taskRepoRoot, assignment.reportPath)).toBe(report);
+    }
+    await context.service.handleRoleHook(docHook(context, "architect"));
+    expect((await context.service.getState(context.baseRepoRoot, context.taskRepoRoot)).status).toBe("idle");
+  });
+
+  it.each([true, false])("explains an old overwritten baseline and permits verified unchanged recovery (Auto Memory: %s)", async (enabled) => {
+    const context = await createContext(true);
+    const [assignment] = await prepareDocAssignments(context, ["docs/ARCHITECTURE.md"]);
+    await writeDocResult(context, assignment, "abc1234");
+    await context.service.handleRoleHook({ ...docHook(context, "architect"), eventName: "StopFailure" });
+    const statePath = path.join(context.taskRepoRoot, ".ai/vcm/memory-review/state.json");
+    const stored = JSON.parse(await readFile(statePath, "utf8"));
+    stored.assignments[0].baseCommit = "abc1234";
+    await writeFile(statePath, JSON.stringify(stored));
+    context.setAutoMemoryEnabled(enabled);
+    const restarted = context.createService();
+    await restarted.retryDurableDocAssignment(context.baseRepoRoot, context.taskRepoRoot, assignment.id);
+    await restarted.handleRoleHook(docHook(context, "architect"));
+    const failed = (await restarted.getState(context.baseRepoRoot, context.taskRepoRoot)).active!.assignments[0];
+    expect(failed.baseCommit).toBe("abc1234");
+    expect(failed.error).toContain("No commits follow assignment baseline abc1234");
+    expect(failed.error).toContain("report unchanged with verification evidence");
+    expect(failed.error).not.toContain("documentation changes were not committed");
+    await restarted.retryDurableDocAssignment(context.baseRepoRoot, context.taskRepoRoot, assignment.id);
+    await writeAssignmentReport(context, assignment, "None.", "unchanged");
+    await restarted.handleRoleHook(docHook(context, "architect"));
+    const recovered = await restarted.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(recovered.status).toBe("idle");
+    expect(recovered.runs[0].assignments[0]).toMatchObject({ status: "completed", commit: "abc1234", baseCommit: "abc1234" });
+    expect(await readText(context.taskRepoRoot, assignment.targetPath)).toBe(assignment.content);
   });
 
   it("retries a corrected report after service restart without a new documentation commit, even with Auto Memory off", async () => {
     const context = await createContext(true);
     const [assignment] = await prepareDocAssignments(context, ["docs/ARCHITECTURE.md"]);
-    await writeDocResult(context, assignment, "doc-123");
-    await writeAssignmentReport(context, assignment, "wrong-commit");
+    await writeDocResult(context, assignment, "d0c00001");
+    await writeAssignmentReport(context, assignment, "deadbeef");
     await context.service.handleRoleHook(docHook(context, "architect"));
     const failed = (await context.service.getState(context.baseRepoRoot, context.taskRepoRoot)).active!.assignments[0];
     context.recordHarnessCommit(["unrelated.md"], "unrelated-commit");
@@ -582,10 +644,10 @@ describe("auto-memory-service", () => {
     await restarted.retryDurableDocAssignment(context.baseRepoRoot, context.taskRepoRoot, assignment.id);
     expect((await restarted.getState(context.baseRepoRoot, context.taskRepoRoot)).active!.assignments[0].baseCommit).toBe(failed.baseCommit);
     expect(context.terminalWrites.join("\n")).toContain("Previous failure:");
-    await writeAssignmentReport(context, assignment, "doc-123");
+    await writeAssignmentReport(context, assignment, "d0c00001");
     await restarted.handleRoleHook(docHook(context, "architect"));
     expect((await restarted.getState(context.baseRepoRoot, context.taskRepoRoot)).runs[0].assignments[0])
-      .toMatchObject({ status: "completed", commit: "doc-123" });
+      .toMatchObject({ status: "completed", commit: "d0c00001" });
   });
 
   it("does not replace a running assignment when an earlier failed item is retried", async () => {
@@ -599,7 +661,7 @@ describe("auto-memory-service", () => {
     expect(await context.service.getDurableDocAssignment(context.taskRepoRoot, "architect")).toBeUndefined();
     expect(await context.service.getDurableDocAssignment(context.taskRepoRoot, "tester")).toMatchObject({ id: assignments[1].id });
     context.setRoleBusy("tester", false);
-    await writeDocResult(context, assignments[1], "test-doc-commit");
+    await writeDocResult(context, assignments[1], "7e57001");
     await context.service.handleRoleHook(docHook(context, "tester"));
     expect(await context.service.getDurableDocAssignment(context.taskRepoRoot, "architect")).toMatchObject({ id: assignments[0].id });
   });
@@ -607,7 +669,7 @@ describe("auto-memory-service", () => {
   it("uses an assignment-specific report and ignores an unrelated Docs-Only report", async () => {
     const context = await createContext(true);
     const [assignment] = await prepareDocAssignments(context, ["docs/ARCHITECTURE.md"]);
-    await writeDocResult(context, assignment, "doc-123");
+    await writeDocResult(context, assignment, "d0c00001");
     await writeFile(path.join(context.taskRepoRoot, ".ai/vcm/handoffs/docs-update-report.md"), "Unrelated docs report");
     await context.service.handleRoleHook(docHook(context, "architect"));
     expect((await context.service.getState(context.baseRepoRoot, context.taskRepoRoot)).status).toBe("idle");
@@ -617,8 +679,8 @@ describe("auto-memory-service", () => {
   it("accepts unchanged existing documentation on retry without any new commit", async () => {
     const context = await createContext(true);
     const [assignment] = await prepareDocAssignments(context, ["docs/ARCHITECTURE.md"]);
-    await writeDocResult(context, assignment, "doc-123");
-    await writeAssignmentReport(context, assignment, "wrong-commit");
+    await writeDocResult(context, assignment, "d0c00001");
+    await writeAssignmentReport(context, assignment, "deadbeef");
     await context.service.handleRoleHook(docHook(context, "architect"));
     await context.service.retryDurableDocAssignment(context.baseRepoRoot, context.taskRepoRoot, assignment.id);
     await writeAssignmentReport(context, assignment, "none", "unchanged");
@@ -937,6 +999,11 @@ describe("auto-memory-service", () => {
         async getHeadCommit() {
           return headCommit;
         },
+        async getCommitInfo(_repo, ref) {
+          const matches = commitHistory.filter((commit) => commit.sha.startsWith(ref!));
+          if (matches.length !== 1) throw new Error(`Unknown or ambiguous commit: ${ref}`);
+          return { sha: matches[0].sha, subject: "test commit" };
+        },
         async getChangedPaths(_repo, base, head) {
           if (base === `${head}^`) {
             return commitHistory.find((commit) => commit.sha === head)?.paths ?? [];
@@ -1050,7 +1117,7 @@ describe("auto-memory-service", () => {
     result.decisions = result.decisions.map((decision: { target: string; entry: string }) => decision.target === "shared"
       ? { ...decision, decision: "move-to-durable-doc", finalContent: "none", durableDocPath: targets[entries.indexOf(decision.entry)] }
       : decision);
-    result.memoryCommit = "memory-move-commit";
+    result.memoryCommit = "fade000";
     result.durableDocAssignments = targets.map((targetPath, index) => ({
       sourceMemoryPath: "CLAUDE.md", sourceEntry: entries[index], targetPath,
       content: `Verified knowledge for ${targetPath}.`, reason: "Maintainer documentation is the correct owner.", evidence: ["src/module.ts"]

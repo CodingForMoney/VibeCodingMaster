@@ -8,6 +8,8 @@ import {
   ARCHITECTURE_PLAN_RESULTS,
   CODER_COMPLETION_DECISIONS,
   DOCS_REPORT_DECISIONS,
+  DOCS_UPDATE_COMMIT_PATTERN,
+  DOCS_UPDATE_COMMIT_RULE,
   DOCS_SYNC_CORRECTION_OWNERS,
   FINAL_ACCEPTANCE_DECISIONS,
   L3_ACTIONS,
@@ -405,7 +407,13 @@ function validateArtifactFields(
   }
 
   if (kind === "docs-update-report") {
-    return validateDecision(content, DOCS_REPORT_DECISIONS);
+    const invalidFields = validateDecision(content, DOCS_REPORT_DECISIONS);
+    const decision = readArtifactSectionContent(content, "Decision")?.trim().toLowerCase();
+    const commit = readArtifactSectionContent(content, "Commit");
+    if (mode === "final" && decision === "synced" && !DOCS_UPDATE_COMMIT_PATTERN.test(commit ?? "")) {
+      invalidFields.push(`${DOCS_UPDATE_COMMIT_RULE} Received Commit: ${JSON.stringify(commit ?? "")}.`);
+    }
+    return invalidFields;
   }
 
   if (kind === "docs-sync-report") {

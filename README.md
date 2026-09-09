@@ -595,11 +595,17 @@ with the exact assigned `--path` and Assignment ID. Reports are isolated under
 The reported commit must modify the target document within the assignment's
 original commit range; unrelated later commits do not invalidate it. Existing
 correct documentation can be reported as `unchanged` without a new commit.
+For `synced`, the entire `Commit` section is one bare lowercase hexadecimal
+hash (7-40 characters), without Markdown or explanatory text. The template,
+artifact submission, and assignment completion use the same format contract.
 
 Assignments run one at a time. A failed assignment does not block later items.
 After the remaining items finish, unresolved failures are reported in Harness
 Studio with their causes and individual Retry buttons. Retry preserves earlier
 committed work and the original baseline, including after a backend restart.
+An old assignment whose baseline was already overwritten is not automatically
+rebased; verify the current document and use `unchanged` when it already preserves
+the assigned content. Errors identify the reported commit and recorded range.
 Migration content and review snapshots remain in the task-local run directory;
 failures do not automatically restore removed memory. Turning Auto Memory off
 does not discard or cancel already-applied document migrations.

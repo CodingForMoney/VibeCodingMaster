@@ -89,7 +89,9 @@ describe("backend E2E with mock Claude Code", () => {
         payload: {
           role: "architect", runtimeSessionToken: architect.runtimeSessionToken,
           kind: "docs-update-report", mode: "final",
-          content: completeWorkflowArtifact(renderDocsUpdateReportTemplate(task.taskSlug), [["synced|unchanged|blocked", "synced"]])
+          content: completeWorkflowArtifact(renderDocsUpdateReportTemplate(task.taskSlug), [
+            ["synced|unchanged|blocked", "synced"], ["## Commit\n\nTBD", "## Commit\n\nabc1234"]
+          ])
         }
       });
       expect(wrong.statusCode, wrong.body).toBe(422);
@@ -1057,6 +1059,7 @@ describe("backend E2E with mock Claude Code", () => {
 
 function completeDocsUpdateReport(taskSlug: string, decision: "synced" | "unchanged"): string {
   return renderDocsUpdateReportTemplate(taskSlug)
+    .replace("## Commit\n\nTBD", "## Commit\n\nabc1234")
     .replaceAll("TBD", "Verified documentation-only task evidence.")
     .replace("synced|unchanged|blocked", decision);
 }

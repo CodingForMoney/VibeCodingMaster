@@ -464,7 +464,11 @@ original commit baseline across retries and recovery. Artifact submission binds
 the report path and Assignment ID to the currently assigned owner; Docs-Only
 reports remain separate. Completion validates the reported commit in the
 original baseline-to-HEAD range and its target-file change, not equality with
-HEAD. Assignment mutation and dispatch are serialized per task. Reviewed memory
+HEAD. The shared artifact contract requires a single bare hash in a synced Docs
+Update Report; both submission and completion validate it, so Markdown formatting
+is rejected before replacing the authoritative report. Commit resolution errors
+are distinct from out-of-range and wrong-target errors. Assignment mutation and
+dispatch are serialized per task. Reviewed memory
 remains applied; failed migration content and snapshots stay in the run, even
 when Auto Memory is switched off. A missing retrospective report or review
 result, incomplete decision coverage, assignment mismatch, uncommitted memory

@@ -31,6 +31,8 @@ export const TEST_INFRASTRUCTURE_STATUSES = [
 export const L3_REQUIRED_VALUES = ["yes", "no"] as const;
 export const L3_ACTIONS = ["run-existing", "updated", "added"] as const;
 export const DOCS_REPORT_DECISIONS = ["synced", "unchanged", "blocked"] as const;
+export const DOCS_UPDATE_COMMIT_PATTERN = /^[0-9a-f]{7,40}$/;
+export const DOCS_UPDATE_COMMIT_RULE = "When Decision is synced, Commit must contain only one bare lowercase hexadecimal commit hash (7-40 characters, for example abc1234) on a single line. No backticks, bullets, links, subjects, or extra lines; put explanations in Evidence Reviewed. An unchanged result does not require a new commit.";
 export const DOCS_SYNC_CORRECTION_OWNERS = ["none", "architect", "coder", "tester"] as const;
 export const FINAL_ACCEPTANCE_DECISIONS = [
   "accepted",

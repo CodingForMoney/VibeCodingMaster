@@ -6,6 +6,7 @@ import {
   renderFinalAcceptanceTemplate
 } from "../../../src/backend/templates/handoff.js";
 import { replaceVcmMemoryBlock } from "../../../src/backend/templates/harness/memory-block.js";
+import { readArtifactSectionContent } from "../../../src/shared/validation/artifact-check.js";
 import { createMockClaudeE2eApp } from "./helpers/e2e-app.js";
 import { createE2eRepo, git } from "./helpers/e2e-repo.js";
 import {
@@ -20,6 +21,8 @@ import {
 import type { MockClaudePromptContext } from "./helpers/mock-claude-runtime.js";
 
 const cleanups: Array<() => Promise<void>> = [];
+// Two backend lifecycles and real Git commits need room under full-suite contention.
+const MEMORY_RECOVERY_TEST_TIMEOUT_MS = 15_000;
 
 afterEach(async () => {
   while (cleanups.length > 0) {
@@ -276,6 +279,23 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
     env.mockRuntime.onPrompt("architect", "[VCM Durable Documentation Assignment]", async (ctx) => {
       await writeDurableArchitectureAssignment(ctx, async (content) => {
         const session = await env.deps.sessionService.getRoleSession(repo.repoRoot, task.taskSlug, "architect");
+        const reportPath = matchPromptPath(ctx.prompt, "Assigned report path");
+        const commit = readArtifactSectionContent(content, "Commit")!;
+        for (const malformed of [`\`${commit}\``, `\`${commit}\` - docs: update architecture`, `${commit}\nExtra explanation`]) {
+          const response = await env.app.inject({
+            method: "POST", url: `/api/tasks/${task.taskSlug}/artifacts/submit`,
+            payload: {
+              kind: "docs-update-report", mode: "final", role: "architect",
+              runtimeSessionToken: session!.runtimeSessionToken, path: reportPath,
+              content: content.replace(`## Commit\n\n${commit}`, `## Commit\n\n${malformed}`)
+            }
+          });
+          expect(response.statusCode).toBe(422);
+          expect(response.json().error.message).toContain(`Received Commit: ${JSON.stringify(malformed)}`);
+          await expect(fs.access(path.join(ctx.cwd, reportPath))).rejects.toMatchObject({ code: "ENOENT" });
+          expect((await env.deps.autoMemoryService.getState(repo.repoRoot, task.worktreePath)).active!.assignments[0].status)
+            .toBe("running");
+        }
         await injectOk(env.app, {
           method: "POST", url: `/api/tasks/${task.taskSlug}/artifacts/submit`,
           payload: {
@@ -421,7 +441,7 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
     expect(JSON.parse(await fs.readFile(markerPath, "utf8"))).toMatchObject({ status: "completed" });
     expect(await fs.readFile(path.join(task.worktreePath, ".ai/vcm/handoffs/docs-update-report.md"), "utf8"))
       .toBe("Unrelated Docs-Only report");
-  });
+  }, MEMORY_RECOVERY_TEST_TIMEOUT_MS);
 });
 
 async function writeNoChangeMemoryDraft(ctx: MockClaudePromptContext): Promise<void> {

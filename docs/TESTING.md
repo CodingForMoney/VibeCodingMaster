@@ -281,6 +281,12 @@ services with controlled runtime doubles:
   without producing a new commit. Unit cases cover report path/owner isolation,
   wrong or ambiguous commit references, unrelated HEAD advancement, preserved
   migration content, dispatch failure, and retry while another item is running.
+  Commit format cases cover bare hashes, Markdown, appended text, multiple lines,
+  length bounds, incomplete drafts, and decisions that require no new commit.
+  Backend E2E verifies that malformed formatting is rejected during submission,
+  leaves the assignment running, and can be corrected before Stop. Recovery tests
+  cover byte-identical reports across retries and an old overwritten baseline,
+  including recovery with Auto Memory disabled.
   Unit coverage verifies strict proposal fields, direct memory-block
   ownership, committed-result recording, and rejection of uncommitted or
   out-of-scope memory edits. Architect restart coverage verifies

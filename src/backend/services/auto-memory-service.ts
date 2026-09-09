@@ -18,7 +18,8 @@ import type {
 } from "../../shared/types/memory.js";
 import type { RoleName, VcmRoleName } from "../../shared/types/role.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
-import { checkMarkdownArtifact, readArtifactSectionValue } from "../../shared/validation/artifact-check.js";
+import { checkMarkdownArtifact, readArtifactSectionContent, readArtifactSectionValue } from "../../shared/validation/artifact-check.js";
+import { DOCS_UPDATE_COMMIT_RULE } from "../../shared/validation/artifact-contract.js";
 import { resolveRepoPath, type FileSystemAdapter } from "../adapters/filesystem.js";
 import type { GitAdapter } from "../adapters/git-adapter.js";
 import { VcmError } from "../errors.js";
@@ -225,7 +226,7 @@ export interface AutoMemoryHarnessHookInput {
 
 export interface AutoMemoryServiceDeps {
   fs: FileSystemAdapter;
-  git: Pick<GitAdapter, "commitPaths" | "getDiff" | "getHeadCommit" | "getChangedPaths" | "getCommitList">;
+  git: Pick<GitAdapter, "commitPaths" | "getDiff" | "getHeadCommit" | "getChangedPaths" | "getCommitList" | "getCommitInfo">;
   runtime: Pick<TerminalRuntime, "getSession" | "write">;
   sessionService: Pick<
     SessionService,
@@ -1111,23 +1112,32 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
   async function validateDurableDocCommit(
     taskRepoRoot: string, assignment: DurableDocAssignmentState, reportContent: string, currentHead: string
   ): Promise<string> {
-    if (!assignment.baseCommit || currentHead === assignment.baseCommit) {
-      throw new Error("documentation changes were not committed");
+    const reportedCommit = readArtifactSectionContent(reportContent, "Commit")!;
+    let commit: string;
+    try {
+      commit = (await deps.git.getCommitInfo(taskRepoRoot, reportedCommit)).sha;
+    } catch (error) {
+      const detail = error instanceof VcmError && error.hint ? `${errorMessage(error)} ${error.hint}` : errorMessage(error);
+      throw new Error(`Commit ${reportedCommit} could not be resolved to a unique Git commit: ${detail}`);
     }
-    const changedPaths = await deps.git.getChangedPaths(taskRepoRoot, assignment.baseCommit, currentHead);
-    if (!changedPaths.includes(assignment.targetPath)) {
-      throw new Error(`documentation commit does not include ${assignment.targetPath}`);
+    const existingContentHint = `If ${assignment.targetPath} already preserves the assigned content, report unchanged with verification evidence; do not create a redundant commit.`;
+    if (!assignment.baseCommit) {
+      throw new Error(`Assignment ${assignment.id} has no recorded commit baseline; cannot validate Commit ${commit}. ${existingContentHint}`);
     }
-    const reportedCommit = readArtifactSectionValue(reportContent, "Commit")?.trim();
+    if (currentHead === assignment.baseCommit) {
+      throw new Error(`No commits follow assignment baseline ${assignment.baseCommit} (HEAD is the same commit); received Commit ${commit}. The document may already have been committed before this baseline. ${existingContentHint}`);
+    }
     const commits = await deps.git.getCommitList(taskRepoRoot, `${assignment.baseCommit}..${currentHead}`);
-    const matches = reportedCommit ? commits.filter((commit) => commit.sha.startsWith(reportedCommit)) : [];
-    if (matches.length !== 1) {
-      throw new Error(`Commit must uniquely identify a documentation commit in ${assignment.baseCommit}..${currentHead}; received ${reportedCommit || "empty"}`);
+    if (!commits.some((candidate) => candidate.sha === commit)) {
+      throw new Error(`Commit ${commit} exists but is outside assignment range ${assignment.baseCommit}..${currentHead}. ${existingContentHint}`);
     }
-    const commit = matches[0].sha;
     const commitPaths = await deps.git.getChangedPaths(taskRepoRoot, `${commit}^`, commit);
     if (!commitPaths.includes(assignment.targetPath)) {
       throw new Error(`reported commit ${commit} does not modify ${assignment.targetPath}`);
+    }
+    const changedPaths = await deps.git.getChangedPaths(taskRepoRoot, assignment.baseCommit, currentHead);
+    if (!changedPaths.includes(assignment.targetPath)) {
+      throw new Error(`Commit ${commit} modified ${assignment.targetPath}, but no net change remains in ${assignment.baseCommit}..${currentHead}. Verify the current document before reporting completion.`);
     }
     return commit;
   }
@@ -1972,6 +1982,7 @@ function buildDurableDocAssignmentPrompt(
     `Assigned report path: ${assignment.reportPath}`,
     `Submit with .ai/tools/vcm-artifact docs-update-report --file <candidate> --path ${assignment.reportPath} --mode final`,
     "Set Assignment ID to the exact ID above.",
+    DOCS_UPDATE_COMMIT_RULE,
     "For synced, record the commit that changed the target document; it need not be HEAD. If the document already preserves the content, use unchanged with evidence; do not create a redundant commit.",
     ...(assignment.error ? [`Previous failure: ${assignment.error}`] : []),
     "End the turn after VCM accepts the report."
