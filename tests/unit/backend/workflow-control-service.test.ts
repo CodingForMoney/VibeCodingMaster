@@ -673,52 +673,86 @@ describe("workflow control service", () => {
     await advance(service, fs, context, "tester", undefined, "validate the Coder-owned documentation correction");
   });
 
-  it("resumes Architecture Diagnosis validation after one user-authorized repair without reusing stale evidence", async () => {
+  it("routes a rejected validation Gate back to Tester before implementation failure branches", async () => {
+    for (const flow of ["code-change", "architect-debug", "architecture-diagnosis"] as const) {
+      const { context, fs } = await createContext(roots);
+      const service = createWorkflowControlService({ fs, now: sequenceClock() });
+
+      if (flow === "code-change") {
+        await enterCodeChangeTester(service, fs, context);
+      } else {
+        await advance(service, fs, context, "architect", flow, `accepted ${flow} task`);
+        if (flow === "architect-debug") {
+          await writeArchitectDebug(fs, context, "debug repair");
+        } else {
+          await writeArchitectureDiagnosis(fs, context, "diagnosis repair");
+        }
+        await advance(service, fs, context, "tester", undefined, `validate ${flow} repair`);
+      }
+      await writeTestReport(fs, context, "fail", "none", `${flow} validation failure`);
+      await writeGateIndex(fs, context, { validation: "request_changes" }, "2026-08-06T00:00:10.000Z");
+
+      await expect(propose(service, fs, context, "architect", undefined, "revise implementation"))
+        .rejects.toMatchObject({
+          code: "WORKFLOW_TRANSITION_DENIED",
+          hint: expect.stringContaining(`Allowed next dispatches: ${flow}/tester`)
+        });
+      await advance(service, fs, context, "tester", undefined, "address validation Gate findings");
+
+      expect((await readProgress(fs, context)).history.at(-1)).toMatchObject({ flow, targetRole: "tester" });
+    }
+  });
+
+  it("still stops a standalone Architecture Diagnosis after an ordinary Tester failure", async () => {
     const { context, fs } = await createContext(roots);
-    const service = createWorkflowControlService({ fs, now: sequenceClock(), id: () => "override-1" });
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
 
     await advance(service, fs, context, "architect", "architecture-diagnosis", "accepted diagnosis task");
-    await writeArchitectureDiagnosis(fs, context, "initial diagnosis");
-    await advance(service, fs, context, "tester", undefined, "implemented diagnosis");
-    await writeTestReport(fs, context, "fail", "none", "code-change validation failure");
-    await writeGateIndex(fs, context, { validation: "request_changes" }, "2026-08-06T00:00:10.000Z");
+    await writeArchitectureDiagnosis(fs, context, "diagnosis repair");
+    await advance(service, fs, context, "tester", undefined, "validate diagnosis repair");
+    await writeTestReport(fs, context, "fail", "none", "diagnosis validation failure");
 
-    await expect(propose(service, fs, context, "architect", undefined, "repair after Tester failure"))
+    await expect(propose(service, fs, context, "architect", undefined, "another diagnosis repair"))
       .rejects.toMatchObject({
         code: "WORKFLOW_TRANSITION_DENIED",
         hint: expect.stringContaining("Architecture Diagnosis stopped after the current Tester failure")
       });
+  });
 
-    await advanceWithOverride(
-      service,
-      fs,
-      context,
-      "architect",
-      "repair after Tester failure",
-      "Continue Architecture Diagnosis repair after the reported Tester failure."
-    );
+  it("does not reuse a validation Gate decision that predates the current Tester dispatch", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
 
-    await expect(propose(service, fs, context, "tester", undefined, "revalidate repair"))
-      .rejects.toMatchObject({ code: "WORKFLOW_TRANSITION_DENIED" });
+    await advance(service, fs, context, "architect", "architecture-diagnosis", "accepted diagnosis task");
+    await writeArchitectureDiagnosis(fs, context, "diagnosis repair");
+    await writeGateIndex(fs, context, { validation: "request_changes" }, "2026-08-06T00:00:10.000Z");
+    await advance(service, fs, context, "tester", undefined, "validate diagnosis repair");
+    await writeTestReport(fs, context, "fail", "none", "diagnosis validation failure");
 
-    await writeArchitectureDiagnosis(fs, context, "repaired diagnosis");
-    const restored = createWorkflowControlService({ fs, now: sequenceClock(), id: () => "override-2" });
-    await advance(restored, fs, context, "tester", undefined, "revalidate repaired diagnosis");
-    await writeTestReport(fs, context, "pass");
+    await expect(propose(service, fs, context, "tester", undefined, "reuse stale Gate decision"))
+      .rejects.toMatchObject({
+        code: "WORKFLOW_TRANSITION_DENIED",
+        hint: expect.stringContaining("Architecture Diagnosis stopped after the current Tester failure")
+      });
+  });
 
-    await expect(propose(restored, fs, context, "tester", undefined, "stale validation revision"))
-      .rejects.toMatchObject({ code: "WORKFLOW_TRANSITION_DENIED" });
+  it("continues an approved Coverage Gap after validation and code-diff Gates approve", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await enterCodeChangeTester(service, fs, context);
+    await writeApprovedCoverageGapTestReport(fs, context);
+    await writeGateIndex(fs, context, {
+      validation: "approve",
+      codeDiff: "approve",
+      codeDiffSource: "coder"
+    }, "2026-08-06T00:00:40.000Z");
 
-    await writeGateIndex(fs, context, { validation: "request_changes" }, "2026-08-06T00:00:20.000Z");
-    await advance(restored, fs, context, "tester", undefined, "current validation revision");
+    await advance(service, fs, context, "architect", undefined, "approved Coverage Gap passed both Gates");
 
-    expect((await readProgress(fs, context)).history.map((entry) => entry.targetRole)).toEqual([
-      "architect",
-      "tester",
-      "architect",
-      "tester",
-      "tester"
-    ]);
+    expect((await readProgress(fs, context)).history.at(-1)).toMatchObject({
+      flow: "code-change",
+      targetRole: "architect"
+    });
   });
 
   it("routes a failed Architect Debug validation through Diagnosis and back to Tester", async () => {
@@ -1670,6 +1704,27 @@ async function writeTestReport(
     ["L3 Required: yes|no", "L3 Required: no"],
     ["Status: none|repair-required|repaired|production-change-required", `Status: ${infrastructure}`],
     ["## Evidence Reviewed\n\nTBD", `## Evidence Reviewed\n\n${evidence}`]
+  ]);
+}
+
+async function writeApprovedCoverageGapTestReport(
+  fs: FileSystemAdapter,
+  context: WorkflowControlContext
+): Promise<void> {
+  await writeFinalArtifact(fs, context, "test-report.md", renderTestReportTemplate(context.taskSlug), [
+    ["Test Result: pass|fail|incomplete", "Test Result: fail"],
+    ["L3 Required: yes|no", "L3 Required: no"],
+    ["Status: none|repair-required|repaired|production-change-required", "Status: none"],
+    ["## Evidence Reviewed\n\nTBD", "## Evidence Reviewed\n\nCompleted validation evidence for the accepted task."],
+    ["## Coverage Gaps\n\nNone.", "## Coverage Gaps\n\nLive gateway coverage remains unavailable."],
+    [
+      "## Blocking Validation Issues\n\nNone.",
+      "## Blocking Validation Issues\n\nThe approved live gateway coverage gap remains open."
+    ],
+    [
+      "## User Approval Evidence\n\nNone.",
+      "## User Approval Evidence\n\nUser explicitly approved retaining the live gateway coverage gap."
+    ]
   ]);
 }
 

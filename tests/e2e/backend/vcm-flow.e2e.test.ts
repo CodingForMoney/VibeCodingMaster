@@ -707,6 +707,84 @@ describe("backend E2E with mock Claude Code", () => {
     }))).rejects.toMatchObject({ code: "WORKFLOW_TRANSITION_DENIED" });
   });
 
+  it("accepts a Tester correction after validation-adequacy rejects a failed report", async () => {
+    const env = await createMockClaudeE2eApp({ workflowControl: true });
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "validation-gate-tester-correction");
+    const pm = await startRole(env.app, task.taskSlug, "project-manager");
+    const service = env.deps.workflowControlService!;
+    const context = {
+      taskRepoRoot: task.worktreePath,
+      stateRoot: ".ai/vcm",
+      handoffDir: ".ai/vcm/handoffs",
+      taskSlug: task.taskSlug
+    };
+
+    await advanceWorkflow(service, context, "architect", "code-change", "accepted code change");
+    await fs.writeFile(
+      path.join(task.worktreePath, context.handoffDir, "architecture-plan.md"),
+      completeWorkflowArtifact(renderArchitecturePlanTemplate(task.taskSlug), [
+        ["Planning Result: complete|incomplete|user clarification required", "Planning Result: complete"]
+      ]),
+      "utf8"
+    );
+    await writeWorkflowGateIndex(task.worktreePath, { architecture: "approve" }, "2026-08-20T01:00:10.000Z");
+    await advanceWorkflow(service, context, "coder", undefined, "approved architecture plan");
+    await fs.writeFile(
+      path.join(task.worktreePath, context.handoffDir, "coder-completion.md"),
+      completeWorkflowArtifact(renderCoderCompletionTemplate(task.taskSlug), [
+        ["Decision: ready_for_review|incomplete|failed", "Decision: ready_for_review"]
+      ]),
+      "utf8"
+    );
+    await advanceWorkflow(service, context, "tester", undefined, "completed implementation");
+    await fs.writeFile(
+      path.join(task.worktreePath, context.handoffDir, "test-report.md"),
+      completeWorkflowArtifact(renderTestReportTemplate(task.taskSlug), [
+        ["Test Result: pass|fail|incomplete", "Test Result: fail"],
+        ["L3 Required: yes|no", "L3 Required: no"],
+        ["Status: none|repair-required|repaired|production-change-required", "Status: none"],
+        [
+          "## Blocking Validation Issues\n\nNone.",
+          "## Blocking Validation Issues\n\nThe current validation evidence does not cover the required recovery path."
+        ]
+      ]),
+      "utf8"
+    );
+    await writeWorkflowGateIndex(
+      task.worktreePath,
+      { architecture: "approve", validation: "request_changes" },
+      "2026-08-20T01:00:20.000Z"
+    );
+
+    const current = await service.getProgress(context);
+    const response = await env.app.inject({
+      method: "POST",
+      url: `/api/tasks/${task.taskSlug}/artifacts/submit`,
+      payload: {
+        kind: "workflow-progress",
+        mode: "final",
+        role: "project-manager",
+        runtimeSessionToken: pm.runtimeSessionToken,
+        content: renderWorkflowProgress({
+          ...current,
+          revision: current.revision + 1,
+          proposal: {
+            targetRole: "tester",
+            evidence: "address the current validation-adequacy findings"
+          }
+        })
+      }
+    });
+
+    expect(response.statusCode, response.body).toBe(200);
+    expect(await service.getState(context)).toMatchObject({
+      pendingDispatch: { targetRole: "tester", effectiveFlow: "code-change" }
+    });
+  });
+
   it("retries a retryable StopFailure by sending a recovery prompt to the same role session", async () => {
     const env = await createMockClaudeE2eApp();
     cleanups.push(() => env.close());
@@ -919,13 +997,16 @@ function completeWorkflowArtifact(template: string, replacements: Array<[string,
 async function writeWorkflowGateIndex(
   taskRepoRoot: string,
   decisions: {
-    architecture?: "approve";
-    validation?: "approve";
-    codeDiff?: "approve";
+    architecture?: "approve" | "request_changes";
+    validation?: "approve" | "request_changes";
+    codeDiff?: "approve" | "request_changes";
   },
   updatedAt: string
 ): Promise<void> {
-  const record = (gate: "architecture-plan" | "validation-adequacy" | "code-diff", decision?: "approve") => ({
+  const record = (
+    gate: "architecture-plan" | "validation-adequacy" | "code-diff",
+    decision?: "approve" | "request_changes"
+  ) => ({
     gate,
     required: true,
     status: decision ? "completed" : "pending",

@@ -1079,12 +1079,12 @@ async function allowedAfterTester(
     return [`${currentFlow}/tester`];
   }
   if (test.value === "incomplete" || test.infrastructure === "repair-required") return [`${currentFlow}/tester`];
-  if (test.value === "fail" && test.infrastructure !== "repair-required") {
-    return options.testerFailureFlow ? [`${options.testerFailureFlow}/architect`] : [];
-  }
   const validation = await gateState(fs, input, "validation-adequacy");
   if (freshGateDecision(state, currentFlow, "tester", "validation-adequacy", validation) === "request_changes") {
     return [`${currentFlow}/tester`];
+  }
+  if (test.value === "fail" && !test.hasUserApprovedCoverageGap) {
+    return options.testerFailureFlow ? [`${options.testerFailureFlow}/architect`] : [];
   }
   if (!gatePassedForDispatch(state, currentFlow, "tester", "validation-adequacy", validation)) return [];
   const codeDiff = await gateState(fs, input, "code-diff");
@@ -1111,6 +1111,7 @@ async function artifactState(
   hash: string;
   value?: string;
   infrastructure?: string;
+  hasUserApprovedCoverageGap?: boolean;
   disposition?: string;
   correctionOwner?: DispatchableRole | "none";
 }> {
@@ -1132,6 +1133,10 @@ async function artifactState(
   const infrastructure = kind === "test-report"
     ? /^Status:\s*(.+?)\s*$/mi.exec(readArtifactSectionContent(content, "Test Infrastructure") ?? "")?.[1]?.trim().toLowerCase()
     : undefined;
+  const hasUserApprovedCoverageGap = kind === "test-report"
+    && check.status === "ok"
+    && hasSubstantiveArtifactSection(readArtifactSectionContent(content, "Coverage Gaps"))
+    && hasSubstantiveArtifactSection(readArtifactSectionContent(content, "User Approval Evidence"));
   const disposition = kind === "architect-debug" || kind === "architecture-diagnosis"
     ? readArtifactSectionContent(content, "Final Disposition")?.trim().toLowerCase()
     : undefined;
@@ -1143,11 +1148,17 @@ async function artifactState(
     hash: await artifactFingerprint(fs, absolute, content),
     value,
     infrastructure,
+    hasUserApprovedCoverageGap,
     disposition,
     correctionOwner: correctionOwner === "none" || asTargetRole(correctionOwner)
       ? correctionOwner as DispatchableRole | "none"
       : undefined
   };
+}
+
+function hasSubstantiveArtifactSection(value: string | undefined): boolean {
+  const normalized = value?.trim();
+  return Boolean(normalized && !/^(none|tbd)\.?$/i.test(normalized));
 }
 
 async function gateState(
