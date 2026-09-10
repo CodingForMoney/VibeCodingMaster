@@ -17,7 +17,6 @@ import type { RoundService } from "../services/round-service.js";
 import type { TaskWorkflowService } from "../services/task-workflow-service.js";
 import type { ArchitectRestartService } from "../services/architect-restart-service.js";
 import type { TranslationService } from "../services/translation-service.js";
-import type { WorkflowControlService } from "../services/workflow-control-service.js";
 
 export interface TaskRouteDeps {
   projectService: ProjectService;
@@ -30,7 +29,6 @@ export interface TaskRouteDeps {
   taskWorkflowService?: Pick<TaskWorkflowService, "getState" | "declare">;
   architectRestartService: Pick<ArchitectRestartService, "getState">;
   translationService?: Pick<TranslationService, "shouldDelayFlowPauseNotification">;
-  workflowControlService?: Pick<WorkflowControlService, "getState">;
 }
 
 export function registerTaskRoutes(app: FastifyInstance, deps: TaskRouteDeps): void {
@@ -113,11 +111,6 @@ export function registerTaskRoutes(app: FastifyInstance, deps: TaskRouteDeps): v
           taskSlug
         }) ?? Promise.resolve(degradedWorkflowState(taskSlug))
       ]);
-      if (roundState.flowPause?.paused && deps.workflowControlService) {
-        const workflow = await deps.workflowControlService.getState(context);
-        const reply = workflow.userQuestionReplies?.find((item) => item.requestedAt === workflow.awaitingUser?.requestedAt);
-        if (reply) roundState.flowPause = { ...roundState.flowPause, message: reply.question };
-      }
       const displayedRoundState = await delayFlowPauseForTranslation(deps, {
         repoRoot: project.repoRoot,
         taskRepoRoot,

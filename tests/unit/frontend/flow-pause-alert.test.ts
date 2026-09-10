@@ -24,10 +24,10 @@ const BASE: VcmSessionRoundState = {
 };
 
 describe("selectFlowPauseAlertMessage", () => {
-  it("displays the complete backend question without deriving workflow decisions", () => {
-    const question = "Existing records must remain readable.\nShould duplicate rows be rejected or merged?";
-    expect(selectFlowPauseAlertMessage({ ...BASE, flowPause: { paused: true, message: question } }, vi.fn())).toBe(question);
-    expect(selectFlowPauseAlertMessage({ ...BASE, flowPause: { paused: false, message: question } }, vi.fn())).toBeNull();
+  it("displays the backend pause notice without deriving workflow decisions", () => {
+    const message = "No new turn started after project-manager stopped.";
+    expect(selectFlowPauseAlertMessage({ ...BASE, flowPause: { paused: true, message } }, vi.fn())).toBe(message);
+    expect(selectFlowPauseAlertMessage({ ...BASE, flowPause: { paused: false, message } }, vi.fn())).toBeNull();
   });
   it("returns null when the backend reports no pause", () => {
     const formatRecoveryFailure = vi.fn();
@@ -101,11 +101,11 @@ describe("selectFlowPauseAlertMessage", () => {
 });
 
 describe("flow pause presentation", () => {
-  it("restores an unanswered question after refresh without reviving ordinary historical alerts", () => {
+  it("does not revive historical alerts after refresh even when a pause message is present", () => {
     const state = { ...BASE, stoppedAt: "2026-09-09T00:00:00.000Z", flowPause: { paused: true } };
     const openedAt = Date.parse("2026-09-09T00:01:00.000Z");
     expect(shouldShowFlowPauseNotice(state, undefined, openedAt)).toBe(false);
-    expect(shouldShowFlowPauseNotice({ ...state, flowPause: { paused: true, message: "Please choose." } }, undefined, openedAt)).toBe(true);
+    expect(shouldShowFlowPauseNotice({ ...state, flowPause: { paused: true, message: "No new turn started." } }, undefined, openedAt)).toBe(false);
     expect(shouldShowFlowPauseNotice(state, { status: "running" }, openedAt)).toBe(true);
   });
   it("always keeps the modal decision separate from the sound preference", () => {

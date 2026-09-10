@@ -193,17 +193,18 @@ authoritative.
 
 Whenever Project Manager asks the user a question, it first uses
 `vcm-ask-user` with the complete question and necessary context. VCM records the
-wait and cancels any pending role dispatch in one state update. Stop Hook then
-ends the PM turn without route scanning and records the question as the official
-reply. The existing Pause Alert displays it even when translation is off; the
-translation panel and Gateway reuse that same reply instead of PM's separate
-closing text. While waiting, new dispatches, Gate requests/retries, and workflow
+wait and cancels any pending role dispatch in one state update. PM then presents
+the complete question and necessary context in its normal final reply. Stop Hook
+ends the PM turn without route scanning. The CC session displays that reply;
+the translation panel reads its transcript and Gateway reuses the same reply
+and translation. Pause Alert remains a round-pause notice, not a question display.
+While waiting, new dispatches, Gate requests/retries, and workflow
 completion are blocked; already-running roles may still return results. Only
 a new direct user message clears the wait, and the next role dispatch requires
 a fresh Workflow Review. PM treats text emitted while a Round continues as
 intermediate output, not as delivered user communication. When the Round pauses
 or completes, its Round Final Reply contains the complete user-facing result or
-registered question without relying on earlier PM output.
+question without relying on earlier PM output or tool arguments.
 
 Typical flow:
 

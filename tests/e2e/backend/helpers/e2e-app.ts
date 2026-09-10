@@ -242,7 +242,6 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
   });
   const transcripts = createClaudeTranscriptService();
   const translationService = createTranslationService({
-    workflowControlService,
     runtime: mockRuntime,
     sessionRegistry: registry,
     transcripts,
@@ -281,7 +280,6 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     roleContextRestartService
   });
   const gatewayService = createGatewayService({
-    workflowControlService,
     fs: fsAdapter,
     settings: gatewaySettings,
     audit: gatewayAudit,

@@ -359,14 +359,15 @@ and its unconsumed Workflow Progress proposal in one recoverable transaction.
 While `awaitingUser` exists, Workflow Progress submission (including completion),
 route authorization, and new/retried Gate requests fail closed. Gate submission
 and question registration share the workflow lock; already-running work is not
-interrupted. PM Stop processing records the turn end without route dispatch or
-Round settle scanning and persists a canonical question reply in
-`workflow-control.json`. Its stable ID and session/turn window let translation
-and Gateway replace the corresponding transcript final without modifying Claude
-transcripts or translating/sending both versions. Completed question replies
-remain available after the wait clears, so replay cannot restore the omitted PM
-closing text. Workspace state supplies the registered question to the existing
-Pause Alert even with translation disabled; the frontend only displays it. A PM
+interrupted. After registration, PM presents the complete question and necessary
+context in its normal final reply. PM Stop processing records the turn end
+without route dispatch or Round settle scanning. The transcript is the display
+source for that reply: translation preserves or translates it under the selected
+scope, and Gateway reuses the same reply and translation. Workflow control does
+not synthesize replies, replace transcript text, or inject questions into Pause
+Alert. Normal feed persistence and replay retain the reply after the wait clears
+or a panel reloads. The existing round-pause notice, sound preference, and delay
+until translation succeeds or fails remain unchanged. A PM
 `UserPromptSubmit` clears the wait only when its prompt is a direct user message
 without a VCM marker; internal role messages and callbacks cannot unlock it.
 The canceled approval is never restored.

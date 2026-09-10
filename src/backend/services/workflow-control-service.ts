@@ -7,7 +7,6 @@ import type { DispatchableRole, RoleName } from "../../shared/types/role.js";
 import type { GateReviewGateRecord, GateReviewIndex } from "../../shared/types/gate-review.js";
 import type {
   WorkflowControlState,
-  WorkflowUserQuestionReply,
   WorkflowDispatchEvidenceBaseline,
   WorkflowDispatchHistoryEntry,
   WorkflowEvidenceArtifact,
@@ -52,7 +51,6 @@ export interface WorkflowControlService {
   getProgress(input: WorkflowControlContext): Promise<WorkflowProgressDocument>;
   requestUserInput(input: WorkflowControlContext, question: string): Promise<WorkflowControlState>;
   resolveUserInput(input: WorkflowControlContext): Promise<WorkflowControlState>;
-  completeUserQuestion(input: WorkflowControlContext, turn: { sessionId: string; startedAt: string; endedAt: string }): Promise<WorkflowUserQuestionReply | undefined>;
   runWhileNotAwaitingUser<T>(input: WorkflowControlContext, run: () => Promise<T>): Promise<T>;
   submitProgress(input: WorkflowControlContext, content: string): Promise<WorkflowProgressSubmissionResult>;
   assertDocsArtifactAllowed(input: WorkflowControlContext, kind: "docs-update-report" | "docs-sync-report", role: RoleName): Promise<void>;
@@ -492,7 +490,6 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
     },
     requestUserInput,
     resolveUserInput,
-    completeUserQuestion,
     runWhileNotAwaitingUser,
     submitProgress,
     assertDocsArtifactAllowed,
@@ -609,31 +606,6 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
       const state = await getState(input);
       failWhileAwaitingUser(state);
       return run();
-    });
-  }
-
-  async function completeUserQuestion(
-    input: WorkflowControlContext,
-    turn: { sessionId: string; startedAt: string; endedAt: string }
-  ): Promise<WorkflowUserQuestionReply | undefined> {
-    return withLock(statePath(input), async () => {
-      const state = await getState(input);
-      failOnStateWarnings(state);
-      const question = state.awaitingUser;
-      if (!question) return undefined;
-      const replies = state.userQuestionReplies ?? [];
-      const existing = replies.find((reply) => reply.requestedAt === question.requestedAt);
-      if (existing) return existing.sessionId === turn.sessionId ? existing : undefined;
-      if (question.requestedAt > turn.endedAt) return undefined;
-      const reply: WorkflowUserQuestionReply = {
-        ...question,
-        id: `user-question:${turn.sessionId}:${question.requestedAt}`,
-        sessionId: turn.sessionId,
-        turnStartedAt: turn.startedAt,
-        completedAt: turn.endedAt
-      };
-      await saveState(input, { ...state, userQuestionReplies: [...replies, reply], updatedAt: now() });
-      return reply;
     });
   }
 
@@ -1799,8 +1771,6 @@ function normalizeState(value: unknown, taskSlug: string, timestamp: string): Wo
   const awaitingUser = value.awaitingUser === undefined || value.awaitingUser === null
     ? null
     : isAwaitingUser(value.awaitingUser) ? value.awaitingUser : undefined;
-  const validQuestionReplies = value.userQuestionReplies === undefined
-    || (Array.isArray(value.userQuestionReplies) && value.userQuestionReplies.every(isUserQuestionReply));
   if (
     pendingDispatch === undefined
     || activeDispatch === undefined
@@ -1808,7 +1778,6 @@ function normalizeState(value: unknown, taskSlug: string, timestamp: string): Wo
     || userAuthorizations === undefined
     || userApprovedFollowUps === undefined
     || awaitingUser === undefined
-    || !validQuestionReplies
   ) {
     return { ...emptyState(taskSlug, timestamp), warnings: ["Workflow control state has an unsupported shape."] };
   }
@@ -1816,9 +1785,6 @@ function normalizeState(value: unknown, taskSlug: string, timestamp: string): Wo
     version: 1,
     taskSlug,
     awaitingUser,
-    ...(Array.isArray(value.userQuestionReplies) ? {
-      userQuestionReplies: value.userQuestionReplies as WorkflowUserQuestionReply[]
-    } : {}),
     pendingDispatch,
     activeDispatch,
     flowRun,
@@ -1827,13 +1793,6 @@ function normalizeState(value: unknown, taskSlug: string, timestamp: string): Wo
     warnings: [],
     updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : timestamp
   };
-}
-
-function isUserQuestionReply(value: unknown): value is WorkflowUserQuestionReply {
-  if (!value || typeof value !== "object") return false;
-  const reply = value as Partial<WorkflowUserQuestionReply>;
-  return [reply.id, reply.sessionId, reply.question, reply.requestedAt, reply.turnStartedAt, reply.completedAt]
-    .every((field) => typeof field === "string" && field.length > 0);
 }
 
 function emptyState(taskSlug: string, timestamp: string): WorkflowControlState {

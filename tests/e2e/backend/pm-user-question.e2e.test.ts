@@ -31,7 +31,7 @@ const statusReport = [
 ].join("\n");
 
 describe("PM question detection through the Stop hook API", () => {
-  it("delivers the registered question without a transcript reply and blocks all advancement until direct user input", async () => {
+  it("registers a wait without synthesizing a reply and blocks advancement until direct user input", async () => {
     const env = await createScenario("question-delivery-off");
     await updatePreferences(env.app, { translationEnabled: false });
     await env.approveArchitect("code-change");
@@ -43,11 +43,12 @@ describe("PM question detection through the Stop hook API", () => {
 
     const first = await pollTranslationFeed(env.app, env.task.taskSlug);
     const questions = first.events.filter((item) => item.event.type === "entry" && item.event.entry.sourceText === question);
-    expect(questions).toHaveLength(1);
-    expect(questions[0]?.event).toMatchObject({ entry: { status: "preserved", role: "project-manager" } });
-    expect((await env.state()).userQuestionReplies).toHaveLength(1);
-    await waitFor(async () => expect((await getWorkspaceState(env.app, env.task.taskSlug)).roundState.flowPause)
-      .toMatchObject({ paused: true, message: question }));
+    expect(questions).toHaveLength(0);
+    await waitFor(async () => {
+      const pause = (await getWorkspaceState(env.app, env.task.taskSlug)).roundState.flowPause;
+      expect(pause).toMatchObject({ paused: true });
+      expect(pause?.message).toBeUndefined();
+    });
     expect(first.events.some((item) => item.event.type === "entry" && item.event.entry.sourceText === "Waiting for your answer.")).toBe(false);
 
     const beforeGate = await getGateState(env.app, env.task.taskSlug);
@@ -81,11 +82,13 @@ describe("PM question detection through the Stop hook API", () => {
   });
 
   it.each([
-    ["round-final", false], ["pm-final-only", false], ["round-final", true]
+    ["round-final", false], ["pm-final-only", false], ["final-only", false], ["all", false],
+    ["round-final", true], ["pm-final-only", true]
   ] as const)("shares exactly one question with the Gateway in %s mode (translation failure: %s)", async (mode, failTranslation) => {
     const env = await createScenario(`question-gateway-${mode}-${failTranslation}`);
     const question = "The import must keep existing records. Should duplicate rows be rejected or merged?";
-    const translated = "ZH: " + question;
+    const finalReply = `## Decision needed\n\n${question}`;
+    const translated = "ZH: " + finalReply;
     const translatedSources: string[] = [];
     env.mockRuntime.onPrompt("translator", "Translate each <VCM_TEXT>", async (ctx) => {
       await ctx.userPromptSubmit();
@@ -108,29 +111,98 @@ describe("PM question detection through the Stop hook API", () => {
       await ctx.userPromptSubmit();
       const registered = await env.app.inject({ method: "POST", url: `/api/tasks/${env.task.taskSlug}/ask-user`, payload: { question } });
       expect(registered.statusCode, registered.body).toBe(200);
-      await ctx.appendTranscriptText("Waiting for your answer.");
-      await ctx.stop();
+      await ctx.writeOutput(finalReply);
+      await ctx.appendTranscriptText(finalReply);
+      await ctx.stop({ last_assistant_message: finalReply });
     });
     const pm = env.mockRuntime.getSessionByRole(env.task.taskSlug, "project-manager")!;
     env.mockRuntime.write(pm.id, "Ask about import");
     await env.mockRuntime.waitForIdle();
     await waitFor(async () => {
       const feed = await pollTranslationFeed(env.app, env.task.taskSlug);
-      expect(feed.events.some((item) => item.event.type === "entry" && item.event.entry.sourceText === question
+      expect(feed.events.some((item) => item.event.type === "entry" && item.event.entry.sourceText === finalReply
         && (failTranslation ? item.event.entry.status === "failed" : item.event.entry.translatedText === translated))).toBe(true);
       expect(feed.events.some((item) => item.event.type === "entry" && item.event.entry.sourceText === "Waiting for your answer.")).toBe(false);
       expect(env.mockGateway.sentTexts.some((item) => item.text.includes(failTranslation ? "PM 角色回复已收到，但翻译失败。" : translated))).toBe(true);
-      expect((await getWorkspaceState(env.app, env.task.taskSlug)).roundState.flowPause)
-        .toMatchObject({ paused: true, message: question });
+      const pause = (await getWorkspaceState(env.app, env.task.taskSlug)).roundState.flowPause;
+      expect(pause).toMatchObject({ paused: true });
+      expect(pause?.message).toBeUndefined();
     }, 15_000);
     const session = (await env.pmSession())!;
     await env.deps.gatewayService.handleRoleStop({ repoRoot: env.repo.repoRoot, taskSlug: env.task.taskSlug, session });
     await pollTranslationFeed(env.app, env.task.taskSlug);
-    expect(translatedSources.filter((text) => text === question)).toHaveLength(1);
-    expect(translatedSources).not.toContain("Waiting for your answer.");
-    expect(env.mockGateway.sentTexts.filter((item) => item.text.includes("Round Final Reply 原文：") && item.text.includes(question))).toHaveLength(1);
+    expect(translatedSources.filter((text) => text === finalReply)).toHaveLength(1);
+    expect(translatedSources).not.toContain(question);
+    expect(env.mockGateway.sentTexts.filter((item) => item.text.includes("Round Final Reply 原文：") && item.text.includes(finalReply))).toHaveLength(1);
     expect(env.mockGateway.sentTexts.filter((item) => item.text.includes(failTranslation ? "PM 角色回复已收到，但翻译失败。" : translated))).toHaveLength(1);
     expect(env.mockGateway.sentTexts.some((item) => item.text.includes("Waiting for your answer."))).toBe(false);
+  }, 45_000);
+
+  it.each([false, true])("preserves the actual PM question on panel reload and after an answer (translation: %s)", async (enabled) => {
+    const env = await createScenario(`question-panel-${enabled}`);
+    const question = "Which storage format should this task support?";
+    const finalReply = `Existing records use format A. Format B would require migrating them.\n\n${question}`;
+    await updatePreferences(env.app, { translationEnabled: enabled, translationOutputMode: "round-final" });
+    const translatedSources: string[] = [];
+    env.mockRuntime.onPrompt("translator", "Translate each <VCM_TEXT>", async (ctx) => {
+      await ctx.userPromptSubmit();
+      for (const match of ctx.prompt.matchAll(/Result Path \d+:\s*(.+?)\n<VCM_TEXT\d+>\n([\s\S]*?)\n<\/VCM_TEXT\d+>/g)) {
+        translatedSources.push(match[2]!);
+        await ctx.writeAbsoluteFile(match[1]!.trim(), "ZH: " + match[2]);
+      }
+      await ctx.stop();
+    }, { once: false });
+    if (enabled) {
+      const ensure = await env.app.inject({ method: "POST", url: "/api/translation/session/ensure", payload: { taskSlug: env.task.taskSlug } });
+      expect(ensure.statusCode, ensure.body).toBe(200);
+    }
+    const pm = env.mockRuntime.getSessionByRole(env.task.taskSlug, "project-manager")!;
+    env.mockRuntime.onPrompt("project-manager", "Ask about storage", async (ctx) => {
+      await ctx.userPromptSubmit();
+      const registered = await env.app.inject({ method: "POST", url: `/api/tasks/${env.task.taskSlug}/ask-user`, payload: { question } });
+      expect(registered.statusCode, registered.body).toBe(200);
+      // The normal transcript, not the registration payload, is display authority.
+      await ctx.writeOutput(finalReply);
+      await ctx.appendTranscriptText(finalReply);
+      await ctx.stop({ last_assistant_message: finalReply });
+    });
+    env.mockRuntime.write(pm.id, "Ask about storage");
+    await env.mockRuntime.waitForIdle();
+    await waitFor(async () => {
+      const feed = await pollTranslationFeed(env.app, env.task.taskSlug);
+      expect(feed.events.some((item) => item.event.type === "entry" && item.event.entry.sourceText === finalReply
+        && item.event.entry.status === (enabled ? "translated" : "preserved"))).toBe(true);
+    }, 15_000);
+    const session = (await env.pmSession())!;
+    expect(await fs.readFile(session.transcriptPath!, "utf8")).toContain(JSON.stringify(finalReply));
+    let terminalReplay = "";
+    const unsubscribe = env.mockRuntime.subscribe(pm.id, (event) => {
+      if (event.type === "output") terminalReplay += event.data;
+    });
+    unsubscribe();
+    expect(terminalReplay).toContain(finalReply);
+
+    for (const afterAnswer of [false, true]) {
+      if (afterAnswer) {
+        env.mockRuntime.onPrompt("project-manager", "Use format A.", async (ctx) => {
+          await ctx.userPromptSubmit();
+          await ctx.stop();
+        });
+        env.mockRuntime.write(pm.id, "Use format A.");
+        await env.mockRuntime.waitForIdle();
+      }
+      const feed = await pollTranslationFeed(env.app, env.task.taskSlug, 1);
+      const entries = feed.events.flatMap((item) => item.event.type === "entry" ? [item.event.entry] : []);
+      const replies = entries.filter((entry) => entry.sourceText === finalReply);
+      expect(new Set(replies.map((entry) => entry.id)).size).toBe(1);
+      expect(replies.every((entry) => entry.role === "project-manager")).toBe(true);
+      expect(feed.events.filter((item) => item.event.type === "entry" && item.event.entry.sourceText === finalReply)
+        .every((item) => item.sessionId === pm.id)).toBe(true);
+      expect(entries.some((entry) => entry.sourceText === question)).toBe(false);
+      expect((await env.state()).awaitingUser === null).toBe(afterAnswer);
+    }
+    expect(translatedSources).toEqual(enabled ? [finalReply] : []);
+    expect(env.mockGateway.sentTexts).toEqual([]);
   }, 45_000);
 
   it("preserves approval, dispatches normally, and accepts reports while Architect is still running", async () => {

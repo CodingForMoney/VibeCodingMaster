@@ -66,19 +66,16 @@ describe("workflow control service", () => {
     expect((await service.getState(context)).pendingDispatch).toBeNull();
   });
 
-  it("preserves a single completed question across duplicate Stop, an answer, and service restart", async () => {
+  it("preserves the complete waiting question across restart and clears it only when resolved", async () => {
     const { context, fs } = await createContext(roots);
     const service = createWorkflowControlService({ fs, now: () => "2026-09-09T00:00:01.000Z" });
     const question = "Please choose the required behavior.\n" + "Full context. ".repeat(1000);
     await service.requestUserInput(context, question);
-    const turn = { sessionId: "pm-1", startedAt: "2026-09-09T00:00:00.000Z", endedAt: "2026-09-09T00:00:02.000Z" };
-    const reply = await service.completeUserQuestion(context, turn);
-    expect(reply?.question).toBe(question.trim());
-    expect(await service.completeUserQuestion(context, turn)).toEqual(reply);
-    await service.resolveUserInput(context);
     const restored = createWorkflowControlService({ fs });
-    expect((await restored.getState(context)).userQuestionReplies).toEqual([reply]);
-    expect(await restored.completeUserQuestion(context, { ...turn, endedAt: "2026-09-09T00:00:03.000Z" })).toBeUndefined();
+    expect((await restored.getState(context)).awaitingUser?.question).toBe(question.trim());
+    await expect(restored.runWhileNotAwaitingUser(context, async () => "dispatched"))
+      .rejects.toMatchObject({ code: "WORKFLOW_AWAITING_USER" });
+    await restored.resolveUserInput(context);
     expect((await restored.getState(context)).awaitingUser).toBeNull();
   });
 

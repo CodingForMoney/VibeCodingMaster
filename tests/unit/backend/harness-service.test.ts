@@ -69,7 +69,10 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.github/pull_request_template.md")).toContain("Final acceptance completed for code-change flow");
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("name: vcm-route-message");
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("## Purpose");
-    expect(await fs.readText("/repo/.claude/skills/vcm-ask-user/SKILL.md")).toContain("Every question pauses the workflow");
+    const askUserSkill = await fs.readText("/repo/.claude/skills/vcm-ask-user/SKILL.md");
+    expect(askUserSkill).toContain("Every question pauses the workflow");
+    expect(askUserSkill).toContain("present the complete question and necessary context in your final reply");
+    expect(askUserSkill).toContain("The tool registers the workflow wait; it does not deliver your question.");
     expect(await fs.readText("/repo/.ai/tools/vcm-ask-user")).toContain("/ask-user");
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("This skill writes a route file");
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("VCM uses project-manager as the routing hub.");
@@ -154,8 +157,9 @@ describe("createHarnessService", () => {
     expect(projectManagerAgent).toContain("while the current Round continues is not user communication");
     expect(projectManagerAgent).toContain("The user is informed only by PM's Round Final Reply");
     expect(projectManagerAgent).toContain("Never rely on earlier PM text in the same Round.");
-    expect(projectManagerAgent).toContain("submit the complete user-facing question and its necessary context");
-    expect(projectManagerAgent).toContain("VCM delivers the registered question as the Round Final Reply");
+    expect(projectManagerAgent).toContain("register it through `vcm-ask-user`");
+    expect(projectManagerAgent).toContain("present the complete question and necessary context in your final reply");
+    expect(projectManagerAgent).not.toContain("VCM delivers the registered question");
     expect(projectManagerAgent).toContain("Plain language means translating technical detail, not deleting it.");
     expect(projectManagerAgent).toContain("Read the complete source report or handoff artifact before replying.");
     expect(projectManagerAgent).toContain("Reuse that instruction verbatim and do not ask the user to confirm it again.");

@@ -43,7 +43,6 @@ export function shouldShowFlowPauseNotice(
   previousObservation: { status: VcmRoundStatus } | undefined,
   taskViewStartedAtMs: number | undefined
 ): boolean {
-  if (roundState.flowPause?.paused && roundState.flowPause.message) return true;
   if (previousObservation?.status === "running") return true;
   const stoppedAtMs = Date.parse(roundState.stoppedAt ?? roundState.lastTurnEndedAt ?? "");
   return Boolean(taskViewStartedAtMs && Number.isFinite(stoppedAtMs) && stoppedAtMs > taskViewStartedAtMs);

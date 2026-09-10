@@ -17,6 +17,6 @@ Submit the complete user-facing question, including the context needed to answer
 .ai/tools/vcm-ask-user --question "<exact question>"
 ```
 
-After the tool returns `awaiting_user`, end the turn. VCM delivers the registered question as the Round Final Reply through the existing display, translation, and Gateway paths. Do not rely on a separate final message to supply missing context. Do not request Workflow Review, write a route message, run a Gate, or advance the workflow in the same turn.
+After the tool returns `awaiting_user`, present the complete question and necessary context in your final reply, then end the turn and wait for the user. The tool registers the workflow wait; it does not deliver your question. Do not request Workflow Review, write a route message, run a Gate, or advance the workflow in the same turn.
 
 Every question pauses the workflow. PM may defer a question by not asking it; once PM asks, only a new direct user message resumes the workflow. The previous workflow approval is canceled, so request a fresh approval before the next dispatch.

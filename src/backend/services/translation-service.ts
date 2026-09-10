@@ -45,9 +45,6 @@ import type { ProjectService } from "./project-service.js";
 import type { SessionService } from "./session-service.js";
 import type { RoundService } from "./round-service.js";
 import { createTranslationQueueRegistry } from "./translation-queue.js";
-import type { WorkflowUserQuestionReply } from "../../shared/types/workflow.js";
-import type { WorkflowControlService } from "./workflow-control-service.js";
-import { findUserQuestionReply, isPendingUserQuestion } from "./user-question-reply.js";
 
 export interface TranslationService {
   startSession(input: StartTranslationSessionServiceInput): Promise<StartTranslationSessionResult>;
@@ -59,7 +56,6 @@ export interface TranslationService {
   ): Promise<PollTranslationSessionResult>;
   pollTaskFeed(input: PollTranslationTaskFeedServiceInput): Promise<PollTranslationTaskFeedResult>;
   recordConversationBoundary(input: RecordTranslationConversationBoundaryInput): Promise<TranslationEntry | undefined>;
-  recordUserQuestionReply(input: { repoRoot: string; taskRepoRoot: string; taskSlug: string; reply: WorkflowUserQuestionReply }): Promise<void>;
   translateUserInput(input: TranslateUserInputServiceInput): Promise<TranslateUserInputResult>;
   translateManualOutput(input: TranslateManualOutputServiceInput): Promise<TranslationEntry>;
   translateLatestReply(input: TranslateLatestReplyServiceInput): Promise<TranslationEntry>;
@@ -164,7 +160,6 @@ export interface TranslationServiceDeps {
   fs?: FileSystemAdapter;
   projectService?: Pick<ProjectService, "loadConfig">;
   roundService?: Pick<RoundService, "getSessionRoundState">;
-  workflowControlService?: Pick<WorkflowControlService, "getState">;
   appSettings: Pick<AppSettingsService, "getPreferences">;
   now?: () => string;
   id?: () => string;
@@ -513,22 +508,6 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 
     const config = await loadConfig();
 
-    if (state.role === "project-manager" && event.kind === "text" && event.stopReason === "end_turn"
-      && !event.isSidechain && state.repoRoot && state.taskSlug && deps.workflowControlService && deps.projectService) {
-      const projectConfig = await deps.projectService.loadConfig(state.baseRepoRoot ?? state.repoRoot);
-      const workflow = await deps.workflowControlService.getState({
-        taskRepoRoot: state.repoRoot, taskSlug: state.taskSlug,
-        stateRoot: projectConfig.stateRoot, handoffDir: projectConfig.handoffRoot
-      });
-      const reply = findUserQuestionReply(workflow, sessionId, event.timestamp);
-      if (reply) {
-        publishUserQuestionReply(reply, config);
-        state.seenTranscriptIds.add(event.id);
-        return;
-      }
-      if (isPendingUserQuestion(workflow, event.timestamp)) return;
-    }
-
     let displayed = false;
     if (event.kind === "text") {
       const shouldTranslate = shouldTranslateTextTranscriptEvent(state, event, config);
@@ -574,19 +553,6 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       return state.role === "project-manager";
     }
     return true;
-  }
-
-  function publishUserQuestionReply(reply: WorkflowUserQuestionReply, config: TranslationRuntimeConfig): void {
-    const state = getState(reply.sessionId);
-    if (state.seenTranscriptIds.has(reply.id)) return;
-    const metadata = { transcriptStopReason: "end_turn", transcriptTimestamp: reply.completedAt };
-    // Claim before scheduling translation so Stop and transcript replay share one entry/job.
-    state.seenTranscriptIds.add(reply.id);
-    if (config.enabled === false || config.outputMode === "round-final") {
-      pushPreservedProseEntry(reply.sessionId, reply.id, reply.question, config, metadata);
-    } else {
-      processClaudeOutputText(reply.sessionId, reply.question, config, reply.id, { flushImmediately: true, metadata });
-    }
   }
 
   function processClaudeOutputText(
@@ -1049,12 +1015,6 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
   }
 
   return {
-    async recordUserQuestionReply(input) {
-      await prepareCache({ repoRoot: input.taskRepoRoot, baseRepoRoot: input.repoRoot,
-        taskSlug: input.taskSlug, role: "project-manager", sessionId: input.reply.sessionId });
-      publishUserQuestionReply(input.reply, await loadConfig());
-      await persistEvents(getState(input.reply.sessionId));
-    },
     async startSession(input) {
       const roleSession = await deps.sessionService.getRoleSession(input.repoRoot, input.taskSlug, input.role);
       if (!roleSession || roleSession.status !== "running") {
@@ -1129,17 +1089,6 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
           role: roleSession.role,
           status: state.status
         });
-      }
-
-      if (deps.workflowControlService && deps.projectService) {
-        const projectConfig = await deps.projectService.loadConfig(input.repoRoot);
-        const workflow = await deps.workflowControlService.getState({ ...input,
-          stateRoot: projectConfig.stateRoot, handoffDir: projectConfig.handoffRoot });
-        for (const reply of workflow.userQuestionReplies ?? []) {
-          if (feedSessions.some((session) => session.role === "project-manager" && session.sessionId === reply.sessionId)) {
-            publishUserQuestionReply(reply, config);
-          }
-        }
       }
 
       if (config.outputMode === "round-final") {
