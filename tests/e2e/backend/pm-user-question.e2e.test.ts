@@ -31,6 +31,46 @@ const statusReport = [
 ].join("\n");
 
 describe("PM question detection through the Stop hook API", () => {
+  it.each(["architect", "coder", "tester"] as const)("rejects PM routing to %s with instructions to ask and stop until the user replies", async (targetRole) => {
+    const env = await createScenario(`question-rejected-route-${targetRole}`);
+    await env.approveArchitect("code-change");
+    await env.beginPmTurn();
+    const routePath = `.ai/vcm/handoffs/messages/project-manager-${targetRole}.md`;
+    const absolutePath = path.join(env.task.worktreePath, routePath);
+    const originalContent = await fs.readFile(absolutePath, "utf8");
+    const question = "Which storage format should this task support?";
+    const registered = await env.app.inject({
+      method: "POST", url: `/api/tasks/${env.task.taskSlug}/ask-user`, payload: { question }
+    });
+    expect(registered.statusCode, registered.body).toBe(200);
+    const pm = (await env.pmSession())!;
+
+    for (const stopped of [false, true]) {
+      if (stopped) expect(await env.stopPm(question)).toEqual({});
+      const response = await env.app.inject({
+        method: "POST", url: `/api/tasks/${env.task.taskSlug}/artifacts/submit`,
+        payload: {
+          role: "project-manager", runtimeSessionToken: pm.runtimeSessionToken,
+          kind: "route-message", mode: "final", path: routePath,
+          content: "---\ntype: task\n---\nContinue the implementation.\n"
+        }
+      });
+      expect(response.statusCode, response.body).toBe(409);
+      expect(response.json().error).toMatchObject({
+        code: "WORKFLOW_AWAITING_USER",
+        message: expect.stringContaining("Present the complete question and necessary context in your final reply, end the current turn, and wait for a new direct user message."),
+        hint: "The previous workflow approval was canceled; request a fresh approval after the answer arrives."
+      });
+      expect(await fs.readFile(absolutePath, "utf8")).toBe(originalContent);
+      expect((await env.state()).awaitingUser?.question).toBe(question);
+      expect((await env.state()).pendingDispatch).toBeNull();
+    }
+
+    await env.directUserPrompt("Use the existing format.");
+    expect((await env.state()).awaitingUser).toBeNull();
+    expect((await env.state()).pendingDispatch).toBeNull();
+  });
+
   it("registers a wait without synthesizing a reply and blocks advancement until direct user input", async () => {
     const env = await createScenario("question-delivery-off");
     await updatePreferences(env.app, { translationEnabled: false });

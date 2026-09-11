@@ -181,7 +181,11 @@ describe("workflow control service", () => {
       ...context,
       routePath: routePath("architect"),
       targetRole: "architect"
-    })).rejects.toMatchObject({ code: "WORKFLOW_AWAITING_USER" });
+    })).rejects.toMatchObject({
+      code: "WORKFLOW_AWAITING_USER",
+      message: expect.stringContaining("Present the complete question and necessary context in your final reply, end the current turn, and wait for a new direct user message."),
+      hint: "The previous workflow approval was canceled; request a fresh approval after the answer arrives."
+    });
 
     expect((await restored.resolveUserInput(context)).awaitingUser).toBeNull();
     expect((await restored.getProgress(context)).proposal).toBeUndefined();

@@ -1887,8 +1887,8 @@ function failWhileAwaitingUser(state: WorkflowControlState): void {
   if (!state.awaitingUser) return;
   throw workflowError(
     "WORKFLOW_AWAITING_USER",
-    "Project Manager is waiting for the user's answer and cannot advance the workflow.",
-    "Wait for a new direct user message. The previous workflow approval was canceled; request a fresh approval after the answer arrives."
+    "vcm-ask-user has registered a user question; Project Manager cannot advance the workflow. Present the complete question and necessary context in your final reply, end the current turn, and wait for a new direct user message.",
+    "The previous workflow approval was canceled; request a fresh approval after the answer arrives."
   );
 }
 
