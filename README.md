@@ -253,10 +253,9 @@ such as a Dev Container or VM.
 
 Model and effort can be selected before start/resume/restart. Changes affect the
 next launched process, not a currently running Claude Code process.
-The native model list includes explicit `Fable 5.1` (`claude-fable-5-1`) and a
-separate `Fable Alias` whose resolved version is selected by Claude Code and the
-active account provider. `Opus` and `Sonnet` continue to track their Claude Code
-aliases, while `Opus 4.8` remains available as a pinned model.
+The native model list is `Default`, `Fable`, `Opus`, and `Sonnet`. The latter
+three use Claude Code aliases, so the resolved model depends on the installed
+Claude Code version and provider.
 
 ## Usage Analytics
 

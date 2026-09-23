@@ -487,6 +487,12 @@ function normalizeClaudeModel(input: unknown, fallback: SessionModel): SessionMo
   if (typeof input !== "string") {
     return fallback;
   }
+  if (input === "claude-fable-5-1") {
+    return "fable";
+  }
+  if (input === "claude-opus-4-8") {
+    return "opus";
+  }
   if (isCodexBridgeSessionModel(input)) {
     return input;
   }

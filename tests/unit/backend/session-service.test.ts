@@ -3,6 +3,7 @@ import type { ProjectConfig } from "../../../src/shared/types/project.js";
 import type { RoleName } from "../../../src/shared/types/role.js";
 import {
   CLAUDE_EFFORT_OPTIONS,
+  CLAUDE_MODEL_OPTIONS,
   type ClaudeModel,
   type RoleSessionRecord,
   type SessionEffort
@@ -22,6 +23,15 @@ const TASK_WORKTREE = "/repo/.claude/worktrees/demo-task";
 const LSP_PLUGIN_ARGS = ["--plugin-dir", VCM_LSP_PLUGIN_DIR];
 
 describe("createSessionService", () => {
+  it("offers only the four Claude model choices", () => {
+    expect(CLAUDE_MODEL_OPTIONS.map((option) => [option.label, option.value])).toEqual([
+      ["Default", "default"],
+      ["Fable", "fable"],
+      ["Opus", "opus"],
+      ["Sonnet", "sonnet"]
+    ]);
+  });
+
   it("keeps Max effort in Claude Code options", () => {
     expect(CLAUDE_EFFORT_OPTIONS.map((option) => option.value)).toContain("max");
   });
@@ -152,16 +162,32 @@ describe("createSessionService", () => {
     const service = createTestSessionService(fs, runtimeInputs);
 
     const started = await service.startRoleSession("/repo", "demo-task", "coder", {
-      model: "claude-fable-5-1"
+      model: "fable"
     });
 
-    expect(started.model).toBe("claude-fable-5-1");
+    expect(started.model).toBe("fable");
     expect(runtimeInputs[0]?.args).toEqual([
       "--agent",
       "coder",
       "--model",
-      "claude-fable-5-1"
+      "fable"
     ]);
+  });
+
+  it.each([
+    ["claude-fable-5-1", "fable"],
+    ["claude-opus-4-8", "opus"]
+  ])("maps removed %s model to %s on launch", async (savedModel, expectedModel) => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const service = createTestSessionService(fs, runtimeInputs);
+
+    const started = await service.startRoleSession("/repo", "demo-task", "coder", {
+      model: savedModel as ClaudeModel
+    });
+
+    expect(started.model).toBe(expectedModel);
+    expect(runtimeInputs[0]?.args).toContain(expectedModel);
   });
 
   it("starts role sessions with the selected Claude effort", async () => {

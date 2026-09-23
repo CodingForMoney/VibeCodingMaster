@@ -112,7 +112,7 @@ describe("app-settings-service", () => {
     launchTemplate.autoOrchestration = false;
     launchTemplate.roles.coder = {
       permissionMode: "bypassPermissions",
-      model: "claude-fable-5-1",
+      model: "fable",
       effort: "high"
     };
 
@@ -122,6 +122,35 @@ describe("app-settings-service", () => {
 
     const stored = await fs.readJson<AppSettingsFile>("/settings.json");
     expect(stored.preferences.launchTemplate).toEqual(launchTemplate);
+  });
+
+  it("maps saved pinned Claude models to their family aliases", async () => {
+    const preferences = createDefaultPreferences();
+    const fs = createMemoryFs({
+      "/settings.json": {
+        version: 1,
+        preferences: {
+          ...preferences,
+          launchTemplate: {
+            ...preferences.launchTemplate,
+            roles: {
+              ...preferences.launchTemplate.roles,
+              architect: { ...preferences.launchTemplate.roles.architect, model: "claude-fable-5-1" }
+            }
+          },
+          toolSessionDefaults: {
+            ...preferences.toolSessionDefaults,
+            translator: { ...preferences.toolSessionDefaults.translator, model: "claude-opus-4-8" }
+          }
+        },
+        recentRepositoryPaths: []
+      }
+    });
+    const service = createAppSettingsService({ fs, settingsPath: "/settings.json" });
+
+    const loaded = await service.getPreferences();
+    expect(loaded.launchTemplate.roles.architect.model).toBe("fable");
+    expect(loaded.toolSessionDefaults.translator.model).toBe("opus");
   });
 
   it("uses independent tool Session defaults when settings do not contain them", async () => {

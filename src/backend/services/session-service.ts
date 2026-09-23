@@ -2133,10 +2133,14 @@ function normalizeClaudePermissionMode(value: unknown): ClaudePermissionMode {
 }
 
 function normalizeClaudeModel(value: unknown): SessionModel {
+  if (value === "claude-fable-5-1") {
+    return "fable";
+  }
+  if (value === "claude-opus-4-8") {
+    return "opus";
+  }
   if (
-    value === "claude-fable-5-1"
-    || value === "opus"
-    || value === "claude-opus-4-8"
+    value === "opus"
     || value === "sonnet"
     || value === "fable"
     || isCodexBridgeSessionModel(value)

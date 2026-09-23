@@ -66,14 +66,14 @@ describe("createClaudeAdapter", () => {
     });
   });
 
-  it("builds role commands with the pinned Opus 4.8 model", () => {
+  it("builds role commands with the Fable alias", () => {
     expect(adapter.buildRoleStartCommand(
       "architect",
       "claude",
       "default",
       undefined,
       false,
-      "claude-opus-4-8"
+      "fable"
     )).toEqual({
       command: "claude",
       args: [
@@ -82,31 +82,9 @@ describe("createClaudeAdapter", () => {
         "--agent",
         "architect",
         "--model",
-        "claude-opus-4-8"
+        "fable"
       ],
-      display: "claude --allowedTools 'Glob,Grep' --agent architect --model claude-opus-4-8"
-    });
-  });
-
-  it("builds role commands with the pinned Fable 5.1 model", () => {
-    expect(adapter.buildRoleStartCommand(
-      "architect",
-      "claude",
-      "default",
-      undefined,
-      false,
-      "claude-fable-5-1"
-    )).toEqual({
-      command: "claude",
-      args: [
-        "--allowedTools",
-        "Glob,Grep",
-        "--agent",
-        "architect",
-        "--model",
-        "claude-fable-5-1"
-      ],
-      display: "claude --allowedTools 'Glob,Grep' --agent architect --model claude-fable-5-1"
+      display: "claude --allowedTools 'Glob,Grep' --agent architect --model fable"
     });
   });
 

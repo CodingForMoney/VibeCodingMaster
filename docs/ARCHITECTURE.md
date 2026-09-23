@@ -503,9 +503,8 @@ launch template. Explicit Start and Restart routes save the successful Session's
 permission, model, and effort; automatic startup and Resume never write them.
 Fresh tool Sessions use the saved defaults, while resumable task Sessions keep
 the launch options recorded by that Session.
-Native launches may select the explicit `claude-fable-5-1` model independently
-from the provider-resolved `fable` alias. `opus` and `sonnet` remain rolling
-Claude Code aliases, while `claude-opus-4-8` remains pinned.
+Native launches offer `default`, `fable`, `opus`, and `sonnet`; the latter three
+resolve through Claude Code according to its version and provider.
 
 Round tracking includes Project Manager, Architect, Coder, Tester, and optional
 Reviewer sessions. Translator and Harness Engineer are task-scoped tool
