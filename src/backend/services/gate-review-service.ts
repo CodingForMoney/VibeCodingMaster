@@ -268,7 +268,14 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     }
 
     if (gate === "code-diff") {
-      const dirtyStatus = await getDirtyCodeDiffStatus(deps.runner, context.taskRepoRoot);
+      let dirtyStatus: string | undefined;
+      try {
+        dirtyStatus = await getDirtyCodeDiffStatus(deps.runner, context.taskRepoRoot);
+      } catch (error) {
+        const message = errorMessage(error);
+        index = await recordCodeDiffStartFailure(index, context, gate, codeDiffSource, message);
+        return { status: "failed_to_start", gate, record: index.gates[gate], message };
+      }
       if (dirtyStatus) {
         const message = `code-diff requires committed inputs; commit or clean these changes first: ${dirtyStatus}`;
         index = applyGateState(index, gate, {
@@ -445,9 +452,16 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       }
     }
 
-    const codeDiffInput = gate === "code-diff"
-      ? await resolveCodeDiffInput(deps, context, record)
-      : undefined;
+    let codeDiffInput: CodeDiffInput | undefined;
+    if (gate === "code-diff") {
+      try {
+        codeDiffInput = await resolveCodeDiffInput(deps, context, record);
+      } catch (error) {
+        const message = errorMessage(error);
+        index = await recordCodeDiffStartFailure(index, context, gate, codeDiffSource, message);
+        return { status: "failed_to_start", gate, record: index.gates[gate], message };
+      }
+    }
     if (gate === "code-diff" && (!codeDiffInput || codeDiffInput.commits.length === 0)) {
       index = applyGateState(index, gate, {
         status: "not_required",
@@ -1470,7 +1484,7 @@ async function resolveCodeDiffBaseCommit(
       "merge-base",
       "HEAD",
       rootBranch
-    ])).trim();
+    ], { allowFailure: true })).trim();
     if (
       mergeBase
       && mergeBase !== headCommit
@@ -1485,13 +1499,13 @@ async function resolveCodeDiffBaseCommit(
     "--abbrev-ref",
     "--symbolic-full-name",
     "@{upstream}"
-  ])).trim();
+  ], { allowFailure: true })).trim();
   if (upstream) {
     const mergeBase = (await commandStdout(deps.runner, context.taskRepoRoot, [
       "merge-base",
       "HEAD",
       upstream
-    ])).trim();
+    ], { allowFailure: true })).trim();
     if (
       mergeBase
       && mergeBase !== headCommit
@@ -1781,9 +1795,30 @@ async function readCodeDiffSourceArtifactError(
   return undefined;
 }
 
-async function commandStdout(runner: CommandRunner, cwd: string, args: string[]): Promise<string> {
-  const result = await runner.run("git", args, { cwd });
-  return result.exitCode === 0 ? result.stdout : "";
+async function commandStdout(
+  runner: CommandRunner,
+  cwd: string,
+  args: string[],
+  options: { allowFailure?: boolean } = {}
+): Promise<string> {
+  const retryHead = args.length === 2 && args[0] === "rev-parse" && args[1] === "HEAD";
+  const attempts = retryHead ? 3 : 1;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const result = await runner.run("git", args, { cwd });
+    if (result.exitCode === 0) return result.stdout;
+    if (attempt + 1 < attempts) {
+      await delay(100 * (attempt + 1));
+      continue;
+    }
+    if (options.allowFailure) return "";
+    const detail = result.stderr.trim() || result.stdout.trim() || "Git did not provide an error message.";
+    throw new VcmError({
+      code: "GATE_REVIEW_GIT_COMMAND_FAILED",
+      message: `Git ${args.join(" ")} failed in ${cwd} (exit ${result.exitCode}): ${detail}`,
+      statusCode: 409
+    });
+  }
+  return "";
 }
 
 function splitLines(value: string): string[] {

@@ -117,6 +117,27 @@ def process_exists(pid: int) -> bool:
         return True
 
 
+def process_group_exists(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def wait_for_process_group_exit(process: subprocess.Popen, timeout: float) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        process.poll()
+        if not process_group_exists(process.pid):
+            return True
+        time.sleep(0.05)
+    process.poll()
+    return not process_group_exists(process.pid)
+
+
 def stop_command(process: subprocess.Popen) -> str:
     try:
         os.killpg(process.pid, signal.SIGTERM)
@@ -127,17 +148,15 @@ def stop_command(process: subprocess.Popen) -> str:
         process.terminate()
         mode = "process"
 
-    try:
-        process.wait(timeout=2)
+    if wait_for_process_group_exit(process, 2):
         return f"terminated-{mode}"
-    except subprocess.TimeoutExpired:
-        pass
 
     try:
         os.killpg(process.pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError):
-        process.kill()
-    return f"killed-{mode}"
+        if process.poll() is None:
+            process.kill()
+    return f"killed-{mode}" if wait_for_process_group_exit(process, 2) else f"cleanup-incomplete-{mode}"
 
 
 def lease_age_seconds(lease_path: Path) -> float | None:

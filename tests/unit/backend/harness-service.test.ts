@@ -429,6 +429,9 @@ describe("createHarnessService", () => {
       "rust",
       "typescript"
     ]);
+    expect(harnessStatus.warnings).toEqual(expect.arrayContaining([
+      expect.stringContaining("Architect LSP for TypeScript / JavaScript is unavailable")
+    ]));
   });
 
   it("reports a broken language server and caches the failed startup probe", async () => {

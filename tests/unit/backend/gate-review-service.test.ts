@@ -774,6 +774,62 @@ describe("gate-review-service", () => {
     expect(runnerCalls.some((call) => call.args.join(" ") === "show --format= --binary --find-renames abc1234")).toBe(true);
   });
 
+  it("retries a transient HEAD failure before deciding whether code-diff is needed", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-head-retry-"));
+    await writeHarnessFiles(tmpRepo);
+    let headAttempts = 0;
+    const baseRunner = createRunner(tmpRepo, [], { "rev-parse HEAD": "head-sha" });
+    const runner: CommandRunner = {
+      ...baseRunner,
+      async run(command, args = [], options) {
+        if (command === "git" && args.join(" ") === "rev-parse HEAD" && options?.cwd === taskWorktree(tmpRepo!)) {
+          headAttempts += 1;
+          if (headAttempts === 1) return { stdout: "", stderr: "temporary git refusal", exitCode: 128 };
+        }
+        return baseRunner.run(command, args, options);
+      }
+    };
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(), runner, runtime: createRuntime(tmpRepo, []),
+      projectService: createProjectService(), taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["code-diff"]), sessionService: createSessionService(),
+      roundService: createRoundService()
+    });
+
+    expect((await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", { codeDiffSource: "coder" })).status)
+      .toBe("not_required");
+    expect(headAttempts).toBe(2);
+  });
+
+  it("reports the git error when HEAD resolution keeps failing", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-head-failure-"));
+    await writeHarnessFiles(tmpRepo);
+    let headAttempts = 0;
+    const baseRunner = createRunner(tmpRepo, []);
+    const runner: CommandRunner = {
+      ...baseRunner,
+      async run(command, args = [], options) {
+        if (command === "git" && args.join(" ") === "rev-parse HEAD") {
+          headAttempts += 1;
+          return { stdout: "", stderr: "fatal: detected dubious ownership", exitCode: 128 };
+        }
+        return baseRunner.run(command, args, options);
+      }
+    };
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(), runner, runtime: createRuntime(tmpRepo, []),
+      projectService: createProjectService(), taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["code-diff"]), sessionService: createSessionService(),
+      roundService: createRoundService()
+    });
+
+    const result = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", { codeDiffSource: "coder" });
+    expect(result.status).toBe("failed_to_start");
+    expect(result.message).toContain("exit 128");
+    expect(result.message).toContain("detected dubious ownership");
+    expect(headAttempts).toBe(3);
+  });
+
   it("excludes Harness commits from mixed code-diff input", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-harness-filter-"));
     await writeHarnessFiles(tmpRepo);

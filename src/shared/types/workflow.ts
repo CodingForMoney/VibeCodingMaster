@@ -71,6 +71,7 @@ export interface WorkflowPendingDispatch {
   status: "pending" | "dispatching";
   routeContentHash?: string;
   messageId?: string;
+  confirmationError?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -93,7 +94,7 @@ export interface WorkflowFlowRun {
 
 export interface WorkflowUserAuthorization {
   id: string;
-  status: "accepted" | "consumed";
+  status: "accepted" | "consumed" | "abandoned";
   role: "project-manager";
   operation: "workflow-dispatch";
   baseRevision: number;
@@ -106,11 +107,13 @@ export interface WorkflowUserAuthorization {
   authorizationText: string;
   createdAt: string;
   consumedAt?: string;
+  abandonedAt?: string;
+  abandonReason?: string;
 }
 
 export interface WorkflowUserApprovedFollowUp {
   id: string;
-  status: "accepted" | "consumed";
+  status: "accepted" | "consumed" | "abandoned";
   role: "project-manager";
   operation: "post-validation-follow-up";
   baseRevision: number;
@@ -121,6 +124,8 @@ export interface WorkflowUserApprovedFollowUp {
   approvalText: string;
   createdAt: string;
   consumedAt?: string;
+  abandonedAt?: string;
+  abandonReason?: string;
 }
 
 export interface WorkflowAwaitingUser {

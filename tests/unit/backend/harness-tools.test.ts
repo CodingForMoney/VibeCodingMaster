@@ -557,6 +557,34 @@ describe("long-running validation tools", () => {
     expect(status.nextWatchDueAt).toBeUndefined();
   }, 10_000);
 
+  it("kills surviving process-group children when the command leader exits on timeout", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-long-check-"));
+    await installHarnessTools(tmpRepo);
+    const childPidPath = path.join(tmpRepo, "child.pid");
+    const heartbeatPath = path.join(tmpRepo, "child-heartbeat");
+    const childCode = `process.on("SIGTERM", () => {}); setInterval(() => require("node:fs").appendFileSync(process.argv[1], "."), 50);`;
+    const parentCode = `const { spawn } = require("node:child_process"); const fs = require("node:fs"); const child = spawn(process.execPath, ["-e", ${JSON.stringify(childCode)}, process.argv[2]], { stdio: "ignore" }); fs.writeFileSync(process.argv[1], String(child.pid)); process.on("SIGTERM", () => process.exit(0)); setInterval(() => {}, 1000);`;
+    const jobId = await startLongCheck([process.execPath, "-e", parentCode, childPidPath, heartbeatPath], { timeout: "1s" });
+    let childPid = 0;
+    try {
+      const deadline = Date.now() + 3_000;
+      while (!childPid && Date.now() < deadline) {
+        childPid = Number(await readFile(childPidPath, "utf8").catch(() => "0"));
+        if (!childPid) await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(childPid).toBeGreaterThan(0);
+      const status = await waitForJobStatus(jobId, "timeout", 8_000);
+      expect(status.processStopResult).toBe("killed-process-group");
+      const before = await readFile(heartbeatPath, "utf8");
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(await readFile(heartbeatPath, "utf8")).toBe(before);
+    } finally {
+      if (childPid) {
+        try { process.kill(childPid, "SIGKILL"); } catch { /* already stopped */ }
+      }
+    }
+  }, 12_000);
+
   it("orphans a job with a distinct reason after the normal handoff deadline", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-long-check-"));
     await installHarnessTools(tmpRepo);

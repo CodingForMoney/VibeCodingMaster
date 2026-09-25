@@ -74,7 +74,7 @@ describe("createRuntimeRecoveryService", () => {
       id: "msg_1",
       taskSlug: "demo-task",
       fromRole: "project-manager",
-      toRole: "coder",
+      toRole: "architect",
       type: "task",
       body: "Continue",
       artifactRefs: [],
@@ -163,16 +163,17 @@ describe("createRuntimeRecoveryService", () => {
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
-    expect(message.dispatchingAt).toBeUndefined();
-    expect(message.deliveredAt).toBeUndefined();
+    expect(message.dispatchingAt).toBe("2026-06-26T23:59:01.000Z");
+    expect(message.deliveredAt).toBe("2026-06-26T23:59:02.000Z");
     expect(message.failureReason).toContain("VCM restarted");
 
     const workflowState = await readJson(path.join(taskRepoRoot, ".ai/vcm/workflow-control.json"));
     expect(workflowState.pendingDispatch).toMatchObject({
-      status: "pending",
-      targetRole: "architect"
+      status: "dispatching",
+      targetRole: "architect",
+      messageId: "msg_1",
+      confirmationError: expect.stringContaining("restarted")
     });
-    expect(workflowState.pendingDispatch.messageId).toBeUndefined();
 
     const gate = await readJson(path.join(taskRepoRoot, ".ai/vcm/gate-reviews/index.json"));
     expect(gate.activeGate).toBeNull();

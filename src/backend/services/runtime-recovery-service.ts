@@ -325,10 +325,11 @@ export function createRuntimeRecoveryService(deps: RuntimeRecoveryServiceDeps): 
       if (message.dispatchingAt && !message.acceptedAt) {
         const next = {
           ...message,
-          failureReason: "VCM restarted before this dispatch was confirmed. Resend the message if it is still needed."
+          failureReason: message.deliveredAt
+            ? "VCM restarted before this delivered dispatch was confirmed. Inspect the target session before retrying."
+            : "VCM restarted before this dispatch was delivered. Resend the message if it is still needed."
         };
-        delete next.dispatchingAt;
-        delete next.deliveredAt;
+        if (!message.deliveredAt) delete next.dispatchingAt;
         changed = true;
         return next;
       }

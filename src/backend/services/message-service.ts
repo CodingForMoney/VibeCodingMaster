@@ -78,7 +78,7 @@ export interface MessageServiceDeps {
   taskService: Pick<TaskService, "loadTask">;
   taskWorkflowService?: Pick<TaskWorkflowService, "recordPmDispatch">;
   workflowControlService?: Pick<WorkflowControlService,
-    "claimDispatch" | "releaseDispatch" | "cancelPendingDispatch" | "confirmDispatch" | "getState">;
+    "claimDispatch" | "releaseDispatch" | "markDispatchUnconfirmed" | "cancelPendingDispatch" | "confirmDispatch" | "getState">;
   now?: () => string;
   id?: () => string;
   preDispatchSwitchDelayMs?: number;
@@ -303,6 +303,7 @@ export function createMessageService(deps: MessageServiceDeps): MessageService {
         if (!message) {
           return undefined;
         }
+        if (message.acceptedAt) return message;
 
         const accepted: VcmRoleMessage = {
           ...message,
@@ -482,7 +483,7 @@ export function createMessageService(deps: MessageServiceDeps): MessageService {
         return;
       }
       if (current.fromRole === PM_ROLE) {
-        await deps.workflowControlService?.releaseDispatch(toWorkflowContext(input), messageId);
+        await deps.workflowControlService?.markDispatchUnconfirmed(toWorkflowContext(input), messageId, failureReason);
       }
       await appendMessageSnapshot(deps.fs, input, {
         ...current,

@@ -312,9 +312,16 @@ describe("harness templates stay in sync with the script installer", () => {
 
     const settings = JSON.parse(await readFile(path.join(tmpRepo, ".claude/settings.json"), "utf8")) as {
       autoMemoryEnabled: boolean;
-      hooks: { PreToolUse: Array<{ matcher: string; hooks: Array<{ command: string }> }> };
+      hooks: {
+        PreToolUse: Array<{ matcher: string; hooks: Array<{ command: string }> }>;
+        UserPromptSubmit: Array<{ hooks: Array<{ command: string; timeout: number }> }>;
+      };
     };
     expect(settings.autoMemoryEnabled).toBe(false);
+    expect(settings.hooks.UserPromptSubmit[0]?.hooks[0]).toMatchObject({
+      command: expect.stringContaining("--retry 2 --retry-delay 1 --retry-all-errors"),
+      timeout: 10
+    });
     const bashHook = settings.hooks.PreToolUse.find((entry) => entry.matcher === "Bash");
     const grepHook = settings.hooks.PreToolUse.find((entry) => entry.matcher === "Grep");
     const command = bashHook?.hooks[0]?.command;

@@ -26,7 +26,8 @@ import type { ProjectService } from "./project-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 import type { TaskWorkflowService } from "./task-workflow-service.js";
 import type { CodexBridgeIntegrationService } from "./codex-bridge-integration-service.js";
-import { roleUsesLsp, VCM_LSP_PLUGIN_DIR } from "./lsp-plugin.js";
+import { roleUsesLsp, prepareTaskLspPlugin, VCM_LSP_PLUGIN_DIR } from "./lsp-plugin.js";
+import type { HarnessCodeIntelligenceDetector } from "./code-intelligence-service.js";
 
 export interface SessionService {
   assertModelLaunchReady(model?: SessionModel): Promise<void>;
@@ -78,6 +79,7 @@ export interface SessionServiceDeps {
     CodexBridgeIntegrationService,
     "getLaunchEnvironment" | "getLaunchSettingsOverride"
   >;
+  codeIntelligenceDetector?: HarnessCodeIntelligenceDetector;
   apiUrl?: string;
   sandboxMode?: string;
   isProcessAlive?: (pid: number) => boolean;
@@ -230,6 +232,15 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         ? claudeTranscriptPath(taskRepoRoot, resumeClaudeSessionId, persisted?.claudeConfigDir)
         : undefined;
 
+    const lspPluginDirs = roleUsesLsp(role)
+      ? deps.codeIntelligenceDetector
+        ? await prepareTaskLspPlugin(
+            deps.fs,
+            taskRepoRoot,
+            await deps.codeIntelligenceDetector.detect(taskRepoRoot)
+          )
+        : [VCM_LSP_PLUGIN_DIR]
+      : [];
     const startCommand = {
       ...deps.claude.buildRoleStartCommand(
         role,
@@ -241,7 +252,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         effort,
         modelSettingsOverride,
         input.appendSystemPrompt,
-        roleUsesLsp(role) ? [VCM_LSP_PLUGIN_DIR] : []
+        lspPluginDirs
       ),
       cwd: taskRepoRoot
     };
@@ -263,7 +274,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_RUNTIME_SESSION_TOKEN: runtimeSessionToken
       }, modelEnvironment, {
         ...buildUsageTelemetryEnvironment(deps.apiUrl, role, model),
-        ...(roleUsesLsp(role)
+        ...(lspPluginDirs.length > 0
           ? {
               ENABLE_LSP_TOOL: "true",
               ENABLE_TOOL_SEARCH: "false"

@@ -267,6 +267,108 @@ describe("workflow control service", () => {
     expect((await service.getState(context)).userAuthorizations).toHaveLength(2);
   });
 
+  it("warns about an unconfirmed delivered dispatch and accepts a late matching hook", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock(), id: () => "authorization-1" });
+    const proposal = initialProposal("coder");
+    proposal.proposal = {
+      ...proposal.proposal!,
+      authorizationText: "Allow this Coder dispatch.",
+      violatedRule: "Transition code-change/coder is not legal after the confirmed Workflow Progress history."
+    };
+    await service.submitProgress(context, renderWorkflowProgress(proposal));
+    await service.claimDispatch({
+      ...context, routePath: routePath("coder"), targetRole: "coder",
+      routeContentHash: "route-hash", messageId: "message-1"
+    });
+    await service.markDispatchUnconfirmed(context, "message-1", "UserPromptSubmit hook timed out.");
+    expect((await service.getState(context)).warnings).toEqual([
+      expect.stringContaining("message-1 to coder was delivered but not confirmed")
+    ]);
+    await expect(service.requestUserInput(context, "Continue?")).rejects.toMatchObject({
+      code: "WORKFLOW_DISPATCH_PENDING"
+    });
+    await service.confirmDispatch(context, "message-1");
+    expect((await service.getState(context)).warnings).toEqual([]);
+    expect((await service.getState(context)).userAuthorizations).toEqual([
+      expect.objectContaining({ id: "authorization-1", status: "consumed" })
+    ]);
+    expect((await readProgress(fs, context)).history).toHaveLength(1);
+  });
+
+  it("preserves abandoned user authorization when an unconfirmed route is cleared", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock(), id: () => "authorization-1" });
+    const proposal = initialProposal("coder");
+    proposal.proposal = {
+      ...proposal.proposal!,
+      authorizationText: "Allow this Coder dispatch.",
+      violatedRule: "Transition code-change/coder is not legal after the confirmed Workflow Progress history."
+    };
+    await service.submitProgress(context, renderWorkflowProgress(proposal));
+    await service.claimDispatch({
+      ...context, routePath: routePath("coder"), targetRole: "coder",
+      routeContentHash: "route-hash", messageId: "message-1"
+    });
+    await expect(service.cancelPendingDispatch(context)).rejects.toMatchObject({ code: "WORKFLOW_DISPATCH_PENDING" });
+    await service.markDispatchUnconfirmed(context, "message-1", "Confirmation did not arrive.");
+    await service.cancelPendingDispatch(context);
+    expect((await service.getState(context)).userAuthorizations).toEqual([
+      expect.objectContaining({
+        id: "authorization-1", status: "abandoned",
+        authorizationText: "Allow this Coder dispatch.",
+        abandonReason: expect.stringContaining("cleared before confirmation")
+      })
+    ]);
+    expect((await readProgress(fs, context)).history).toHaveLength(0);
+  });
+
+  it("keeps authorization evidence when PM asks the user after a failed submission", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock(), id: () => "authorization-1" });
+    const proposal = initialProposal("coder");
+    proposal.proposal = {
+      ...proposal.proposal!,
+      authorizationText: "Allow this Coder dispatch.",
+      violatedRule: "Transition code-change/coder is not legal after the confirmed Workflow Progress history."
+    };
+    await service.submitProgress(context, renderWorkflowProgress(proposal));
+    await service.claimDispatch({
+      ...context, routePath: routePath("coder"), targetRole: "coder",
+      routeContentHash: "route-hash", messageId: "message-1"
+    });
+    await service.releaseDispatch(context, "message-1");
+    await service.requestUserInput(context, "How should we proceed?");
+    expect((await service.getState(context)).userAuthorizations).toEqual([
+      expect.objectContaining({
+        id: "authorization-1", status: "abandoned",
+        authorizationText: "Allow this Coder dispatch."
+      })
+    ]);
+  });
+
+  it("does not release a delivered unconfirmed dispatch during runtime recovery", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await service.submitProgress(context, renderWorkflowProgress(initialProposal("architect")));
+    await service.claimDispatch({
+      ...context, routePath: routePath("architect"), targetRole: "architect",
+      routeContentHash: "route-hash", messageId: "message-1"
+    });
+    const messagesPath = path.join(context.taskRepoRoot, context.stateRoot, "messages", `${context.taskSlug}.jsonl`);
+    await fs.ensureDir(path.dirname(messagesPath));
+    await fs.writeText(messagesPath, `${JSON.stringify({ id: "message-1", deliveredAt: "2026-09-25T00:00:00Z" })}\n`);
+
+    const restored = createWorkflowControlService({ fs, now: sequenceClock() });
+    expect(await restored.recoverTask(context)).toBe(true);
+    expect((await restored.getState(context)).pendingDispatch).toMatchObject({
+      status: "dispatching", messageId: "message-1",
+      confirmationError: expect.stringContaining("restarted")
+    });
+    await restored.confirmDispatch(context, "message-1");
+    expect((await readProgress(fs, context)).history).toHaveLength(1);
+  });
+
   it("rejects incomplete or mismatched direct user authorization", async () => {
     const { context, fs } = await createContext(roots);
     const service = createWorkflowControlService({ fs, now: sequenceClock() });

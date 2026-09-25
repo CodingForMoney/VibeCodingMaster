@@ -12,6 +12,11 @@ planning-session memory candidate and provides an exact path.
 - If VCM did not provide a path, do not create a proposal.
 - Propose only verified, durable, reusable project knowledge supported by task
   evidence.
+- Before proposing an add or update, check current durable documents, Harness
+  rules and skills, and the tool's help, usage, or error output. Cite the checked
+  source in Evidence. Do not duplicate existing knowledge in memory; propose
+  \`durable-doc\` only when the existing document is wrong or incomplete, or use
+  \`memory-reference\` when roles need a short pointer across tasks.
 - Target shared project knowledge to \`shared\`. Target knowledge used only by
   the current role to \`current-role\`.
 - For every add or update, explain why the memory is necessary, what future

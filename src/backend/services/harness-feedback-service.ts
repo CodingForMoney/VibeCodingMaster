@@ -138,16 +138,6 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
       });
     }
 
-    const existingMarker = await loadTaskRetrospectiveMarker(repoRoot, taskSlug);
-    if (existingMarker && existingMarker.status !== "failed") {
-      throw new VcmError({
-        code: "TASK_HARNESS_RETROSPECTIVE_EXISTS",
-        message: `Task Harness Retrospective has already been triggered for task: ${taskSlug}`,
-        statusCode: 409,
-        hint: "Review the existing retrospective result instead of starting another retrospective for the same task."
-      });
-    }
-
     const finalAcceptancePath = path.posix.join(input.handoffDir, "final-acceptance.md");
     const finalAcceptanceAbsolutePath = resolveRepoPath(input.taskRepoRoot, finalAcceptancePath);
     const finalAcceptanceContent = await readAbsoluteOptionalText(finalAcceptanceAbsolutePath);
@@ -168,10 +158,28 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
       });
     }
 
+    const finalAcceptanceHash = `sha256:${sha256(finalAcceptanceContent)}`;
+    const existingMarker = await loadTaskRetrospectiveMarker(repoRoot, taskSlug);
+    if (existingMarker && (
+      existingMarker.status === "running"
+      || existingMarker.status === "triggered"
+      || existingMarker.status === "waiting-docs"
+      || (existingMarker.finalAcceptanceHash === finalAcceptanceHash && existingMarker.status !== "failed")
+    )) {
+      throw new VcmError({
+        code: "TASK_HARNESS_RETROSPECTIVE_EXISTS",
+        message: `Task Harness Retrospective has already been triggered for this acceptance or is still active: ${taskSlug}`,
+        statusCode: 409,
+        hint: "Wait for the active retrospective, or review its result before retrying the same acceptance."
+      });
+    }
+
     const session = await ensureIdleHarnessEngineer(repoRoot, taskSlug);
     const pendingFeedback = await listPendingFeedback(repoRoot);
     const timestamp = now();
-    const analysisPath = `${TASK_RETROSPECTIVE_DIR}/${sanitizeFeedbackId(taskSlug)}.md`;
+    const analysisPath = existingMarker && existingMarker.finalAcceptanceHash !== finalAcceptanceHash
+      ? `${TASK_RETROSPECTIVE_DIR}/${sanitizeFeedbackId(taskSlug)}.${finalAcceptanceHash.slice(7)}.md`
+      : existingMarker?.analysisPath ?? `${TASK_RETROSPECTIVE_DIR}/${sanitizeFeedbackId(taskSlug)}.md`;
     const analysisAbsolutePath = resolveRepoPath(repoRoot, analysisPath);
     const memoryReview = await deps.autoMemoryService?.prepareTaskRetrospectiveReview(
       input.taskRepoRoot,
@@ -183,13 +191,20 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
       trigger: input.trigger,
       status: "running",
       analysisPath,
-      finalAcceptanceHash: `sha256:${sha256(finalAcceptanceContent)}`,
+      finalAcceptanceHash,
       pendingFeedbackPaths: pendingFeedback.map((item) => item.path),
       ...(memoryReview ? { memoryRunId: memoryReview.runId } : {}),
       createdAt: timestamp,
       updatedAt: timestamp
     };
     try {
+      if (existingMarker && existingMarker.finalAcceptanceHash !== finalAcceptanceHash) {
+        const archivePath = resolveRepoPath(
+          repoRoot,
+          `${TASK_RETROSPECTIVE_DIR}/${sanitizeFeedbackId(taskSlug)}.${existingMarker.finalAcceptanceHash.slice(7)}.json`
+        );
+        await deps.fs.writeJsonAtomic(archivePath, existingMarker);
+      }
       await persistTaskRetrospectiveMarker(repoRoot, marker);
       await submitTerminalInput(
         deps.runtime,

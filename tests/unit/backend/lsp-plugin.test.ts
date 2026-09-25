@@ -1,11 +1,23 @@
-import { readFile } from "node:fs/promises";
-import { describe, expect, it } from "vitest";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import type { RoleName } from "../../../src/shared/types/role.js";
+import type { HarnessCodeIntelligenceStatus } from "../../../src/shared/types/harness.js";
+import { createNodeFileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import {
+  prepareTaskLspPlugin,
   roleUsesLsp,
   VCM_LSP_PLUGIN_MANIFEST,
   VCM_LSP_PLUGIN_NAME
 } from "../../../src/backend/services/lsp-plugin.js";
+
+let tmpRepo: string | undefined;
+
+afterEach(async () => {
+  if (tmpRepo) await rm(tmpRepo, { recursive: true, force: true });
+  tmpRepo = undefined;
+});
 
 describe("VCM LSP plugin", () => {
   it("loads only for code-reading workflow roles", () => {
@@ -54,5 +66,41 @@ describe("VCM LSP plugin", () => {
       expect(server.restartOnCrash).toBe(true);
       expect(server.maxRestarts).toBe(3);
     }
+  });
+
+  it("registers only runnable servers detected in the task worktree", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-lsp-plugin-"));
+    const status: HarnessCodeIntelligenceStatus = {
+      state: "available",
+      languages: [{
+        language: "rust", label: "Rust", serverCommand: "rust-analyzer", pluginName: VCM_LSP_PLUGIN_NAME,
+        detected: true, pluginReady: true, serverFound: true, serverRunnable: true,
+        state: "server_runnable", detectedBy: ["Cargo.toml"]
+      }]
+    };
+    const [pluginDir] = await prepareTaskLspPlugin(createNodeFileSystemAdapter(), tmpRepo, status);
+    const manifest = JSON.parse(await readFile(path.join(pluginDir!, ".claude-plugin/plugin.json"), "utf8"));
+    expect(Object.keys(manifest.lspServers)).toEqual(["rust-analyzer"]);
+  });
+
+  it("omits a missing project language server without blocking other languages", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-lsp-plugin-"));
+    const status: HarnessCodeIntelligenceStatus = {
+      state: "partial",
+      languages: [{
+        language: "rust", label: "Rust", serverCommand: "rust-analyzer", pluginName: VCM_LSP_PLUGIN_NAME,
+        detected: true, pluginReady: true, serverFound: true, serverRunnable: true,
+        state: "server_runnable", detectedBy: ["Cargo.toml"]
+      }, {
+        language: "python", label: "Python", serverCommand: "pyright-langserver", pluginName: VCM_LSP_PLUGIN_NAME,
+        detected: true, pluginReady: true, serverFound: false, serverRunnable: false,
+        state: "server_missing", error: "pyright-langserver was not found in the VCM backend PATH.",
+        detectedBy: ["pyproject.toml"]
+      }]
+    };
+    const [pluginDir] = await prepareTaskLspPlugin(createNodeFileSystemAdapter(), tmpRepo, status);
+    const manifest = JSON.parse(await readFile(path.join(pluginDir!, ".claude-plugin/plugin.json"), "utf8"));
+    expect(Object.keys(manifest.lspServers)).toEqual(["rust-analyzer"]);
+    expect(await prepareTaskLspPlugin(createNodeFileSystemAdapter(), tmpRepo, { ...status, languages: status.languages.slice(1) })).toEqual([]);
   });
 });

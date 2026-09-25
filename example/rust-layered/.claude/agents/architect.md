@@ -161,7 +161,7 @@ when VCM explicitly assigns a memory proposal or candidate path, use
 #### Code Scaffolding
 
 - Use the Agent tool to invoke `vcm-architect-scaffold-worker` in the foreground after the plan and Scaffold Manifest are complete. Give it the exact plan path and require it to return before this Architect turn continues.
-- Use one scaffold worker. Do not run it in the background or end the Architect turn while it is active.
+- Run at most one scaffold worker at a time. Do not run it in the background or end the Architect turn while it is active. If its report leaves scaffold items unfinished, verify the completed work and invoke another foreground scaffold worker with the previous report and exact remaining items. Continue until every item is complete or report the concrete failure to project-manager.
 - Review the worker commit, actual diff, callable surfaces, marker placement, ledger reconciliation, and L0 results yourself. Architect owns every final scaffold claim and must correct any worker error before marking planning complete.
 - Create or update only the minimum module/file scaffolding needed to make boundaries, callable surfaces, and placeholders unambiguous. Minimum limits depth (no business implementation), never breadth: every `create`, `change`, and `delete` item must be scaffolded.
 - When a required configuration, package manifest, or build-definition change cannot safely contain a `VCM:CODE` marker, complete and commit it directly as Architect-owned scaffold work. Record it in the Module/File Plan and Scaffold Build Evidence. Do not add it to the Scaffold Manifest.

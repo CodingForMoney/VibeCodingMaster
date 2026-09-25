@@ -177,6 +177,60 @@ None.
     })).rejects.toThrow("already been triggered");
   });
 
+  it("reviews a second accepted flow in the same task without overwriting the first result", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-retrospective-repeat-"));
+    const taskRepoRoot = path.join(tmpRepo, ".claude/worktrees/demo-task");
+    const handoffDir = path.join(taskRepoRoot, ".ai/vcm/handoffs");
+    await mkdir(handoffDir, { recursive: true });
+    const acceptancePath = path.join(handoffDir, "final-acceptance.md");
+    await writeFile(acceptancePath, renderFinalAcceptance("accepted"), "utf8");
+    let memoryRun = 0;
+    const service = createHarnessFeedbackService({
+      fs: createNodeFileSystemAdapter(),
+      runtime: createRuntime([]),
+      sessionService: createSessionService(),
+      autoMemoryService: {
+        async prepareTaskRetrospectiveReview() {
+          memoryRun += 1;
+          return { runId: `memory-${memoryRun}`, roleDraftsPath: "drafts", currentMemoryPath: "before",
+            activeMemoryPaths: [], existingEntriesPath: "existing.json", proposalCandidates: [],
+            reviewResultPath: "review-result.json" };
+        },
+        async cancelTaskRetrospectiveReview() {}
+      },
+      now: createClock()
+    });
+    const input = { taskSlug: "demo-task", taskRepoRoot, handoffDir: ".ai/vcm/handoffs", trigger: "auto" as const };
+    const markerPath = path.join(tmpRepo, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.json");
+    await service.startTaskRetrospective(tmpRepo, input);
+    const firstMarker = JSON.parse(await readFile(markerPath, "utf8"));
+    await writeFile(path.join(tmpRepo, firstMarker.analysisPath), renderRetrospectiveReport([]), "utf8");
+    await service.handleTaskRetrospectiveHook(tmpRepo, {
+      taskSlug: "demo-task", eventName: "Stop", memoryReviewStatus: "applied"
+    });
+    expect(JSON.parse(await readFile(markerPath, "utf8")).status).toBe("completed");
+
+    await writeFile(acceptancePath, renderFinalAcceptance("accepted").replace("Done.", "Second flow done."), "utf8");
+    await service.startTaskRetrospective(tmpRepo, input);
+    const secondMarker = JSON.parse(await readFile(markerPath, "utf8"));
+    expect(secondMarker.finalAcceptanceHash).not.toBe(firstMarker.finalAcceptanceHash);
+    expect(secondMarker.memoryRunId).toBe("memory-2");
+    expect(secondMarker.analysisPath).not.toBe(firstMarker.analysisPath);
+    expect(await readFile(path.join(tmpRepo, firstMarker.analysisPath), "utf8")).toBe(renderRetrospectiveReport([]));
+    expect(JSON.parse(await readFile(path.join(
+      tmpRepo, `.ai/vcm/harness-feedback/task-retrospectives/demo-task.${firstMarker.finalAcceptanceHash.slice(7)}.json`
+    ), "utf8")).status).toBe("completed");
+
+    await writeFile(path.join(tmpRepo, secondMarker.analysisPath), renderRetrospectiveReport([]), "utf8");
+    await service.handleTaskRetrospectiveHook(tmpRepo, {
+      taskSlug: "demo-task", eventName: "Stop", memoryReviewStatus: "applied"
+    });
+    expect(JSON.parse(await readFile(markerPath, "utf8")).status).toBe("completed");
+    await expect(service.startTaskRetrospective(tmpRepo, input)).rejects.toMatchObject({
+      code: "TASK_HARNESS_RETROSPECTIVE_EXISTS"
+    });
+  });
+
   it("includes Auto Memory review in the same task retrospective turn", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-retrospective-memory-"));
     const taskRepoRoot = path.join(tmpRepo, ".claude/worktrees/demo-task");

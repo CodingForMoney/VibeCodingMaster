@@ -119,6 +119,9 @@ describe("createMessageService", () => {
       deliveredAt: "2026-05-29T00:00:00.000Z",
       acceptedAt: "2026-05-29T00:00:00.000Z"
     });
+    expect(await harness.service.confirmPromptSubmitted({
+      ...harness.base, role: "coder", prompt: harness.writes[0]
+    })).toMatchObject({ id: "msg_1", acceptedAt: "2026-05-29T00:00:00.000Z" });
   });
 
   it("retries Enter and marks auto dispatch failure when submission is not confirmed", async () => {
@@ -153,6 +156,22 @@ describe("createMessageService", () => {
       failureReason: expect.stringContaining("did not confirm submission")
     });
     await expect(harness.readRoute("project-manager-coder.md")).resolves.toBe("Handle this task.");
+  });
+
+  it("marks an unconfirmed PM dispatch without releasing its workflow claim", async () => {
+    const harness = createHarness(["coder"], {
+      workflowControl: "allow",
+      dispatchConfirmationEnabled: true,
+      dispatchConfirmationRetryDelaysMs: [1],
+      dispatchConfirmationFailureDelayMs: 1
+    });
+    await harness.service.updateOrchestrationState({ ...harness.base, mode: "auto" });
+    await harness.writeRoute("project-manager-coder.md", "Handle this task.");
+    await harness.service.scanAndDispatchPendingRouteFiles({ ...harness.base, stoppedRole: "project-manager" });
+    await waitFor(() => harness.workflowControlUnconfirmed.length === 1);
+    expect(harness.workflowControlUnconfirmed[0]).toMatchObject({
+      messageId: "msg_1", reason: expect.stringContaining("did not confirm submission")
+    });
   });
 
   it("keeps same-target route files pending until the active target emits Stop", async () => {
@@ -405,6 +424,7 @@ function createHarness(runningRoles: RoleName[], options: {
   const workflowUpdates: Array<Record<string, unknown>> = [];
   const workflowControlClaims: Array<Record<string, unknown>> = [];
   const workflowControlConfirmations: string[] = [];
+  const workflowControlUnconfirmed: Array<{ messageId: string; reason: string }> = [];
   let workflowControlCancellations = 0;
   const activity = new Map<RoleName, RoleSessionRecord["activityStatus"]>();
   let nextId = 1;
@@ -442,6 +462,9 @@ function createHarness(runningRoles: RoleName[], options: {
         if (options.workflowControl === "deny") throw new Error("workflow route denied");
       },
       async releaseDispatch() {},
+      async markDispatchUnconfirmed(_input, messageId, reason) {
+        workflowControlUnconfirmed.push({ messageId, reason });
+      },
       async cancelPendingDispatch() {
         workflowControlCancellations += 1;
       },
@@ -472,6 +495,7 @@ function createHarness(runningRoles: RoleName[], options: {
     workflowUpdates,
     workflowControlClaims,
     workflowControlConfirmations,
+    workflowControlUnconfirmed,
     get workflowControlCancellations() {
       return workflowControlCancellations;
     },

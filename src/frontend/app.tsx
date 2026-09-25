@@ -96,6 +96,7 @@ export function App() {
   const [activeEvents, setActiveEvents] = useState<{ taskSlug: string; events: string[] } | null>(null);
   const [activeSessionRoundState, setActiveSessionRoundState] = useState<{ taskSlug: string; roundState: VcmSessionRoundState } | null>(null);
   const [activeGateReview, setActiveGateReview] = useState<{ taskSlug: string; state: GateReviewIndex } | null>(null);
+  const [workflowControlWarnings, setWorkflowControlWarnings] = useState<{ taskSlug: string; warnings: string[] } | null>(null);
   const [activeRole, setActiveRole] = useState<RoleName>("project-manager");
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
   const [pauseAlertSound, setPauseAlertSound] = useState(true);
@@ -470,6 +471,7 @@ export function App() {
     setAutoMemoryState(state.autoMemoryState);
     setAutoMemoryStateTaskSlug(taskSlug && state.autoMemoryState ? taskSlug : null);
     setGatewayStatus(state.gatewayStatus);
+    setWorkflowControlWarnings(taskSlug ? { taskSlug, warnings: state.workflowControlState?.warnings ?? [] } : null);
 
     if (taskSlug && state.harnessStatus) {
       setHarnessStatus(state.harnessStatus);
@@ -505,6 +507,7 @@ export function App() {
       setHarnessFeedbackState(null);
       setAutoMemoryState(null);
       setAutoMemoryStateTaskSlug(null);
+      setWorkflowControlWarnings(null);
       return null;
     }
 
@@ -757,6 +760,9 @@ export function App() {
   const reviewerEnabled = Boolean(
     sidebarGateReview && Object.values(sidebarGateReview.gates).some((gate) => gate.required)
   );
+  const activeWorkflowWarnings = workflowControlWarnings && workflowControlWarnings.taskSlug === activeTask?.taskSlug
+    ? workflowControlWarnings.warnings
+    : [];
   return (
     <AppShell
       sidebar={(
@@ -770,6 +776,7 @@ export function App() {
           events={sidebarEvents}
           roundState={sidebarRoundState}
           gateReview={sidebarGateReview}
+          workflowControlWarnings={activeWorkflowWarnings}
           translationEnabled={effectiveTranslationEnabled}
           translationAutoSendEnabled={translationAutoSendEnabled}
           translationTargetLanguage={translationTargetLanguage}

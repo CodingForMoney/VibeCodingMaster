@@ -319,7 +319,7 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
         trigger
       });
     } catch (error) {
-      if (error instanceof VcmError && (EXPECTED_AUTO_RETROSPECTIVE_SKIP_CODES.has(error.code) || error.statusCode === 409)) {
+      if (error instanceof VcmError && EXPECTED_AUTO_RETROSPECTIVE_SKIP_CODES.has(error.code)) {
         return;
       }
       throw error;

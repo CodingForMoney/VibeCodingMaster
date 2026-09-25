@@ -57,6 +57,7 @@ export interface WorkflowControlService {
   assertRouteAuthorized(input: WorkflowRouteAuthorizationInput): Promise<void>;
   claimDispatch(input: Required<WorkflowRouteAuthorizationInput>): Promise<void>;
   releaseDispatch(input: WorkflowControlContext, messageId: string): Promise<void>;
+  markDispatchUnconfirmed(input: WorkflowControlContext, messageId: string, reason: string): Promise<void>;
   cancelPendingDispatch(input: WorkflowControlContext): Promise<void>;
   confirmDispatch(input: WorkflowControlContext, messageId: string): Promise<void>;
   recoverTask(input: WorkflowControlContext): Promise<boolean>;
@@ -360,8 +361,26 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
           status: "pending",
           routeContentHash: undefined,
           messageId: undefined,
+          confirmationError: undefined,
           updatedAt: now()
         },
+        updatedAt: now()
+      });
+    });
+  }
+
+  async function markDispatchUnconfirmed(
+    input: WorkflowControlContext,
+    messageId: string,
+    reason: string
+  ): Promise<void> {
+    await withLock(statePath(input), async () => {
+      const state = await getState(input);
+      const pending = state.pendingDispatch;
+      if (!pending || pending.status !== "dispatching" || pending.messageId !== messageId) return;
+      await saveState(input, {
+        ...state,
+        pendingDispatch: { ...pending, confirmationError: reason, updatedAt: now() },
         updatedAt: now()
       });
     });
@@ -372,6 +391,13 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
       const state = await getState(input);
       const pending = state.pendingDispatch;
       if (!pending) return;
+      if (pending.status === "dispatching" && !pending.confirmationError) {
+        throw workflowError(
+          "WORKFLOW_DISPATCH_PENDING",
+          `Message ${pending.messageId} is being delivered and cannot be cleared before confirmation.`
+        );
+      }
+      const timestamp = now();
       const progress = await readProgress(deps.fs, input);
       await commitStateAndProgress(input, renderWorkflowProgress({
         ...progress,
@@ -379,9 +405,8 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
       }), {
         ...state,
         pendingDispatch: null,
-        userAuthorizations: state.userAuthorizations.filter((entry) => entry.id !== pending.overrideAuthorizationId),
-        userApprovedFollowUps: state.userApprovedFollowUps.filter((entry) => entry.id !== pending.followUpApprovalId),
-        updatedAt: now()
+        ...abandonPendingApprovals(state, pending, "Pending route was cleared before confirmation.", timestamp),
+        updatedAt: timestamp
       });
     });
   }
@@ -389,7 +414,10 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
   async function confirmDispatch(input: WorkflowControlContext, messageId: string): Promise<void> {
     await withLock(statePath(input), async () => {
       const state = await getState(input);
-      failOnStateWarnings(state);
+      failOnStateWarnings({
+        ...state,
+        warnings: state.warnings.filter((warning) => warning !== unconfirmedDispatchWarning(state.pendingDispatch))
+      });
       failWhileAwaitingUser(state);
       const pending = state.pendingDispatch;
       if (!pending || pending.status !== "dispatching" || pending.messageId !== messageId) {
@@ -466,7 +494,22 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
     return withLock(statePath(input), async () => {
       await recoverCommitJournal(input);
       const state = await getState(input);
-      if (state.warnings.length > 0 || state.pendingDispatch?.status !== "dispatching") return false;
+      if (state.pendingDispatch?.status !== "dispatching"
+        || state.warnings.some((warning) => warning !== unconfirmedDispatchWarning(state.pendingDispatch))) return false;
+      if (await wasDispatchDelivered(deps.fs, input, state.pendingDispatch.messageId)) {
+        if (state.pendingDispatch.confirmationError) return false;
+        const timestamp = now();
+        await saveState(input, {
+          ...state,
+          pendingDispatch: {
+            ...state.pendingDispatch,
+            confirmationError: "VCM restarted before the delivered message received UserPromptSubmit confirmation.",
+            updatedAt: timestamp
+          },
+          updatedAt: timestamp
+        });
+        return true;
+      }
       await saveState(input, {
         ...state,
         pendingDispatch: {
@@ -474,6 +517,7 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
           status: "pending",
           routeContentHash: undefined,
           messageId: undefined,
+          confirmationError: undefined,
           updatedAt: now()
         },
         updatedAt: now()
@@ -496,6 +540,7 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
     assertRouteAuthorized,
     claimDispatch,
     releaseDispatch,
+    markDispatchUnconfirmed,
     cancelPendingDispatch,
     confirmDispatch,
     recoverTask
@@ -545,14 +590,16 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
   ): Promise<WorkflowControlState> {
     return withLock(statePath(input), async () => {
       const state = await getState(input);
-      failOnStateWarnings(state);
       if (state.pendingDispatch?.status === "dispatching") {
         throw workflowError(
           "WORKFLOW_DISPATCH_PENDING",
-          "A role dispatch is already being submitted and cannot be canceled by a user question.",
-          "Wait for the target UserPromptSubmit confirmation or recover the dispatch before asking the user."
+          state.pendingDispatch.confirmationError
+            ? `A delivered role dispatch is unconfirmed: ${state.pendingDispatch.confirmationError}`
+            : "A role dispatch is already being submitted and cannot be canceled by a user question.",
+          "Inspect the target session and confirm or clear the pending dispatch before asking the user."
         );
       }
+      failOnStateWarnings(state);
       const normalizedQuestion = question.trim();
       if (!normalizedQuestion) {
         throw workflowError(
@@ -569,8 +616,7 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
           requestedAt: timestamp
         },
         pendingDispatch: null,
-        userAuthorizations: state.userAuthorizations.filter((entry) => entry.id !== pending?.overrideAuthorizationId),
-        userApprovedFollowUps: state.userApprovedFollowUps.filter((entry) => entry.id !== pending?.followUpApprovalId),
+        ...(pending ? abandonPendingApprovals(state, pending, "PM asked the user before dispatch confirmation.", timestamp) : {}),
         updatedAt: timestamp
       };
       if (pending) {
@@ -1624,6 +1670,8 @@ function stateProgressConsistencyWarnings(
 ): string[] {
   const warnings: string[] = [];
   const pending = state.pendingDispatch;
+  const unconfirmedWarning = unconfirmedDispatchWarning(pending);
+  if (unconfirmedWarning) warnings.push(unconfirmedWarning);
   if (!pending && progress.proposal) {
     warnings.push("Workflow Progress contains a dispatch proposal without a runtime approval.");
   }
@@ -1647,6 +1695,48 @@ function stateProgressConsistencyWarnings(
     warnings.push("Workflow active dispatch exists without a Workflow Progress history entry.");
   }
   return warnings;
+}
+
+function unconfirmedDispatchWarning(pending: WorkflowPendingDispatch | null): string | undefined {
+  return pending?.confirmationError
+    ? `PM dispatch ${pending.messageId ?? "unknown"} to ${pending.targetRole} was delivered but not confirmed: ${pending.confirmationError} Inspect the target session before clearing or retrying this route.`
+    : undefined;
+}
+
+function abandonPendingApprovals(
+  state: WorkflowControlState,
+  pending: WorkflowPendingDispatch,
+  reason: string,
+  timestamp: string
+): Pick<WorkflowControlState, "userAuthorizations" | "userApprovedFollowUps"> {
+  return {
+    userAuthorizations: state.userAuthorizations.map((entry) => entry.id === pending.overrideAuthorizationId
+      ? { ...entry, status: "abandoned" as const, abandonedAt: timestamp, abandonReason: reason }
+      : entry),
+    userApprovedFollowUps: state.userApprovedFollowUps.map((entry) => entry.id === pending.followUpApprovalId
+      ? { ...entry, status: "abandoned" as const, abandonedAt: timestamp, abandonReason: reason }
+      : entry)
+  };
+}
+
+async function wasDispatchDelivered(
+  fs: FileSystemAdapter,
+  input: WorkflowControlContext,
+  messageId: string | undefined
+): Promise<boolean> {
+  if (!messageId) return false;
+  const messagesPath = path.join(input.taskRepoRoot, input.stateRoot, "messages", `${input.taskSlug}.jsonl`);
+  if (!(await fs.pathExists(messagesPath))) return false;
+  try {
+    let latest: { id?: string; deliveredAt?: string } | undefined;
+    for (const line of (await fs.readText(messagesPath)).split(/\r?\n/).filter(Boolean)) {
+      const message = JSON.parse(line) as { id?: string; deliveredAt?: string };
+      if (message.id === messageId) latest = message;
+    }
+    return Boolean(latest?.deliveredAt);
+  } catch {
+    return true;
+  }
 }
 
 function createUserAuthorization(
@@ -1935,6 +2025,7 @@ function isPendingDispatch(value: unknown): value is WorkflowPendingDispatch {
     && (value.status === "pending" || value.status === "dispatching")
     && (value.routeContentHash === undefined || typeof value.routeContentHash === "string")
     && (value.messageId === undefined || typeof value.messageId === "string")
+    && (value.confirmationError === undefined || typeof value.confirmationError === "string")
     && typeof value.createdAt === "string"
     && typeof value.updatedAt === "string";
 }
@@ -1942,7 +2033,7 @@ function isPendingDispatch(value: unknown): value is WorkflowPendingDispatch {
 function isUserAuthorization(value: unknown): value is WorkflowUserAuthorization {
   if (!isRecord(value)) return false;
   return typeof value.id === "string"
-    && (value.status === "accepted" || value.status === "consumed")
+    && (value.status === "accepted" || value.status === "consumed" || value.status === "abandoned")
     && value.role === "project-manager"
     && value.operation === "workflow-dispatch"
     && Number.isInteger(value.baseRevision)
@@ -1954,13 +2045,15 @@ function isUserAuthorization(value: unknown): value is WorkflowUserAuthorization
     && typeof value.violatedRule === "string"
     && typeof value.authorizationText === "string"
     && typeof value.createdAt === "string"
-    && (value.consumedAt === undefined || typeof value.consumedAt === "string");
+    && (value.consumedAt === undefined || typeof value.consumedAt === "string")
+    && (value.abandonedAt === undefined || typeof value.abandonedAt === "string")
+    && (value.abandonReason === undefined || typeof value.abandonReason === "string");
 }
 
 function isUserApprovedFollowUp(value: unknown): value is WorkflowUserApprovedFollowUp {
   if (!isRecord(value)) return false;
   return typeof value.id === "string"
-    && (value.status === "accepted" || value.status === "consumed")
+    && (value.status === "accepted" || value.status === "consumed" || value.status === "abandoned")
     && value.role === "project-manager"
     && value.operation === "post-validation-follow-up"
     && Number.isInteger(value.baseRevision)
@@ -1972,7 +2065,9 @@ function isUserApprovedFollowUp(value: unknown): value is WorkflowUserApprovedFo
     && typeof value.evidence === "string"
     && typeof value.approvalText === "string"
     && typeof value.createdAt === "string"
-    && (value.consumedAt === undefined || typeof value.consumedAt === "string");
+    && (value.consumedAt === undefined || typeof value.consumedAt === "string")
+    && (value.abandonedAt === undefined || typeof value.abandonedAt === "string")
+    && (value.abandonReason === undefined || typeof value.abandonReason === "string");
 }
 
 function normalizeDispatchEvidenceBaseline(value: unknown): WorkflowDispatchEvidenceBaseline | undefined {

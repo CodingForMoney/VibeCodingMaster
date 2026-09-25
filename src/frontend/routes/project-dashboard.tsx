@@ -55,6 +55,7 @@ export interface ProjectDashboardProps {
   events: string[];
   roundState: VcmSessionRoundState | null;
   gateReview: GateReviewIndex | null;
+  workflowControlWarnings: string[];
   translationEnabled: boolean;
   translationAutoSendEnabled: boolean;
   translationTargetLanguage: TranslationTargetLanguage;
@@ -141,6 +142,7 @@ export function ProjectDashboard({
   events,
   roundState,
   gateReview,
+  workflowControlWarnings,
   translationEnabled,
   translationAutoSendEnabled,
   translationTargetLanguage,
@@ -488,6 +490,11 @@ export function ProjectDashboard({
           {openTasks.length > 0 ? (
             <div className="task-panel">
               <TaskNav tasks={openTasks} activeTaskSlug={activeTaskSlug} onSelect={onSelectTask} />
+              {activeTask && workflowControlWarnings.length > 0 ? (
+                <div className="warnings" role="status">
+                  {workflowControlWarnings.map((warning) => <p key={warning}>{warning}</p>)}
+                </div>
+              ) : null}
               {activeTask ? (
                 <div className="task-panel-actions">
                   <button
