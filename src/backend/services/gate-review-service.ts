@@ -26,7 +26,7 @@ import { checkMarkdownArtifact, readArtifactSectionValue } from "../../shared/va
 import { VcmError } from "../errors.js";
 import { resolveRepoPath } from "../adapters/filesystem.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
-import type { CommandRunner } from "../adapters/command-runner.js";
+import type { CommandResult, CommandRunner } from "../adapters/command-runner.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import type { AppGateReviewSettings, AppSettingsService } from "./app-settings-service.js";
@@ -1484,7 +1484,7 @@ async function resolveCodeDiffBaseCommit(
       "merge-base",
       "HEAD",
       rootBranch
-    ], { allowFailure: true })).trim();
+    ], { expectedFailure: "no-common-ancestor" })).trim();
     if (
       mergeBase
       && mergeBase !== headCommit
@@ -1499,13 +1499,13 @@ async function resolveCodeDiffBaseCommit(
     "--abbrev-ref",
     "--symbolic-full-name",
     "@{upstream}"
-  ], { allowFailure: true })).trim();
+  ], { expectedFailure: "missing-upstream" })).trim();
   if (upstream) {
     const mergeBase = (await commandStdout(deps.runner, context.taskRepoRoot, [
       "merge-base",
       "HEAD",
       upstream
-    ], { allowFailure: true })).trim();
+    ], { expectedFailure: "no-common-ancestor" })).trim();
     if (
       mergeBase
       && mergeBase !== headCommit
@@ -1524,7 +1524,9 @@ async function isAncestor(
   ancestor: string,
   descendant: string
 ): Promise<boolean> {
-  const result = await runner.run("git", ["merge-base", "--is-ancestor", ancestor, descendant], { cwd });
+  const result = await readGateGit(runner, cwd, ["merge-base", "--is-ancestor", ancestor, descendant], {
+    expectedFailure: "not-ancestor"
+  });
   return result.exitCode === 0;
 }
 
@@ -1795,22 +1797,32 @@ async function readCodeDiffSourceArtifactError(
   return undefined;
 }
 
+type ExpectedGitFailure = "not-ancestor" | "no-common-ancestor" | "missing-upstream";
+
 async function commandStdout(
   runner: CommandRunner,
   cwd: string,
   args: string[],
-  options: { allowFailure?: boolean } = {}
+  options: { expectedFailure?: ExpectedGitFailure } = {}
 ): Promise<string> {
-  const retryHead = args.length === 2 && args[0] === "rev-parse" && args[1] === "HEAD";
-  const attempts = retryHead ? 3 : 1;
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const result = await runner.run("git", args, { cwd });
-    if (result.exitCode === 0) return result.stdout;
-    if (attempt + 1 < attempts) {
-      await delay(100 * (attempt + 1));
+  const result = await readGateGit(runner, cwd, args, options);
+  return result.exitCode === 0 ? result.stdout : "";
+}
+
+async function readGateGit(
+  runner: CommandRunner,
+  cwd: string,
+  args: string[],
+  options: { expectedFailure?: ExpectedGitFailure } = {}
+): Promise<CommandResult> {
+  const retryDelays = [500, 1000, 2000];
+  for (let attempt = 0; ; attempt += 1) {
+    const result = await runner.run("git", ["-c", `safe.directory=${path.resolve(cwd)}`, ...args], { cwd });
+    if (result.exitCode === 0 || isExpectedGitFailure(result, options.expectedFailure)) return result;
+    if (attempt < retryDelays.length) {
+      await delay(retryDelays[attempt]!);
       continue;
     }
-    if (options.allowFailure) return "";
     const detail = result.stderr.trim() || result.stdout.trim() || "Git did not provide an error message.";
     throw new VcmError({
       code: "GATE_REVIEW_GIT_COMMAND_FAILED",
@@ -1818,7 +1830,14 @@ async function commandStdout(
       statusCode: 409
     });
   }
-  return "";
+}
+
+function isExpectedGitFailure(result: CommandResult, expected?: ExpectedGitFailure): boolean {
+  if (expected === "not-ancestor" || expected === "no-common-ancestor") {
+    return result.exitCode === 1 && !result.stderr.trim() && !result.stdout.trim();
+  }
+  return expected === "missing-upstream" && result.exitCode === 128
+    && /^fatal: (no upstream configured for branch |HEAD does not point to a branch)/.test(result.stderr.trim());
 }
 
 function splitLines(value: string): string[] {

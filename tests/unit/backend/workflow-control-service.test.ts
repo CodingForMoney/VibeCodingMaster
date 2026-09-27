@@ -323,6 +323,53 @@ describe("workflow control service", () => {
     expect((await readProgress(fs, context)).history).toHaveLength(0);
   });
 
+  it("preserves the pre-delivery baseline when executed work is confirmed manually after restart", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock(), id: () => "authorization-1" });
+    const proposal = initialProposal("coder");
+    proposal.proposal = {
+      ...proposal.proposal!, authorizationText: "Allow this Coder dispatch.",
+      violatedRule: "Transition code-change/coder is not legal after the confirmed Workflow Progress history."
+    };
+    await service.submitProgress(context, renderWorkflowProgress(proposal));
+    await service.claimDispatch({
+      ...context, routePath: routePath("coder"), targetRole: "coder",
+      routeContentHash: "route-hash", messageId: "message-1"
+    });
+    const baseline = (await service.getState(context)).pendingDispatch?.evidenceBaseline;
+    await writeFinalArtifact(fs, context, "coder-completion.md", renderCoderCompletionTemplate(context.taskSlug), [
+      ["Decision: ready_for_review|incomplete|failed", "Decision: ready_for_review"]
+    ]);
+    await service.markDispatchUnconfirmed(context, "message-1", "All hooks were lost.");
+    const restored = createWorkflowControlService({ fs, now: sequenceClock() });
+    await expect(restored.confirmDispatch(context, "wrong-message", "manual")).rejects.toMatchObject({
+      code: "WORKFLOW_DISPATCH_CONFIRMATION_MISMATCH"
+    });
+    await restored.confirmDispatch(context, "message-1", "manual");
+    const state = await restored.getState(context);
+    expect(state.activeDispatch).toEqual(baseline);
+    expect(state.pendingDispatch).toBeNull();
+    expect(state.warnings).toEqual([]);
+    expect(state.userAuthorizations[0]?.status).toBe("consumed");
+    expect((await readProgress(fs, context)).history[0]?.evidence).toContain("User manually confirmed execution of message message-1");
+    await advance(restored, fs, context, "tester", undefined, "validate completed work");
+    expect((await readProgress(fs, context)).history).toHaveLength(2);
+  });
+
+  it("does not manually confirm a dispatch before its confirmation has failed", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await service.submitProgress(context, renderWorkflowProgress(initialProposal("architect")));
+    await service.claimDispatch({
+      ...context, routePath: routePath("architect"), targetRole: "architect",
+      routeContentHash: "route-hash", messageId: "message-1"
+    });
+    await expect(service.confirmDispatch(context, "message-1", "manual")).rejects.toMatchObject({
+      code: "WORKFLOW_DISPATCH_NOT_UNCONFIRMED"
+    });
+    expect((await readProgress(fs, context)).history).toEqual([]);
+  });
+
   it("keeps authorization evidence when PM asks the user after a failed submission", async () => {
     const { context, fs } = await createContext(roots);
     const service = createWorkflowControlService({ fs, now: sequenceClock(), id: () => "authorization-1" });

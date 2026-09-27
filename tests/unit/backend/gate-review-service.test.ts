@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createNodeFileSystemAdapter, type FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
-import type { CommandResult, CommandRunner, CommandRunnerOptions } from "../../../src/backend/adapters/command-runner.js";
+import { createCommandRunner, type CommandResult, type CommandRunner, type CommandRunnerOptions } from "../../../src/backend/adapters/command-runner.js";
 import type { TerminalRuntime } from "../../../src/backend/runtime/terminal-runtime.js";
 import { createGateReviewService } from "../../../src/backend/services/gate-review-service.js";
 import type { CodeDiffSource, GateReviewGate } from "../../../src/shared/types/gate-review.js";
@@ -112,7 +112,7 @@ describe("gate-review-service", () => {
     expect(await readFile(path.join(taskWorktree(tmpRepo), planSnapshot.snapshotPath), "utf8"))
       .toBe(validArchitecturePlan());
 
-    expect(runnerCalls.some((call) => call.command === "git" && call.args[0] === "diff")).toBe(true);
+    expect(runnerCalls.some((call) => call.command === "git" && gitArgs(call.args)[0] === "diff")).toBe(true);
     expect(sessionStarts).toEqual(["reviewer"]);
     expect(activityCalls).toEqual([
       "running:reviewer",
@@ -771,7 +771,7 @@ describe("gate-review-service", () => {
     expect(prompt).toContain("Reviewable commits:");
     expect(prompt).toContain("- abc1234 implement route");
     expect(prompt).toContain("git show --find-renames abc1234");
-    expect(runnerCalls.some((call) => call.args.join(" ") === "show --format= --binary --find-renames abc1234")).toBe(true);
+    expect(runnerCalls.some((call) => gitArgs(call.args).join(" ") === "show --format= --binary --find-renames abc1234")).toBe(true);
   });
 
   it("retries a transient HEAD failure before deciding whether code-diff is needed", async () => {
@@ -782,7 +782,7 @@ describe("gate-review-service", () => {
     const runner: CommandRunner = {
       ...baseRunner,
       async run(command, args = [], options) {
-        if (command === "git" && args.join(" ") === "rev-parse HEAD" && options?.cwd === taskWorktree(tmpRepo!)) {
+        if (command === "git" && gitArgs(args).join(" ") === "rev-parse HEAD" && options?.cwd === taskWorktree(tmpRepo!)) {
           headAttempts += 1;
           if (headAttempts === 1) return { stdout: "", stderr: "temporary git refusal", exitCode: 128 };
         }
@@ -809,7 +809,7 @@ describe("gate-review-service", () => {
     const runner: CommandRunner = {
       ...baseRunner,
       async run(command, args = [], options) {
-        if (command === "git" && args.join(" ") === "rev-parse HEAD") {
+        if (command === "git" && gitArgs(args).join(" ") === "rev-parse HEAD") {
           headAttempts += 1;
           return { stdout: "", stderr: "fatal: detected dubious ownership", exitCode: 128 };
         }
@@ -827,7 +827,134 @@ describe("gate-review-service", () => {
     expect(result.status).toBe("failed_to_start");
     expect(result.message).toContain("exit 128");
     expect(result.message).toContain("detected dubious ownership");
-    expect(headAttempts).toBe(3);
+    expect(headAttempts).toBe(4);
+  }, 15_000);
+
+  it.each([
+    "status --porcelain=v1",
+    "log --oneline --reverse base-sha..head-sha",
+    "merge-base --is-ancestor base-sha head-sha",
+    "show --format= --binary --find-renames abc1234"
+  ])("retries transient %s failures and starts code-diff with scoped repository trust", async (failingCommand) => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-git-retry-"));
+    await writeHarnessFiles(tmpRepo);
+    let attempts = 0;
+    const baseRunner = createRunner(tmpRepo, [], {
+      "rev-parse HEAD": ({ cwd }) => cwd === tmpRepo ? "base-sha" : "head-sha",
+      "log --oneline --reverse base-sha..head-sha": "abc1234 implement route",
+      "show --format= --name-only --find-renames abc1234": "src/feature.ts",
+      "show --format= --binary --find-renames abc1234": "diff --git a/src/feature.ts b/src/feature.ts\n"
+    });
+    const runner: CommandRunner = {
+      async run(command, args = [], options) {
+        expect(args.slice(0, 2)).toEqual(["-c", `safe.directory=${options!.cwd}`]);
+        if (gitArgs(args).join(" ") === failingCommand) {
+          attempts += 1;
+          if (attempts <= 2) return { stdout: "", stderr: "fatal: transient shared-mount error", exitCode: 128 };
+        }
+        return baseRunner.run(command, args, options);
+      }
+    };
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(), runner, runtime: createRuntime(tmpRepo, []),
+      projectService: createProjectService(), taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["code-diff"]), sessionService: createSessionService(),
+      roundService: createRoundService(), reportPollIntervalMs: 5
+    });
+    expect((await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", { codeDiffSource: "coder" })).status).toBe("started");
+    expect(attempts).toBe(3);
+    await waitFor(async () => (await service.getState(tmpRepo!, "demo-task")).gates["code-diff"].status === "completed");
+  }, 15_000);
+
+  it.each(["status --porcelain=v1", "merge-base --is-ancestor base-sha head-sha", "rev-parse --abbrev-ref --symbolic-full-name @{upstream}"])(
+    "does not mistake persistent %s errors for clean state or missing changes",
+    async (failingCommand) => {
+      tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-git-error-"));
+      await writeHarnessFiles(tmpRepo);
+      let attempts = 0;
+      const baseRunner = createRunner(tmpRepo, [], {
+        "rev-parse HEAD": ({ cwd }) => cwd === tmpRepo ? "base-sha" : "head-sha"
+      });
+      const runner: CommandRunner = {
+        async run(command, args = [], options) {
+          const key = gitArgs(args).join(" ");
+          if (key === failingCommand) {
+            attempts += 1;
+            return { stdout: "", stderr: "fatal: cannot read repository", exitCode: 128 };
+          }
+          if (failingCommand.includes("@{upstream}") && key.startsWith("merge-base --is-ancestor")) {
+            return { stdout: "", stderr: "", exitCode: 1 };
+          }
+          return baseRunner.run(command, args, options);
+        }
+      };
+      const service = createGateReviewService({
+        fs: createNodeFileSystemAdapter(), runner, runtime: createRuntime(tmpRepo, []),
+        projectService: createProjectService(), taskService: createTaskService(tmpRepo),
+        appSettings: createAppSettings(["code-diff"]), sessionService: createSessionService(),
+        roundService: createRoundService()
+      });
+      const result = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", { codeDiffSource: "coder" });
+      expect(result.status).toBe("failed_to_start");
+      expect(result.message).toContain(failingCommand);
+      expect(result.message).toContain("exit 128");
+      expect(attempts).toBe(4);
+    }, 15_000
+  );
+
+  it("accepts a negative ancestor result and an absent upstream without retrying or swallowing fatal errors", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-git-negative-"));
+    await writeHarnessFiles(tmpRepo);
+    const attempts: string[] = [];
+    const baseRunner = createRunner(tmpRepo, [], {
+      "rev-parse HEAD": ({ cwd }) => cwd === tmpRepo ? "base-sha" : "head-sha"
+    });
+    const runner: CommandRunner = {
+      async run(command, args = [], options) {
+        const key = gitArgs(args).join(" ");
+        attempts.push(key);
+        if (key.startsWith("merge-base --is-ancestor")) return { stdout: "", stderr: "", exitCode: 1 };
+        if (key.includes("@{upstream}")) return { stdout: "", stderr: "fatal: no upstream configured for branch 'task'", exitCode: 128 };
+        return baseRunner.run(command, args, options);
+      }
+    };
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(), runner, runtime: createRuntime(tmpRepo, []),
+      projectService: createProjectService(), taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["code-diff"]), sessionService: createSessionService(), roundService: createRoundService()
+    });
+    expect((await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", { codeDiffSource: "coder" })).status).toBe("not_required");
+    expect(attempts.filter((key) => key.startsWith("merge-base --is-ancestor"))).toHaveLength(1);
+    expect(attempts.filter((key) => key.includes("@{upstream}"))).toHaveLength(1);
+  });
+
+  it("reads a real task worktree with command-scoped safe.directory under simulated different ownership", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-git-ownership-"));
+    const realRunner = createCommandRunner();
+    const run = async (cwd: string, args: string[]) => {
+      const result = await realRunner.run("git", args, { cwd });
+      expect(result.exitCode, result.stderr).toBe(0);
+      return result;
+    };
+    await run(tmpRepo, ["init"]);
+    await run(tmpRepo, ["-c", "user.name=VCM Test", "-c", "user.email=test@vcm.local", "commit", "--allow-empty", "-m", "initial"]);
+    await run(tmpRepo, ["worktree", "add", "-b", "demo-task", taskWorktree(tmpRepo)]);
+    await writeHarnessFiles(tmpRepo);
+    await writeFile(path.join(taskWorktree(tmpRepo), ".gitignore"), ".ai/vcm/\n", "utf8");
+    await run(taskWorktree(tmpRepo), ["add", "."]);
+    await run(taskWorktree(tmpRepo), ["-c", "user.name=VCM Test", "-c", "user.email=test@vcm.local", "commit", "-m", "[VCM Harness] test fixture"]);
+    const runner: CommandRunner = {
+      run(command, args, options) {
+        return realRunner.run(command, args, { ...options, env: { GIT_TEST_ASSUME_DIFFERENT_OWNER: "1" } });
+      }
+    };
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(), runner, runtime: createRuntime(tmpRepo, []),
+      projectService: createProjectService(), taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["code-diff"]), sessionService: createSessionService(), roundService: createRoundService()
+    });
+    const result = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", { codeDiffSource: "coder" });
+    expect(result.status, result.message).toBe("not_required");
   });
 
   it("excludes Harness commits from mixed code-diff input", async () => {
@@ -1599,7 +1726,7 @@ function createRunner(
     async run(command: string, args: string[] = [], options?: CommandRunnerOptions): Promise<CommandResult> {
       calls.push({ command, args, options });
       if (command === "git") {
-        const key = args.join(" ");
+        const key = gitArgs(args).join(" ");
         const output = gitOutputs[key];
         if (typeof output === "function") {
           return { stdout: output({ cwd: options?.cwd }), stderr: "", exitCode: 0 };
@@ -1612,6 +1739,10 @@ function createRunner(
       return { stdout: "", stderr: `unexpected command: ${command}`, exitCode: 1 };
     }
   };
+}
+
+function gitArgs(args: string[]): string[] {
+  return args[0] === "-c" && args[1]?.startsWith("safe.directory=") ? args.slice(2) : args;
 }
 
 function createRuntime(

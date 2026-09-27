@@ -95,7 +95,7 @@ export interface DetectCodeIntelligenceOptions {
 }
 
 export interface HarnessCodeIntelligenceDetector {
-  detect(repoRoot: string): Promise<HarnessCodeIntelligenceStatus>;
+  detect(repoRoot: string, options?: { refresh?: boolean }): Promise<HarnessCodeIntelligenceStatus>;
 }
 
 interface ProbeCacheEntry {
@@ -117,7 +117,8 @@ export function createHarnessCodeIntelligenceDetector(
   const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
 
   return {
-    async detect(repoRoot) {
+    async detect(repoRoot, detectOptions) {
+      if (detectOptions?.refresh) probeCache.clear();
       return detectCodeIntelligence(fs, repoRoot, options, async (definition, executablePath) => {
         const cacheKey = `${executablePath}\u0000${definition.probeArgs.join("\u0000")}`;
         const cached = probeCache.get(cacheKey);

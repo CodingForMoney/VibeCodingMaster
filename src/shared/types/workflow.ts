@@ -72,6 +72,7 @@ export interface WorkflowPendingDispatch {
   routeContentHash?: string;
   messageId?: string;
   confirmationError?: string;
+  evidenceBaseline?: WorkflowDispatchEvidenceBaseline;
   createdAt: string;
   updatedAt: string;
 }

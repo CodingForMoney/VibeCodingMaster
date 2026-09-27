@@ -100,7 +100,7 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-architecture-interview/SKILL.md")).toContain("During an active Architect Interview");
     const codeNavigationSkill = await fs.readText("/repo/.claude/skills/vcm-code-navigation/SKILL.md");
     expect(codeNavigationSkill).toContain("record that limitation and leave the relationship unresolved");
-    expect(codeNavigationSkill).toContain("If `LSP` is unavailable, report a VCM LSP configuration failure");
+    expect(codeNavigationSkill).toContain("If a required language server is unavailable, stop the affected work");
     expect(codeNavigationSkill).not.toContain("ToolSearch");
     expect(codeNavigationSkill).not.toContain("documentSymbol");
     expect(codeNavigationSkill).toContain("Retry the same bounded workspace query at most two more times");
@@ -201,8 +201,8 @@ describe("createHarnessService", () => {
     expect(frontmatterOf(architectAgent)).not.toMatch(/^tools:/m);
     expect(architectAgent).toContain("Follow the preloaded `vcm-code-navigation` skill");
     expect(architectAgent).toContain("Do not use the built-in `Grep` tool or shell text-search commands");
-    expect(architectAgent).toContain("LSP is mandatory and directly available");
-    expect(architectAgent).toContain("report a VCM LSP configuration failure");
+    expect(architectAgent).toContain("LSP is mandatory for navigating project source code");
+    expect(architectAgent).toContain("report its language, command, error, and installation hint");
     expect(architectAgent).toContain("An accessor, its backing field, a trait declaration, its implementation method, a wrapper, and an alias are separate symbols");
     expect(architectAgent).toContain("except for the bounded fallback below");
     expect(architectAgent).toContain("Text matches identify candidates only and are not relationship evidence");
@@ -444,6 +444,7 @@ describe("createHarnessService", () => {
       }
     });
     let probeCalls = 0;
+    let repaired = false;
     const detector = createHarnessCodeIntelligenceDetector(fs, {
       pluginDir: "/plugins/vcm-lsp",
       pathEnv: "/tools",
@@ -451,6 +452,7 @@ describe("createHarnessService", () => {
       runner: {
         async run() {
           probeCalls += 1;
+          if (repaired) return { stdout: "rust-analyzer 1.0", stderr: "", exitCode: 0 };
           return {
             stdout: "",
             stderr: "Unknown binary 'rust-analyzer' in official toolchain",
@@ -472,6 +474,9 @@ describe("createHarnessService", () => {
     });
     expect(second.languages[0]?.state).toBe("server_failed");
     expect(probeCalls).toBe(1);
+    repaired = true;
+    expect((await detector.detect("/repo", { refresh: true })).languages[0]?.state).toBe("server_runnable");
+    expect(probeCalls).toBe(2);
   });
 
   it("inserts VCM rules into an existing file without overwriting user content", async () => {

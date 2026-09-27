@@ -185,7 +185,13 @@ Regenerate both after changing module layout, public exports, or HTTP routes.
 
 VCM ships the local `vcm-lsp-bridge` Claude Code plugin. Session Service passes
 it through `--plugin-dir` and enables the LSP tool only for Architect sessions
-on both native Claude and Codex Bridge launches. Other roles do not load the plugin.
+on both native Claude and Codex Bridge launches. Only runnable project language
+servers are registered. Launches re-probe the environment and append language
+availability, missing-server errors, and installation hints to Architect's
+system context without replacing its existing restart context. Missing required
+servers are environment prerequisites: Architect reports the affected work
+instead of substituting source-text search, then restarts after environment repair.
+Other roles do not load the plugin.
 Each bundled language server may restart up to three times after a crash. The
 Rust server disables its redundant check-on-save run because VCM roles execute
 the required validation explicitly. Server restart recovers a terminated LSP
@@ -315,14 +321,19 @@ snapshots are not role submission paths.
 `workflow-control-service` validates its append-only history and legal target
 against the fixed flow policy plus current accepted artifacts and Gate state.
 An accepted revision grants one pending PM route. `message-service` claims that
-approval before terminal submission and confirms it only from the target
-role's matching `UserPromptSubmit`; confirmation appends the history row and
+approval and captures the artifact/Gate baseline before terminal submission.
+The target role's matching `UserPromptSubmit` confirms delivery; if confirmation
+is lost permanently, the user can inspect the target session and use Confirm
+Executed to confirm that exact delivered message without sending it again.
+Manual confirmation is recorded in the history evidence and message record.
+Confirmation reuses the pre-delivery baseline, appends the history row, and
 clears the approval. Paired Workflow Progress and runtime approval updates use
 a task-local write-ahead transaction record; the next state read replays an
 interrupted commit before exposing either file. Project recovery also returns
-an unconfirmed `dispatching` approval to `pending` after recovering message
-state, so the approved route can be submitted again instead of remaining
-stuck. Exact user overrides are recorded by the backend and are bound to one
+an undelivered `dispatching` approval to `pending`. Delivered unconfirmed
+approvals retain their message ID, authorization, baseline, and warning for
+a late Hook or explicit user confirmation. Clearing such a route abandons its
+authorization without deleting the evidence. Exact user overrides are recorded by the backend and are bound to one
 rejected transition. An existing direct user instruction that explicitly
 authorizes that transition is reused without a second confirmation. The same
 user wording may be used again, but each record is consumable only by its own

@@ -84,17 +84,23 @@ Dispatch uses this lifecycle:
 
 1. Accepted Workflow Progress creates one `pending` approval.
 2. A matching PM route claims it as `dispatching` before terminal input and
-   records the route-content hash and generated message ID.
+   records the route-content hash, generated message ID, and current artifact/Gate baseline.
 3. Terminal submission failure returns the same approval to `pending`.
-4. The target role's matching `UserPromptSubmit` confirms the dispatch.
+4. The target role's matching `UserPromptSubmit` confirms the dispatch. If all
+   confirmation attempts fail, the user may inspect the session and use Confirm
+   Executed for that exact delivered message. This records manual confirmation
+   without submitting the message again.
 5. Confirmation atomically appends one Dispatch History row and clears the
    approval.
 
 Submitting or confirming a dispatch updates Workflow Progress and runtime state
 through `.ai/vcm/workflow-control-transaction.json`. An interrupted paired write
 is replayed before state is read. Project startup recovers message state first,
-then changes an unconfirmed `dispatching` approval back to `pending` so it can
-be delivered again without creating a second history row.
+then returns only undelivered `dispatching` approvals to `pending`. Delivered
+unconfirmed approvals retain their claim and warning until a late Hook, manual
+confirmation, or explicit cancellation. Confirmation reuses the pre-delivery
+baseline so already-produced artifacts remain fresh. Cancellation preserves
+the authorization as abandoned rather than deleting it.
 
 Automatic delivery matches the generated VCM message ID. In manual
 orchestration, VCM accepts only a target `UserPromptSubmit` whose text exactly
@@ -269,10 +275,13 @@ Unit and backend E2E coverage verifies:
 - one-time user-approved post-validation Tester work without an override, with stale Gate rejection afterward
 - strict docs-sync correction owner/evidence and owner-specific return paths
 - route denial without approval and target mismatch rejection
-- claim before terminal submission, release on failure, and confirmation only
-  from the matching target `UserPromptSubmit`
+- claim and baseline capture before terminal submission, release on submission
+  failure, and confirmation from the matching target `UserPromptSubmit` or
+  explicit user confirmation of an unconfirmed delivered message
 - transaction replay after interrupted proposal or confirmation writes
 - restart recovery of unconfirmed dispatches without duplicate history
+- permanent Hook loss, manual confirmation after execution, late Hook idempotency,
+  consumed authorization, no duplicate delivery, and fresh next-step evidence
 - missing/inconsistent state fail-closed and conservative baseline reconstruction
 - fresh exception Gate enforcement and identical-content artifact resubmission
 - repeated user wording bound independently to separate transitions

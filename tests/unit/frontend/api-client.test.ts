@@ -39,6 +39,15 @@ describe("apiClient", () => {
     expect(new Headers(init?.headers).get("content-type")).toBe("application/json");
   });
 
+  it("confirms exactly the selected delivered dispatch without submitting terminal input", async () => {
+    const fetchMock = mockFetch({ id: "msg/1", confirmationSource: "manual" });
+    await apiClient.confirmDeliveredDispatch("task/1", "msg/1");
+    expect(fetchMock.mock.calls).toHaveLength(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/tasks/task%2F1/messages/msg%2F1/confirm-delivered");
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBeUndefined();
+  });
+
   it("cancels the exact running Gate Review request", async () => {
     const fetchMock = mockFetch({
       version: 1,

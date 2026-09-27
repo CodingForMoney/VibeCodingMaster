@@ -28,6 +28,7 @@ import type { ProjectSummary } from "../../shared/types/project.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel, SessionModelOption } from "../../shared/types/session.js";
 import type { TaskRecord } from "../../shared/types/task.js";
+import type { WorkflowControlState } from "../../shared/types/workflow.js";
 import { EventLog } from "../components/event-log.js";
 import { HarnessPanel, type BootstrapLaunchOptions } from "../components/harness-panel.js";
 import { MessageTimeline, getMessageCounts } from "../components/message-timeline.js";
@@ -55,7 +56,7 @@ export interface ProjectDashboardProps {
   events: string[];
   roundState: VcmSessionRoundState | null;
   gateReview: GateReviewIndex | null;
-  workflowControlWarnings: string[];
+  workflowControlState: WorkflowControlState | null;
   translationEnabled: boolean;
   translationAutoSendEnabled: boolean;
   translationTargetLanguage: TranslationTargetLanguage;
@@ -129,6 +130,7 @@ export interface ProjectDashboardProps {
   onSaveLaunchTemplate(): void;
   onOneClickStart(): void;
   onMarkAllMessagesDone(taskSlug: string): void;
+  onConfirmDeliveredDispatch(taskSlug: string, messageId: string): void;
   onDeleteMessageHistory(taskSlug: string): void;
 }
 
@@ -142,7 +144,7 @@ export function ProjectDashboard({
   events,
   roundState,
   gateReview,
-  workflowControlWarnings,
+  workflowControlState,
   translationEnabled,
   translationAutoSendEnabled,
   translationTargetLanguage,
@@ -215,6 +217,7 @@ export function ProjectDashboard({
   onSaveLaunchTemplate,
   onOneClickStart,
   onMarkAllMessagesDone,
+  onConfirmDeliveredDispatch,
   onDeleteMessageHistory
 }: ProjectDashboardProps) {
   const [taskSlug, setTaskSlug] = useState("");
@@ -490,9 +493,21 @@ export function ProjectDashboard({
           {openTasks.length > 0 ? (
             <div className="task-panel">
               <TaskNav tasks={openTasks} activeTaskSlug={activeTaskSlug} onSelect={onSelectTask} />
-              {activeTask && workflowControlWarnings.length > 0 ? (
+              {activeTask && workflowControlState && workflowControlState.warnings.length > 0 ? (
                 <div className="warnings" role="status">
-                  {workflowControlWarnings.map((warning) => <p key={warning}>{warning}</p>)}
+                  {workflowControlState.warnings.map((warning) => <p key={warning}>{warning}</p>)}
+                  {workflowControlState.pendingDispatch?.status === "dispatching"
+                    && workflowControlState.pendingDispatch.confirmationError
+                    && workflowControlState.pendingDispatch.messageId ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      title="Confirm that this message already executed in the target session without sending it again"
+                      onClick={() => onConfirmDeliveredDispatch(activeTask.taskSlug, workflowControlState.pendingDispatch!.messageId!)}
+                    >
+                      Confirm Executed
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
               {activeTask ? (

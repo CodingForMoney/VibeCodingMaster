@@ -229,7 +229,7 @@ tests/
 | INT-RT-007 | Multi-role Docs-Only Flow | Workflow Control + Artifact API + Architect/Coder/Tester sessions | Documentation-only work can be assigned to the role that owns the relevant evidence without entering code or validation gates | All three roles may submit `docs-update-report.md`; each sequential assignment requires a fresh report; only the latest `synced` or `unchanged` result completes; a testing-document update by Tester remains Docs-Only | L2, on Docs-Only or managed-artifact changes | Covered by artifact, workflow-control, Harness-template, and backend mock-Claude E2E tests |
 | INT-RT-008 | Workflow-role Restart With Context | Session routes + Role Context Restart Service + Claude Hook | A fresh workflow-role Session can continue from durable task artifacts without a new context document | All five workflow roles receive role-specific artifact references and one continuation prompt; Translator and Harness Engineer are rejected; the first prompt clears intent; backend restart recreates an unconfirmed replacement | L2, on Session restart or recovery changes | Covered by `role-context-restart.e2e.test.ts` with the mock Claude runtime |
 | INT-RT-009 | Post-validation follow-up and docs-sync correction | Workflow Control + managed artifacts + PM route authorization | Fully green validation can accept one explicit Tester-owned follow-up without a workflow override, and blocked docs sync returns to its declared owner | Missing, reused, wrong-owner, or wrong-checkpoint approval is rejected; the matching approval is consumed once; old Test/Gate evidence becomes stale; blocked docs sync requires exact owner/evidence and returns through every invalidated validation step | L2, on Workflow Control or docs-sync contract changes | Covered by workflow-control, artifact-contract, Harness-template, and backend mock-Claude E2E tests |
-| INT-RT-010 | Workflow Control paired-state recovery | Workflow Progress + Workflow Control runtime state + message recovery | A crash or backend restart cannot leave a false approval, duplicate history row, or permanently dispatching route | Interrupted proposal/confirmation writes replay from the transaction record; unconfirmed dispatching returns to pending after message recovery; missing or inconsistent paired state fails closed; missing runtime state reconstructs a conservative evidence baseline | L2, on Workflow Control persistence or runtime recovery changes | Covered by Workflow Control and runtime recovery service tests plus backend mock-Claude workflow journeys |
+| INT-RT-010 | Workflow Control paired-state recovery | Workflow Progress + Workflow Control runtime state + message recovery | A crash or backend restart cannot leave a false approval, duplicate history row, or an unrecoverable delivered route | Interrupted paired writes replay from the transaction record; undelivered dispatches return to pending; delivered unconfirmed dispatches retain their claim and pre-delivery baseline for late Hook or explicit manual confirmation; missing or inconsistent paired state fails closed | L2, on Workflow Control persistence or runtime recovery changes | Covered by Workflow Control and runtime recovery service tests plus backend mock-Claude workflow journeys |
 
 ### Backend E2E (implemented: `tests/e2e/backend/`)
 
@@ -246,6 +246,8 @@ services with controlled runtime doubles:
 
 - PM-to-role routing, round completion, retryable failures, and manual
   interruption without retry.
+- Permanent dispatch-confirmation Hook loss, exact-message manual confirmation,
+  preserved authorization, fresh next-step evidence, and no duplicate execution.
 - PM question hard pause, pending-approval cancellation, direct-user reply
   unlock, and refusal to dispatch a stale route after the answer. False-positive
   regressions cover normal Stop and routing, reports while Architect or a Gate
@@ -262,6 +264,11 @@ services with controlled runtime doubles:
   reviewable regression-test changes, and unchanged-input suppression.
 - Code-diff exclusion of `[VCM Harness]` commits, including mixed ranges,
   all-Harness ranges, review-input hashes, and HEAD checkpoint advancement.
+- Gate Git unit regressions cover multi-second retries for status, HEAD, log,
+  show, and ancestor queries, command-scoped repository trust, persistent errors,
+  and expected negative results that must not hide execution failures. Architect
+  launch regressions cover LSP notices on start/resume, repaired-server detection
+  on restart, and preservation of the caller's system context.
 - Gate Review cancellation, Reviewer restart, exact request ownership, and
   protection against cancelled-request reports overwriting replacement state.
 - Tester `incomplete` report validation and backend refusal to start

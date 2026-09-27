@@ -17,12 +17,53 @@ import {
 } from "../../../src/backend/services/session-service.js";
 import { claudeTranscriptPath } from "../../../src/backend/services/claude-transcript-service.js";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
-import { VCM_LSP_PLUGIN_DIR } from "../../../src/backend/services/lsp-plugin.js";
+import type { HarnessCodeIntelligenceStatus } from "../../../src/shared/types/harness.js";
+import { VCM_LSP_PLUGIN_DIR, VCM_LSP_PLUGIN_MANIFEST } from "../../../src/backend/services/lsp-plugin.js";
 
 const TASK_WORKTREE = "/repo/.claude/worktrees/demo-task";
 const LSP_PLUGIN_ARGS = ["--plugin-dir", VCM_LSP_PLUGIN_DIR];
 
 describe("createSessionService", () => {
+  it("tells Architect about missing LSP prerequisites on start and resume, then registers a repaired server on restart", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const status: HarnessCodeIntelligenceStatus = {
+      state: "missing",
+      languages: [{
+        language: "python", label: "Python", serverCommand: "pyright-langserver", pluginName: "vcm-lsp-bridge",
+        detected: true, pluginReady: true, serverFound: false, serverRunnable: false, state: "server_missing",
+        error: "pyright-langserver was not found in the VCM backend PATH.", detectedBy: ["pyproject.toml"]
+      }]
+    };
+    const service = createTestSessionService(fs, runtimeInputs, [], { codeIntelligenceStatus: status });
+    await service.startRoleSession("/repo", "demo-task", "architect", { appendSystemPrompt: "Preserved planning context." });
+    expect(runtimeInputs[0]?.args).not.toContain("--plugin-dir");
+    const launchPrompt = runtimeInputs[0]?.args.at(-1);
+    expect(launchPrompt).toContain("Preserved planning context.");
+    expect(launchPrompt).toContain("Registered language servers: none");
+    expect(launchPrompt).toContain("npm install -g pyright");
+    expect(launchPrompt).toContain("stop that work and report the environment prerequisite");
+    expect(runtimeInputs[0]?.env?.ENABLE_LSP_TOOL).toBeUndefined();
+    await recordCurrentRoleHook(service, {
+      taskSlug: "demo-task", role: "architect", eventName: "UserPromptSubmit",
+      sessionId: "architect-python-session", cwd: TASK_WORKTREE
+    });
+    await service.stopRoleSession("/repo", "demo-task", "architect");
+    await service.resumeRoleSession("/repo", "demo-task", "architect");
+    expect(runtimeInputs[1]?.args.at(-1)).toContain("npm install -g pyright");
+    status.state = "available";
+    Object.assign(status.languages[0]!, { state: "server_runnable", serverFound: true, serverRunnable: true, error: undefined });
+    await fs.writeJsonAtomic(VCM_LSP_PLUGIN_MANIFEST, { name: "vcm-lsp-bridge", lspServers: { pyright: { command: "pyright-langserver" } } });
+    await service.restartRoleSession("/repo", "demo-task", "architect");
+    expect(runtimeInputs[2]?.args).toContain("--plugin-dir");
+    expect(runtimeInputs[2]?.args.at(-1)).toContain("Python (pyright-langserver)");
+    expect(runtimeInputs[2]?.args.at(-1)).not.toContain("unavailable");
+    expect(runtimeInputs[2]?.env?.ENABLE_LSP_TOOL).toBe("true");
+    await service.startRoleSession("/repo", "demo-task", "coder");
+    expect(runtimeInputs[3]?.args).not.toContain("--append-system-prompt");
+    expect(runtimeInputs[3]?.args).not.toContain("--plugin-dir");
+  });
+
   it("offers only the four Claude model choices", () => {
     expect(CLAUDE_MODEL_OPTIONS.map((option) => [option.label, option.value])).toEqual([
       ["Default", "default"],
@@ -1546,6 +1587,7 @@ function createTestSessionService(
     deadProcessCalls?: number[];
     dropBeforeWriteCalls?: number[];
     workflowContext?: string;
+    codeIntelligenceStatus?: HarnessCodeIntelligenceStatus;
     onRuntimeStop?: (sessionId: string) => Promise<void> | void;
   } = {}
 ) {
@@ -1577,7 +1619,7 @@ function createTestSessionService(
         model: ClaudeModel = "default",
         effort: SessionEffort = "default",
         _settingsOverride?: Record<string, unknown>,
-        _appendSystemPrompt?: string,
+        appendSystemPrompt?: string,
         pluginDirs: string[] = []
       ) {
         const args = pluginDirs.flatMap((pluginDir) => ["--plugin-dir", pluginDir]);
@@ -1594,6 +1636,7 @@ function createTestSessionService(
         if (permissionMode !== "default") {
           args.push("--permission-mode", permissionMode);
         }
+        if (appendSystemPrompt) args.push("--append-system-prompt", appendSystemPrompt);
         return { command, args, display: `${command} ${args.join(" ")}` };
       }
     },
@@ -1669,6 +1712,13 @@ function createTestSessionService(
       }
     } : undefined,
     apiUrl: "http://127.0.0.1:4173",
+    codeIntelligenceDetector: options.codeIntelligenceStatus ? {
+      async detect(repoRoot, detectOptions) {
+        expect(repoRoot).toBe(worktreePath);
+        expect(detectOptions).toEqual({ refresh: true });
+        return options.codeIntelligenceStatus!;
+      }
+    } : undefined,
     sandboxMode: options.sandboxMode,
     isProcessAlive: (pid) => !deadProcessPids.has(pid),
     now: () => "2026-05-29T00:00:00.000Z"

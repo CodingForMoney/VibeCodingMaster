@@ -376,6 +376,11 @@ export const apiClient = {
   listMessages(taskSlug: string) {
     return request<VcmRoleMessage[]>(`/api/tasks/${encodeURIComponent(taskSlug)}/messages`);
   },
+  confirmDeliveredDispatch(taskSlug: string, messageId: string) {
+    return request<VcmRoleMessage>(`/api/tasks/${encodeURIComponent(taskSlug)}/messages/${encodeURIComponent(messageId)}/confirm-delivered`, {
+      method: "POST"
+    });
+  },
   markAllMessagesDone(taskSlug: string) {
     return request<MarkAllMessagesDoneResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/messages/mark-all-done`, {
       method: "POST"

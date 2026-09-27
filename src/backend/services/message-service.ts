@@ -29,6 +29,7 @@ export interface MessageService {
   listPendingRouteFiles(input: ListRouteFilesInput): Promise<VcmRouteFile[]>;
   scanAndDispatchPendingRouteFiles(input: ScanPendingRouteFilesInput): Promise<VcmRouteFileDispatchResult[]>;
   confirmPromptSubmitted(input: ConfirmPromptSubmittedInput): Promise<VcmRoleMessage | undefined>;
+  confirmDeliveredDispatch(input: ListRouteFilesInput, messageId: string): Promise<VcmRoleMessage>;
   markAllDone(input: MarkAllDoneInput): Promise<MarkAllMessagesDoneResult>;
   deleteMessageHistory(input: ListRouteFilesInput): Promise<DeleteMessageHistoryResult>;
   getOrchestrationState(input: OrchestrationStateInput): Promise<VcmOrchestrationState>;
@@ -98,7 +99,7 @@ const DEFAULT_PRE_DISPATCH_SWITCH_DELAY_MS = 500;
 const DEFAULT_AUTO_DISPATCH_ENTER_DELAY_MS = 500;
 const DEFAULT_DISPATCH_CONFIRMATION_RETRY_DELAYS_MS = [1500, 3000];
 const DEFAULT_DISPATCH_CONFIRMATION_FAILURE_DELAY_MS = 3000;
-const DISPATCH_NOT_CONFIRMED_REASON = "Auto orchestration pasted the message, but Claude Code did not confirm submission. Press Enter in the target terminal or resend the route message.";
+const DISPATCH_NOT_CONFIRMED_REASON = "Auto orchestration pasted the message, but Claude Code did not confirm submission. Inspect the target terminal: press Enter if the prompt was not submitted, or use Confirm Executed if the role already executed it.";
 const INVALID_ROUTE_REASON = "Invalid route: non-PM roles must route through project-manager.";
 
 export function createMessageService(deps: MessageServiceDeps): MessageService {
@@ -313,6 +314,21 @@ export function createMessageService(deps: MessageServiceDeps): MessageService {
         if (accepted.fromRole === PM_ROLE) {
           await deps.workflowControlService?.confirmDispatch(toWorkflowContext(input), accepted.id);
         }
+        await appendMessageSnapshot(deps.fs, input, accepted);
+        await clearRouteFileIfStillMatchesMessage(deps.fs, input, accepted);
+        return accepted;
+      });
+    },
+    async confirmDeliveredDispatch(input, messageId) {
+      return withTaskLock(taskLocks, getMessagesPath(getStateRepoRoot(input), input.stateRoot, input.taskSlug), async () => {
+        const messages = await readLatestMessages(deps.fs, getMessagesPath(getStateRepoRoot(input), input.stateRoot, input.taskSlug));
+        const message = messages.find((entry) => entry.id === messageId);
+        if (!message || message.fromRole !== PM_ROLE || !message.deliveredAt || !deps.workflowControlService) {
+          throw new VcmError({ code: "MESSAGE_NOT_DELIVERED", message: `Message ${messageId} is not a delivered PM workflow dispatch.`, statusCode: 409 });
+        }
+        if (message.acceptedAt) return message;
+        await deps.workflowControlService.confirmDispatch(toWorkflowContext(input), messageId, "manual");
+        const accepted: VcmRoleMessage = { ...message, acceptedAt: now(), confirmationSource: "manual", failureReason: undefined };
         await appendMessageSnapshot(deps.fs, input, accepted);
         await clearRouteFileIfStillMatchesMessage(deps.fs, input, accepted);
         return accepted;

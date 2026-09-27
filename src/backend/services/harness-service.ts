@@ -88,6 +88,7 @@ import { VcmError } from "../errors.js";
 import { bumpHarnessRevision, readHarnessRevisionState } from "./harness-revision.js";
 import type { SessionService } from "./session-service.js";
 import { createHarnessCodeIntelligenceDetector } from "./code-intelligence-service.js";
+import { lspUnavailableWarning } from "./lsp-plugin.js";
 
 const execFileAsync = promisify(execFile);
 const BOOTSTRAP_SESSION_PATH = ".ai/vcm/bootstrap/session.json";
@@ -1820,7 +1821,7 @@ function renderHarnessStatus(
       ...(plannedChanges.length > 0 ? ["Review and commit VCM Harness changes before starting long-running work."] : []),
       ...((codeIntelligence?.languages ?? [])
         .filter((language) => language.state !== "server_runnable")
-        .map((language) => `Architect LSP for ${language.label} is unavailable: ${language.error ?? `${language.serverCommand} is not runnable.`}`))
+        .map(lspUnavailableWarning))
     ]
   };
 }

@@ -30,6 +30,7 @@ import type { AutoMemoryStateReport } from "../shared/types/memory.js";
 import type { VcmOrchestrationState, VcmRoleMessage } from "../shared/types/message.js";
 import type { ProjectSummary } from "../shared/types/project.js";
 import type { ProjectRuntimeState } from "../shared/types/api.js";
+import type { WorkflowControlState } from "../shared/types/workflow.js";
 import type { RoleName } from "../shared/types/role.js";
 import type { VcmRoleRecoveryState, VcmRoundStatus, VcmSessionRoundState } from "../shared/types/round.js";
 import {
@@ -96,7 +97,7 @@ export function App() {
   const [activeEvents, setActiveEvents] = useState<{ taskSlug: string; events: string[] } | null>(null);
   const [activeSessionRoundState, setActiveSessionRoundState] = useState<{ taskSlug: string; roundState: VcmSessionRoundState } | null>(null);
   const [activeGateReview, setActiveGateReview] = useState<{ taskSlug: string; state: GateReviewIndex } | null>(null);
-  const [workflowControlWarnings, setWorkflowControlWarnings] = useState<{ taskSlug: string; warnings: string[] } | null>(null);
+  const [workflowControlState, setWorkflowControlState] = useState<{ taskSlug: string; state: WorkflowControlState | null } | null>(null);
   const [activeRole, setActiveRole] = useState<RoleName>("project-manager");
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
   const [pauseAlertSound, setPauseAlertSound] = useState(true);
@@ -471,7 +472,7 @@ export function App() {
     setAutoMemoryState(state.autoMemoryState);
     setAutoMemoryStateTaskSlug(taskSlug && state.autoMemoryState ? taskSlug : null);
     setGatewayStatus(state.gatewayStatus);
-    setWorkflowControlWarnings(taskSlug ? { taskSlug, warnings: state.workflowControlState?.warnings ?? [] } : null);
+    setWorkflowControlState(taskSlug ? { taskSlug, state: state.workflowControlState ?? null } : null);
 
     if (taskSlug && state.harnessStatus) {
       setHarnessStatus(state.harnessStatus);
@@ -507,7 +508,7 @@ export function App() {
       setHarnessFeedbackState(null);
       setAutoMemoryState(null);
       setAutoMemoryStateTaskSlug(null);
-      setWorkflowControlWarnings(null);
+      setWorkflowControlState(null);
       return null;
     }
 
@@ -760,9 +761,9 @@ export function App() {
   const reviewerEnabled = Boolean(
     sidebarGateReview && Object.values(sidebarGateReview.gates).some((gate) => gate.required)
   );
-  const activeWorkflowWarnings = workflowControlWarnings && workflowControlWarnings.taskSlug === activeTask?.taskSlug
-    ? workflowControlWarnings.warnings
-    : [];
+  const activeWorkflowControl = workflowControlState && workflowControlState.taskSlug === activeTask?.taskSlug
+    ? workflowControlState.state
+    : null;
   return (
     <AppShell
       sidebar={(
@@ -776,7 +777,7 @@ export function App() {
           events={sidebarEvents}
           roundState={sidebarRoundState}
           gateReview={sidebarGateReview}
-          workflowControlWarnings={activeWorkflowWarnings}
+          workflowControlState={activeWorkflowControl}
           translationEnabled={effectiveTranslationEnabled}
           translationAutoSendEnabled={translationAutoSendEnabled}
           translationTargetLanguage={translationTargetLanguage}
@@ -1159,6 +1160,13 @@ export function App() {
               setActiveMessages({ taskSlug, messages: result.messages });
               await refreshMessageState(taskSlug);
             }, "Mark all role messages done");
+          }}
+          onConfirmDeliveredDispatch={(taskSlug, messageId) => {
+            void withBusy(async () => {
+              await apiClient.confirmDeliveredDispatch(taskSlug, messageId);
+              await refreshMessageState(taskSlug);
+              await refreshProjectRuntimeState();
+            }, "Confirm executed role dispatch");
           }}
           onDeleteMessageHistory={(taskSlug) => {
             void withBusy(async () => {

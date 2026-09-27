@@ -559,7 +559,10 @@ Before every PM dispatch to Architect, Coder, or Tester, PM uses
 validates the append-only history, requested flow, target role, and current
 artifacts, then grants one matching route. Route frontmatter contains no
 workflow approval metadata. The approval is consumed only when the target
-role's matching `UserPromptSubmit` confirms delivery.
+role's matching `UserPromptSubmit` confirms delivery. If every confirmation
+attempt fails after execution, the user may inspect the target session and
+use Confirm Executed to record that exact message without resending it. VCM
+retains the authorization and pre-delivery evidence baseline during recovery.
 
 If VCM rejects a transition, PM remains in the current turn. A direct user may
 authorize that exact rejected transition. If the current user instruction
@@ -776,7 +779,11 @@ manifest, module, or public API changes. Do not hand-edit them as durable truth.
 For Architect code reading, generated context locates the boundary; it does not
 replace semantic navigation or source inspection. VCM loads its bundled LSP
 bridge only for Architect, and the project runtime must provide the matching
-language-server executable. The Architect definition preloads
+language-server executable. Launches register only runnable project servers and
+provide Architect with language availability, errors, and installation hints.
+When a required server is missing, Architect reports the environment prerequisite
+instead of substituting source search, and restarts after the environment is repaired.
+The Architect definition preloads
 `vcm-code-navigation`. The skill uses definitions, implementations, references,
 and call hierarchy when those semantic relationships are required, then requires
 every resolved callable unit to be read in full. LSP references are

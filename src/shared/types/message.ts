@@ -30,6 +30,7 @@ export interface VcmRoleMessage {
   dispatchingAt?: string;
   deliveredAt?: string;
   acceptedAt?: string;
+  confirmationSource?: "hook" | "manual";
   failureReason?: string;
 }
 

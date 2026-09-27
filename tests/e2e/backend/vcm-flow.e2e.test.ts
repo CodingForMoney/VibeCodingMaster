@@ -36,6 +36,97 @@ afterEach(async () => {
 });
 
 describe("backend E2E with mock Claude Code", () => {
+  it("recovers executed work after every confirmation hook is lost without resending the dispatch", async () => {
+    const env = await createMockClaudeE2eApp({ workflowControl: true, dispatchConfirmationEnabled: true });
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "lost-dispatch-hook");
+    const pm = await startRole(env.app, task.taskSlug, "project-manager");
+    const coder = await startRole(env.app, task.taskSlug, "coder");
+    const service = env.deps.workflowControlService!;
+    const context = {
+      taskRepoRoot: task.worktreePath, taskSlug: task.taskSlug,
+      stateRoot: ".ai/vcm", handoffDir: ".ai/vcm/handoffs"
+    };
+    const current = await service.getProgress(context);
+    const approved = await env.app.inject({
+      method: "POST", url: `/api/tasks/${task.taskSlug}/artifacts/submit`,
+      payload: {
+        role: "project-manager", runtimeSessionToken: pm.runtimeSessionToken, kind: "workflow-progress", mode: "final",
+        content: renderWorkflowProgress({
+          ...current, revision: current.revision + 1,
+          proposal: {
+            requestedFlow: "code-change", targetRole: "coder", evidence: "User authorized this exact dispatch.",
+            authorizationText: "Send this implementation directly to Coder once.",
+            violatedRule: "Transition code-change/coder is not legal after the confirmed Workflow Progress history."
+          }
+        })
+      }
+    });
+    expect(approved.statusCode, approved.body).toBe(200);
+    let executionCount = 0;
+    let lateHook: (() => Promise<void>) | undefined;
+    env.mockRuntime.onPrompt("project-manager", "Dispatch the authorized work", async (ctx) => {
+      await ctx.userPromptSubmit();
+      await ctx.writeFile(".ai/vcm/handoffs/messages/project-manager-coder.md", "---\ntype: task\n---\nImplement the authorized work.\n");
+      await ctx.stop();
+    });
+    env.mockRuntime.onPrompt("coder", "Implement the authorized work", async (ctx) => {
+      executionCount += 1;
+      lateHook = () => ctx.userPromptSubmit();
+      // Execution succeeds, but no UserPromptSubmit confirmation reaches VCM.
+      await ctx.writeFile(".ai/vcm/handoffs/coder-completion.md", completeWorkflowArtifact(renderCoderCompletionTemplate(task.taskSlug), [
+        ["Decision: ready_for_review|incomplete|failed", "Decision: ready_for_review"]
+      ]));
+      await ctx.appendTranscriptText("Implementation completed.");
+    }, { once: false });
+    env.mockRuntime.write(pm.id, "Dispatch the authorized work");
+    await env.mockRuntime.waitForIdle();
+    await waitFor(async () => Boolean((await service.getState(context)).pendingDispatch?.confirmationError));
+    const messageId = (await service.getState(context)).pendingDispatch!.messageId!;
+    const writesBefore = env.mockRuntime.getWrites(coder.id);
+    expect((await service.getProgress(context)).history).toEqual([]);
+    const wrong = await env.app.inject({
+      method: "POST", url: `/api/tasks/${task.taskSlug}/messages/unrelated-message/confirm-delivered`
+    });
+    expect(wrong.statusCode).toBe(409);
+    const confirmed = await env.app.inject({
+      method: "POST", url: `/api/tasks/${task.taskSlug}/messages/${messageId}/confirm-delivered`
+    });
+    expect(confirmed.statusCode, confirmed.body).toBe(200);
+    expect(confirmed.json()).toMatchObject({ id: messageId, confirmationSource: "manual", acceptedAt: expect.any(String) });
+    const state = await service.getState(context);
+    expect(state.pendingDispatch).toBeNull();
+    expect(state.warnings).toEqual([]);
+    expect(state.userAuthorizations[0]?.status).toBe("consumed");
+    const progress = await service.getProgress(context);
+    expect(progress.history).toHaveLength(1);
+    expect(progress.history[0]?.evidence).toContain("User manually confirmed execution");
+    expect(await fs.readFile(path.join(task.worktreePath, context.handoffDir, "messages/project-manager-coder.md"), "utf8")).toBe("");
+    const repeated = await env.app.inject({
+      method: "POST", url: `/api/tasks/${task.taskSlug}/messages/${messageId}/confirm-delivered`
+    });
+    expect(repeated.statusCode).toBe(200);
+    expect((await service.getProgress(context)).history).toHaveLength(1);
+    expect(env.mockRuntime.getWrites(coder.id)).toEqual(writesBefore);
+    expect(executionCount).toBe(1);
+    const next = await env.app.inject({
+      method: "POST", url: `/api/tasks/${task.taskSlug}/artifacts/submit`,
+      payload: {
+        role: "project-manager", runtimeSessionToken: pm.runtimeSessionToken, kind: "workflow-progress", mode: "final",
+        content: renderWorkflowProgress({
+          ...progress, revision: progress.revision + 1,
+          proposal: { targetRole: "tester", evidence: "Validate the completed Coder implementation." }
+        })
+      }
+    });
+    expect(next.statusCode, next.body).toBe(200);
+    await lateHook!();
+    expect((await service.getProgress(context)).history).toHaveLength(1);
+    expect((await service.getState(context)).pendingDispatch?.targetRole).toBe("tester");
+  });
+
   it.each(["code-change", "architect-debug", "architecture-diagnosis"] as const)("rejects the wrong docs artifact and completes %s with docs-sync through the API", async (flow) => {
     const env = await createMockClaudeE2eApp({ workflowControl: true });
     cleanups.push(() => env.close());

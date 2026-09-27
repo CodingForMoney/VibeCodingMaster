@@ -73,6 +73,7 @@ export interface MockClaudeE2eAppOptions {
   codexBridgeBaseEnv?: NodeJS.ProcessEnv;
   now?: () => string;
   workflowControl?: boolean;
+  dispatchConfirmationEnabled?: boolean;
 }
 
 export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = {}): Promise<MockClaudeE2eApp> {
@@ -195,7 +196,9 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     workflowControlService,
     preDispatchSwitchDelayMs: 0,
     autoDispatchEnterDelayMs: 0,
-    dispatchConfirmationEnabled: false,
+    dispatchConfirmationEnabled: options.dispatchConfirmationEnabled ?? false,
+    dispatchConfirmationRetryDelaysMs: [1],
+    dispatchConfirmationFailureDelayMs: 1,
     onRouteDelivered: ({ repoRoot, taskSlug, message }) =>
       architectRestartService.recordRouteDelivered(repoRoot, taskSlug, message)
   });

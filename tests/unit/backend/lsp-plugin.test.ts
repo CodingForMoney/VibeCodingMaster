@@ -7,6 +7,7 @@ import type { HarnessCodeIntelligenceStatus } from "../../../src/shared/types/ha
 import { createNodeFileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import {
   prepareTaskLspPlugin,
+  renderArchitectLspNotice,
   roleUsesLsp,
   VCM_LSP_PLUGIN_MANIFEST,
   VCM_LSP_PLUGIN_NAME
@@ -102,5 +103,10 @@ describe("VCM LSP plugin", () => {
     const manifest = JSON.parse(await readFile(path.join(pluginDir!, ".claude-plugin/plugin.json"), "utf8"));
     expect(Object.keys(manifest.lspServers)).toEqual(["rust-analyzer"]);
     expect(await prepareTaskLspPlugin(createNodeFileSystemAdapter(), tmpRepo, { ...status, languages: status.languages.slice(1) })).toEqual([]);
+    const notice = renderArchitectLspNotice(status);
+    expect(notice).toContain("Registered language servers: Rust (rust-analyzer)");
+    expect(notice).toContain("Architect LSP for Python is unavailable");
+    expect(notice).toContain("npm install -g pyright");
+    expect(notice).toContain("Do not substitute source text search");
   });
 });

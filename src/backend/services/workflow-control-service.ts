@@ -59,7 +59,7 @@ export interface WorkflowControlService {
   releaseDispatch(input: WorkflowControlContext, messageId: string): Promise<void>;
   markDispatchUnconfirmed(input: WorkflowControlContext, messageId: string, reason: string): Promise<void>;
   cancelPendingDispatch(input: WorkflowControlContext): Promise<void>;
-  confirmDispatch(input: WorkflowControlContext, messageId: string): Promise<void>;
+  confirmDispatch(input: WorkflowControlContext, messageId: string, source?: "hook" | "manual"): Promise<void>;
   recoverTask(input: WorkflowControlContext): Promise<boolean>;
 }
 
@@ -335,6 +335,11 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
       await assertRouteAuthorized(input);
       const state = await getState(input);
       const pending = state.pendingDispatch!;
+      const timestamp = now();
+      const progress = await readProgress(deps.fs, input);
+      const evidenceBaseline = await captureEvidenceBaseline(
+        deps.fs, input, progress.history.length + 1, pending.effectiveFlow, pending.targetRole, timestamp
+      );
       await saveState(input, {
         ...state,
         pendingDispatch: {
@@ -342,7 +347,8 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
           status: "dispatching",
           routeContentHash: input.routeContentHash,
           messageId: input.messageId,
-          updatedAt: now()
+          evidenceBaseline,
+          updatedAt: timestamp
         },
         updatedAt: now()
       });
@@ -362,6 +368,7 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
           routeContentHash: undefined,
           messageId: undefined,
           confirmationError: undefined,
+          evidenceBaseline: undefined,
           updatedAt: now()
         },
         updatedAt: now()
@@ -411,7 +418,7 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
     });
   }
 
-  async function confirmDispatch(input: WorkflowControlContext, messageId: string): Promise<void> {
+  async function confirmDispatch(input: WorkflowControlContext, messageId: string, source: "hook" | "manual" = "hook"): Promise<void> {
     await withLock(statePath(input), async () => {
       const state = await getState(input);
       failOnStateWarnings({
@@ -427,6 +434,9 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
           "Do not advance Workflow Progress from an unrelated UserPromptSubmit event."
         );
       }
+      if (source === "manual" && !pending.confirmationError) {
+        throw workflowError("WORKFLOW_DISPATCH_NOT_UNCONFIRMED", "Manual confirmation is only available for a delivered dispatch whose confirmation failed.");
+      }
       const current = await readProgress(deps.fs, input);
       if (current.revision !== pending.revision || historyHash(current.history) !== pending.baseHistoryHash) {
         throw workflowError(
@@ -440,12 +450,14 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
         sequence: current.history.length + 1,
         flow: pending.effectiveFlow,
         targetRole: pending.targetRole,
-        evidence: pending.evidence,
+        evidence: source === "manual"
+          ? `${pending.evidence} [User manually confirmed execution of message ${messageId}.]`
+          : pending.evidence,
         overrideAuthorizationId: pending.overrideAuthorizationId,
         followUpApprovalId: pending.followUpApprovalId,
         confirmedAt: timestamp
       };
-      const activeDispatch = await captureEvidenceBaseline(
+      const activeDispatch = pending.evidenceBaseline ?? await captureEvidenceBaseline(
         deps.fs,
         input,
         entry.sequence,
@@ -518,6 +530,7 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
           routeContentHash: undefined,
           messageId: undefined,
           confirmationError: undefined,
+          evidenceBaseline: undefined,
           updatedAt: now()
         },
         updatedAt: now()
@@ -1699,7 +1712,7 @@ function stateProgressConsistencyWarnings(
 
 function unconfirmedDispatchWarning(pending: WorkflowPendingDispatch | null): string | undefined {
   return pending?.confirmationError
-    ? `PM dispatch ${pending.messageId ?? "unknown"} to ${pending.targetRole} was delivered but not confirmed: ${pending.confirmationError} Inspect the target session before clearing or retrying this route.`
+    ? `PM dispatch ${pending.messageId ?? "unknown"} to ${pending.targetRole} was delivered but not confirmed: ${pending.confirmationError} Inspect the target session and use Confirm Executed if it already ran; do not resend executed work.`
     : undefined;
 }
 
@@ -2026,6 +2039,7 @@ function isPendingDispatch(value: unknown): value is WorkflowPendingDispatch {
     && (value.routeContentHash === undefined || typeof value.routeContentHash === "string")
     && (value.messageId === undefined || typeof value.messageId === "string")
     && (value.confirmationError === undefined || typeof value.confirmationError === "string")
+    && (value.evidenceBaseline === undefined || Boolean(normalizeDispatchEvidenceBaseline(value.evidenceBaseline)))
     && typeof value.createdAt === "string"
     && typeof value.updatedAt === "string";
 }

@@ -48,6 +48,14 @@ export function registerMessageRoutes(app: FastifyInstance, deps: MessageRouteDe
     return deps.messageService.deleteMessageHistory(context);
   });
 
+  app.post<{ Params: { taskSlug: string; messageId: string } }>(
+    "/api/tasks/:taskSlug/messages/:messageId/confirm-delivered",
+    async (request) => {
+      const context = await getRouteContext(deps, request.params.taskSlug);
+      return deps.messageService.confirmDeliveredDispatch(context, request.params.messageId);
+    }
+  );
+
   app.get<{ Params: { taskSlug: string } }>("/api/tasks/:taskSlug/orchestration", async (request) => {
     return withOpenFileLimitFallback(
       async () => {
