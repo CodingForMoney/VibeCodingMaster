@@ -1935,7 +1935,8 @@ function buildRoleDraftPrompt(
           "Review that candidate against final task evidence. Carry forward only facts that remain verified after implementation and testing."
         ]
       : []),
-    `Assigned proposal path: ${resolveRepoPath(taskRepoRoot, draft.path)}`
+    `Assigned proposal path: ${draft.path}`,
+    "Pass the assigned repository-relative path to vcm-artifact --path."
   ];
   return [
     ...prompt,

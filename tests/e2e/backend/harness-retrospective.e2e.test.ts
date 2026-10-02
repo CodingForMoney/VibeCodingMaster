@@ -6,6 +6,7 @@ import {
   renderFinalAcceptanceTemplate
 } from "../../../src/backend/templates/handoff.js";
 import { replaceVcmMemoryBlock } from "../../../src/backend/templates/harness/memory-block.js";
+import { renderVcmReportHarnessIssueSkillRules } from "../../../src/backend/templates/harness/vcm-report-harness-issue-skill.js";
 import { readArtifactSectionContent } from "../../../src/shared/validation/artifact-check.js";
 import { createMockClaudeE2eApp } from "./helpers/e2e-app.js";
 import { createE2eRepo, git } from "./helpers/e2e-repo.js";
@@ -31,6 +32,32 @@ afterEach(async () => {
 });
 
 describe("backend E2E task harness retrospective with mock Claude Code", () => {
+  it("submits the skill's relative feedback path into the base repository, not the task worktree", async () => {
+    const env = await createMockClaudeE2eApp();
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "mock-feedback-path");
+    const session = await startRole(env.app, task.taskSlug, "coder");
+    const assignedPath = renderVcmReportHarnessIssueSkillRules()
+      .match(/^\.ai\/vcm\/harness-feedback\/pending\/.+$/m)![0]
+      .replace("<UTC timestamp>", "20261002T120000Z")
+      .replace("<reporter-role>", "coder")
+      .replace("<short-slug>", "artifact-path");
+    expect(path.isAbsolute(assignedPath)).toBe(false);
+    const content = renderHarnessFeedback("Artifact path feedback", "coder");
+    const response = await injectOk(env.app, {
+      method: "POST", url: `/api/tasks/${task.taskSlug}/artifacts/submit`,
+      payload: {
+        kind: "harness-feedback", mode: "final", role: "coder",
+        runtimeSessionToken: session.runtimeSessionToken, path: assignedPath, content
+      }
+    });
+    expect(response.json()).toMatchObject({ ok: true, path: assignedPath });
+    await expect(fs.readFile(path.join(repo.repoRoot, assignedPath), "utf8")).resolves.toBe(content);
+    await expect(fs.access(path.join(task.worktreePath, assignedPath))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("does not dispatch Harness Engineer before final acceptance is ready", async () => {
     const env = await createMockClaudeE2eApp();
     cleanups.push(() => env.close());
@@ -94,10 +121,10 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
       await ctx.userPromptSubmit();
       pmMemoryStarted.resolve();
       await releasePmMemory.promise;
-      await writeNoChangeMemoryDraftResult(ctx);
+      await writeNoChangeMemoryDraftResult(ctx, env);
     });
     for (const role of ["architect", "coder", "tester"] as const) {
-      env.mockRuntime.onPrompt(role, "[VCM Task Harness Review: Memory Proposal]", writeNoChangeMemoryDraft);
+      env.mockRuntime.onPrompt(role, "[VCM Task Harness Review: Memory Proposal]", (ctx) => writeNoChangeMemoryDraft(ctx, env));
     }
     env.mockRuntime.onPrompt("harness-engineer", "[VCM Task Harness Retrospective]", writeHarnessRetrospective);
 
@@ -271,7 +298,7 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
       await ctx.stop();
     });
     for (const role of ["project-manager", "architect", "coder", "tester"] as const) {
-      env.mockRuntime.onPrompt(role, "[VCM Task Harness Review: Memory Proposal]", writeNoChangeMemoryDraft);
+      env.mockRuntime.onPrompt(role, "[VCM Task Harness Review: Memory Proposal]", (ctx) => writeNoChangeMemoryDraft(ctx, env));
     }
     env.mockRuntime.onPrompt("harness-engineer", "[VCM Task Harness Retrospective]", async (ctx) => {
       await writeHarnessRetrospectiveWithDurableDocMove(ctx, sourceEntry);
@@ -356,7 +383,7 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
     await git(task.worktreePath, "add", "CLAUDE.md");
     await git(task.worktreePath, "commit", "-m", "test: seed two memory entries");
     for (const role of ["project-manager", "architect", "coder", "tester"] as const) {
-      env.mockRuntime.onPrompt(role, "[VCM Task Harness Review: Memory Proposal]", writeNoChangeMemoryDraft);
+      env.mockRuntime.onPrompt(role, "[VCM Task Harness Review: Memory Proposal]", (ctx) => writeNoChangeMemoryDraft(ctx, env));
       await startRole(env.app, task.taskSlug, role);
     }
     env.mockRuntime.onPrompt("project-manager", "Finish recovery test", async (ctx) => {
@@ -444,14 +471,15 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
   }, MEMORY_RECOVERY_TEST_TIMEOUT_MS);
 });
 
-async function writeNoChangeMemoryDraft(ctx: MockClaudePromptContext): Promise<void> {
+async function writeNoChangeMemoryDraft(ctx: MockClaudePromptContext, env: Awaited<ReturnType<typeof createMockClaudeE2eApp>>): Promise<void> {
   await ctx.userPromptSubmit();
-  await writeNoChangeMemoryDraftResult(ctx);
+  await writeNoChangeMemoryDraftResult(ctx, env);
 }
 
-async function writeNoChangeMemoryDraftResult(ctx: MockClaudePromptContext): Promise<void> {
+async function writeNoChangeMemoryDraftResult(ctx: MockClaudePromptContext, env: Awaited<ReturnType<typeof createMockClaudeE2eApp>>): Promise<void> {
   const draftPath = matchPromptPath(ctx.prompt, "Assigned proposal path");
-  await ctx.writeAbsoluteFile(draftPath, [
+  expect(path.isAbsolute(draftPath)).toBe(false);
+  const content = [
     "# Memory Proposal",
     "Decision: no-change",
     "",
@@ -464,7 +492,17 @@ async function writeNoChangeMemoryDraftResult(ctx: MockClaudePromptContext): Pro
     "## Remove",
     "none",
     ""
-  ].join("\n"));
+  ].join("\n");
+  const response = await injectOk(env.app, {
+    method: "POST", url: `/api/tasks/${ctx.taskSlug}/artifacts/submit`,
+    payload: {
+      kind: "memory-proposal", mode: "final", role: ctx.role, path: draftPath, content,
+      runtimeSessionToken: env.mockRuntime.getCreateInput(ctx.session.id).env?.VCM_RUNTIME_SESSION_TOKEN
+    }
+  });
+  expect(response.json()).toMatchObject({ ok: true, path: draftPath });
+  await expect(fs.readFile(path.join(ctx.cwd, draftPath), "utf8")).resolves.toBe(content);
+  await expect(fs.access(path.join(ctx.session.repoRoot, draftPath))).rejects.toMatchObject({ code: "ENOENT" });
   await ctx.stop();
 }
 

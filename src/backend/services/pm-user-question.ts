@@ -9,7 +9,8 @@ const markdown = unified().use(remarkParse).use(remarkGfm).freeze();
 const DIRECT_REQUESTS = [
   /^(?:can|could|do|did|are|have|should|will|would)\s+you\b/i,
   /^(?:should|shall|may|can|could)\s+(?:i|we)\b/i,
-  /^(?:which|what|how|where|when|who)\b[^.!?]*\b(?:you|your|(?:should|shall|can|may)\s+(?:i|we))\b/i,
+  /^(?:which|what|how|where|when|who)\s+(?:is|are|was|were|do|did|have|has|can|could|will|would|should|shall|may)\s+(?:you|your|i|we)\b/i,
+  /^(?:which|what|how|where|when|who)\b[^.!?:,;]*\b(?:do|did|can|could|will|would|should|shall|may)\s+(?:you|i|we)\b/i,
   /^(?:which|what)\s+(?:option|approach|behavior|behaviour|choice)\b[^.!?]*\bshould\s+be\b/i,
   /^(?:please\s+)?(?:answer|reply|respond|choose|confirm|decide|provide|select|tell\s+me|let\s+me\s+know|give\s+(?:me|your))\b/i,
   /^i\s+need\s+your\s+(?:decision|choice|confirmation|answer|approval)\b/i,

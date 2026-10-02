@@ -268,7 +268,11 @@ runtime Session token to the backend. All 13 fixed handoffs and five dynamic
 artifacts use the managed-artifact registry in
 `src/shared/validation/artifact-registry.ts`. The registry owns the artifact
 kind, owner, allowed submission modes, storage class, and required headings.
-Dynamic artifacts additionally use their assigned repository-relative path.
+Dynamic artifacts additionally use their assigned repository-relative `--path`;
+`--file` identifies the candidate. Auto Memory prompts provide this relative
+destination directly. Artifact Service selects the task worktree for memory
+proposals and the base repository for Harness Feedback; absolute destinations
+and parent-directory traversal remain invalid.
 
 `managed-artifact-validation` owns the strict content contracts and parsers
 used by both `artifact-service` and downstream consumers. `artifact-service`

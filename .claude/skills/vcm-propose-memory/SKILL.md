@@ -16,6 +16,10 @@ planning-session memory candidate and provides an exact path.
   under `.ai/vcm/memory-review/runs/<run-id>/drafts/` or a planning candidate
   under `.ai/vcm/memory-review/candidates/` in the active task worktree.
 - If VCM did not provide a path, do not create a proposal.
+- Pass the assigned repository-relative destination unchanged to `--path`;
+  do not prefix it with the task worktree or base repository root. `--file`
+  names the candidate file, not the destination. VCM writes the accepted proposal
+  inside the active task worktree.
 - Propose only verified, durable, reusable project knowledge supported by task
   evidence.
 - Before proposing an add or update, check current durable documents, Harness

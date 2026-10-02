@@ -19,7 +19,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mode", choices=("draft", "final"), default="final")
     parser.add_argument(
         "--path",
-        help="VCM-assigned destination for dynamic artifacts or a durable-document assignment report.",
+        help="Repository-relative VCM-assigned destination; never an absolute path. VCM selects the artifact's repository root.",
     )
     parser.add_argument(
         "--keep-candidate",

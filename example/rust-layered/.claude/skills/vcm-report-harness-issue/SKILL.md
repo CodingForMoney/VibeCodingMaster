@@ -11,15 +11,19 @@ This skill records feedback only. It must not call Harness Engineer directly and
 
 ## Write Location
 
-Submit one markdown file under:
+Submit one markdown file with this repository-relative `--path`:
 
 ```
-${VCM_BASE_REPO_ROOT}/.ai/vcm/harness-feedback/pending/
+.ai/vcm/harness-feedback/pending/<UTC timestamp>-<reporter-role>-<short-slug>.md
 ```
 
 If `VCM_BASE_REPO_ROOT` is not set, do not guess a fallback path. Report the
 environment problem to project-manager so VCM can retry with the correct base
 repository root.
+
+VCM resolves this destination inside the base repository root, not the task
+worktree. Do not prefix `--path` with `VCM_BASE_REPO_ROOT` or an absolute
+directory. `--file` names the candidate file, not the destination.
 
 Use a filename like:
 

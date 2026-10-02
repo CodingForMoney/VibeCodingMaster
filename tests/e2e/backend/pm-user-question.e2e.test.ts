@@ -26,11 +26,39 @@ const statusReport = [
   '',
   '## So: can this be completed?',
   'See https://example.com/x?tab=readme for the upstream note.',
+  'What the Tester is doing: checking the changes against what you confirmed.',
+  'What changed, based on your answers to the Architect: the input format is preserved.',
   '',
   'No question was asked of the user; the only question mark sits in reported speech - "does wiring close it?".'
 ].join("\n");
 
 describe("PM question detection through the Stop hook API", () => {
+  it.each([
+    'What the Tester is doing: checking the changes against what you confirmed.',
+    'What changed, based on your answers to the Architect: the input format is preserved.'
+  ])("dispatches an approved route instead of blocking the status label: %s", async (message) => {
+    const env = await createScenario("question-status-label");
+    await env.approveArchitect("code-change");
+    let delivered = false;
+    env.mockRuntime.onPrompt("architect", "Perform the approved work", async (ctx) => {
+      await ctx.userPromptSubmit();
+      delivered = true;
+    });
+    await startRole(env.app, env.task.taskSlug, "architect");
+    await env.writeRoute();
+    await env.beginPmTurn();
+
+    expect(await env.stopPm(message)).toEqual({});
+    await env.mockRuntime.waitForIdle();
+    expect(delivered).toBe(true);
+    expect(await env.state()).toMatchObject({
+      pendingDispatch: null,
+      awaitingUser: null,
+      activeDispatch: { targetRole: "architect" }
+    });
+    expect((await env.pmSession())?.activityStatus).toBe("idle");
+  });
+
   it.each(["architect", "coder", "tester"] as const)("rejects PM routing to %s with instructions to ask and stop until the user replies", async (targetRole) => {
     const env = await createScenario(`question-rejected-route-${targetRole}`);
     await env.approveArchitect("code-change");

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { renderArchitectHarnessRules } from "../../../src/backend/templates/harness/architect-agent.js";
+import { renderArchitectEvidenceWorkerHarnessRules } from "../../../src/backend/templates/harness/architect-evidence-worker-agent.js";
+import { renderArchitectScaffoldWorkerHarnessRules } from "../../../src/backend/templates/harness/architect-scaffold-worker-agent.js";
+import { renderArchitectValidationWorkerHarnessRules } from "../../../src/backend/templates/harness/architect-validation-worker-agent.js";
 import { renderRootClaudeHarnessRules } from "../../../src/backend/templates/harness/claude-root.js";
 import { renderCoderHarnessRules } from "../../../src/backend/templates/harness/coder-agent.js";
 import { renderCoderWorkerHarnessRules } from "../../../src/backend/templates/harness/coder-worker-agent.js";
@@ -10,6 +13,8 @@ import { renderVcmArchitectureInterviewSkillRules } from "../../../src/backend/t
 import { renderVcmFinalAcceptanceSkillRules } from "../../../src/backend/templates/harness/vcm-final-acceptance-skill.js";
 import { renderVcmLongRunningValidationSkillRules } from "../../../src/backend/templates/harness/vcm-long-running-validation-skill.js";
 import { renderVcmRouteMessageSkillRules } from "../../../src/backend/templates/harness/vcm-route-message-skill.js";
+import { renderVcmProposeMemorySkillRules } from "../../../src/backend/templates/harness/vcm-propose-memory-skill.js";
+import { renderVcmReportHarnessIssueSkillRules } from "../../../src/backend/templates/harness/vcm-report-harness-issue-skill.js";
 import {
   renderArchitecturePlanTemplate,
   renderCoderCompletionTemplate,
@@ -59,10 +64,44 @@ describe("machine-consumed harness contracts", () => {
     expect(coder).not.toContain("clean `.ai/vcm/coder-workers/`");
   });
 
+  it("requires safe worker report filenames and file-backed completion", () => {
+    for (const rules of [
+      renderCoderWorkerHarnessRules(),
+      renderArchitectEvidenceWorkerHarnessRules(),
+      renderArchitectScaffoldWorkerHarnessRules(),
+      renderArchitectValidationWorkerHarnessRules()
+    ]) {
+      expect(rules).toContain("worker-<worker-id>-candidate.md");
+      expect(rules).toContain("`report`, `summary`, `findings`, or `analysis` (case-insensitive)");
+      expect(rules).toContain("rename it and retry");
+      expect(rules).toContain("not just response text");
+    }
+
+    const architect = renderArchitectHarnessRules();
+    expect(architect).toContain(".ai/vcm/architect-workers/<worker-type>/worker-<worker-id>.md");
+    expect(architect).toContain("Read the assigned report file before accepting");
+    const scaffold = renderArchitectScaffoldWorkerHarnessRules();
+    expect(scaffold).toContain(".ai/vcm/architect-workers/scaffold/worker-<worker-id>.md");
+    expect(scaffold).toContain("including when scaffold work remains incomplete");
+    expect(scaffold).toContain("completed and remaining Scaffold Manifest IDs");
+    expect(scaffold).toContain("exact L0 check commands and results");
+    expect(scaffold).toContain("Return the report path");
+  });
+
   it("uses the exact final-acceptance decision options in the skill template", () => {
     expect(renderVcmFinalAcceptanceSkillRules()).toContain(
       "accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|needs-docs-sync|blocked-by-user-decision"
     );
+  });
+
+  it("distinguishes relative artifact destinations from candidate files and repository roots", () => {
+    const memory = renderVcmProposeMemorySkillRules();
+    const feedback = renderVcmReportHarnessIssueSkillRules();
+    expect(memory).toContain("assigned repository-relative destination unchanged to `--path`");
+    expect(memory).toContain("`--file`\n  names the candidate file, not the destination");
+    expect(feedback).toContain(".ai/vcm/harness-feedback/pending/<UTC timestamp>-<reporter-role>-<short-slug>.md");
+    expect(feedback).not.toContain("${VCM_BASE_REPO_ROOT}/.ai/vcm/harness-feedback");
+    expect(feedback).toContain("destination inside the base repository root, not the task");
   });
 
   it("requires an upstream disposition for a third file-local workaround", () => {

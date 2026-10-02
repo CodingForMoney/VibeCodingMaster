@@ -498,6 +498,12 @@ their raw results, reviews every worker output, and owns any correction. Native
 Architect evidence, scaffold, and validation workers use Opus with xhigh effort;
 Bridge sessions make them inherit the selected GPT model. Every worker returns
 before the Architect turn continues and cannot invoke another subagent.
+Architect assigns reports named `worker-<worker-id>.md` under the worker's
+task-local output directory. Candidate and staging Markdown use a `worker-`
+prefix, avoiding Claude Code's reserved report basenames. All workers must
+deliver a report file; Architect reads it before accepting or continuing work.
+Scaffold reports include completed and remaining Manifest IDs, changed files,
+commit, ledger result, L0 commands/results, and failure evidence.
 
 After completed planning and scaffold commits, Architect runs the
 `restart-architect` skill before writing its first completed route to PM. The

@@ -496,7 +496,9 @@ describe("createArtifactService", () => {
       ["coder", ARCHITECT_PLANNING_MEMORY_CANDIDATE_PATH],
       ["architect", coderDraftPath],
       ["architect", architectPlanningCandidateSnapshotPath("run-1")],
-      ["architect", ".ai/vcm/memory-review/candidates/architect/other.md"]
+      ["architect", ".ai/vcm/memory-review/candidates/architect/other.md"],
+      ["coder", `/repo/task/${coderDraftPath}`],
+      ["coder", `../${coderDraftPath}`]
     ] as const) {
       await expect(service.submitArtifact({
         repoRoot: "/repo/task",
@@ -529,6 +531,14 @@ describe("createArtifactService", () => {
       content: validHarnessFeedback()
     })).resolves.toMatchObject({ path: feedbackPath });
     await expect(fs.readText(`/repo/${feedbackPath}`)).resolves.toContain("Reporter role: reviewer");
+    await expect(fs.readText(`/repo/task/${feedbackPath}`)).rejects.toThrow();
+    for (const artifactPath of [`/repo/${feedbackPath}`, `../${feedbackPath}`]) {
+      await expect(service.submitArtifact({
+        repoRoot: "/repo/task", baseRepoRoot: "/repo", handoffDir: ".ai/vcm/handoffs", taskSlug: "demo-task",
+        kind: "harness-feedback", mode: "final", role: "reviewer", artifactPath,
+        content: validHarnessFeedback()
+      })).rejects.toMatchObject({ code: "ARTIFACT_VALIDATION_FAILED" });
+    }
 
     await expect(service.submitArtifact({
       repoRoot: "/repo/task",

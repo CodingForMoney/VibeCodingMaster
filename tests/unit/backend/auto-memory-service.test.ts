@@ -5,6 +5,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 import { createNodeFileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import { createAutoMemoryService } from "../../../src/backend/services/auto-memory-service.js";
+import { createArtifactService } from "../../../src/backend/services/artifact-service.js";
 import {
   renderVcmMemoryBlock,
   replaceVcmMemoryBlock
@@ -168,6 +169,7 @@ describe("auto-memory-service", () => {
     expect(state.active?.drafts[0].status).toBe("dispatched");
     await expect(readFile(activeStatePath, "utf8")).resolves.toContain('"status": "dispatched"');
 
+    const artifactService = createArtifactService(createNodeFileSystemAdapter());
     for (const role of ["project-manager", "architect", "coder", "tester"] as const) {
       state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
       const draft = state.active?.drafts.find((item) => item.role === role);
@@ -179,12 +181,23 @@ describe("auto-memory-service", () => {
           "Carry forward only facts that remain verified after implementation and testing."
         );
       }
-      await mkdir(path.dirname(path.join(context.taskRepoRoot, draft!.path)), { recursive: true });
-      await writeFile(
-        path.join(context.taskRepoRoot, draft!.path),
-        noChangeMemoryProposal(),
-        "utf8"
-      );
+      const prompt = context.terminalWrites.join("");
+      const assignedPath = [...prompt.matchAll(/^Assigned proposal path: (.+)$/gm)].at(-1)?.[1];
+      expect(assignedPath).toBe(draft!.path);
+      expect(path.isAbsolute(assignedPath!)).toBe(false);
+      await expect(artifactService.submitArtifact({
+        repoRoot: context.taskRepoRoot,
+        baseRepoRoot: context.baseRepoRoot,
+        taskSlug: "demo",
+        handoffDir: ".ai/vcm/handoffs",
+        kind: "memory-proposal",
+        mode: "final",
+        role,
+        artifactPath: assignedPath,
+        content: noChangeMemoryProposal()
+      })).resolves.toMatchObject({ path: assignedPath, status: "accepted" });
+      await expect(readText(context.taskRepoRoot, assignedPath!)).resolves.toBe(noChangeMemoryProposal());
+      await expect(readText(context.baseRepoRoot, assignedPath!)).rejects.toMatchObject({ code: "ENOENT" });
       await context.service.handleRoleHook({
         baseRepoRoot: context.baseRepoRoot,
         taskRepoRoot: context.taskRepoRoot,

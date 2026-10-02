@@ -43,7 +43,8 @@ ${renderRoleMemoryRules("architect")}
 
 - Architect may invoke only \`vcm-architect-evidence-worker\`, \`vcm-architect-scaffold-worker\`, and \`vcm-architect-validation-worker\`.
 - Every worker must run in the foreground and return before the current Architect turn continues. Do not run workers in the background or end the turn while a worker is active.
-- Give each worker an exact bounded assignment, repo-relative paths, and one report path. Pass paths instead of copying full source, documents, or plans into the worker prompt.
+- Give each worker an exact bounded assignment, repo-relative paths, and one report path under \`.ai/vcm/architect-workers/<worker-type>/worker-<worker-id>.md\`. Pass paths instead of copying full source, documents, or plans into the worker prompt.
+- Read the assigned report file before accepting a worker result or continuing its unfinished work; a text-only return is not a completed worker report.
 - Worker output is evidence or execution output, never an architecture decision. Architect owns every conclusion, plan, change boundary, validation interpretation, and final claim.
 - Use \`vcm-architect-evidence-worker\` for bounded bulk reading when relevant evidence spans multiple files or modules. Evidence workers may run in parallel only when their read scopes are disjoint.
 - Give evidence workers only repo-relative paths, symbols, documents, and questions. They have no shell access.
