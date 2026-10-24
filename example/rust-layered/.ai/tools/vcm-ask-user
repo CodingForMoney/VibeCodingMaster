@@ -1,61 +1,147 @@
-#!/usr/bin/env python3
-import argparse
-import json
-import os
-import sys
-import urllib.error
-import urllib.parse
-import urllib.request
+#!/usr/bin/env node
+"use strict";
+// Pause VCM workflow for an exact user question.
 
+function parseToolArguments(argv, spec) {
+  const prog = require("node:path").basename(process.argv[1] || "tool");
+  const options = spec.options || {};
+  const positionals = spec.positionals || [];
+  const usage = "usage: " + prog
+    + Object.keys(options).map((name) => " [" + name + (options[name].flag ? "" : " " + name.slice(2).toUpperCase()) + "]").join("")
+    + positionals.map((name) => " " + name).join("");
+  const fail = (message) => {
+    process.stderr.write(usage + "\n" + prog + ": error: " + message + "\n");
+    process.exit(2);
+  };
+  const values = {};
+  for (const [name, option] of Object.entries(options)) {
+    values[option.dest] = option.append ? [] : option.flag ? false : option.default;
+  }
+  const remaining = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === "-h" || argument === "--help") {
+      process.stdout.write(usage + "\n\n" + (spec.description || "") + "\n");
+      process.exit(0);
+    }
+    if (!argument.startsWith("--") || argument === "--") {
+      remaining.push(argument);
+      continue;
+    }
+    const separator = argument.indexOf("=");
+    const name = separator >= 0 ? argument.slice(0, separator) : argument;
+    const option = options[name];
+    if (!option) {
+      fail("unrecognized arguments: " + argument);
+    }
+    if (option.flag) {
+      values[option.dest] = true;
+      continue;
+    }
+    let value;
+    if (separator >= 0) {
+      value = argument.slice(separator + 1);
+    } else {
+      if (index + 1 >= argv.length) {
+        fail("argument " + name + ": expected one argument");
+      }
+      index += 1;
+      value = argv[index];
+    }
+    if (option.choices && !option.choices.includes(value)) {
+      fail("argument " + name + ": invalid choice: '" + value + "' (choose from " + option.choices.map((choice) => "'" + choice + "'").join(", ") + ")");
+    }
+    if (option.append) {
+      values[option.dest].push(value);
+    } else {
+      values[option.dest] = value;
+    }
+  }
+  if (remaining.length > positionals.length) {
+    fail("unrecognized arguments: " + remaining.slice(positionals.length).join(" "));
+  }
+  positionals.forEach((name, index) => {
+    values[name] = remaining[index];
+  });
+  const missing = [
+    ...positionals.filter((name) => values[name] === undefined),
+    ...Object.entries(options).filter(([, option]) => option.required && values[option.dest] === undefined).map(([name]) => name)
+  ];
+  if (missing.length > 0) {
+    fail("the following arguments are required: " + missing.join(", "));
+  }
+  return values;
+}
 
-def emit(status, message=None, state=None):
-    payload = {"status": status}
-    if message:
-        payload["message"] = message
-    if state is not None:
-        payload["state"] = state
-    print(json.dumps(payload, ensure_ascii=False))
+async function postJson(url, body, timeoutMs) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs)
+  });
+  return { ok: response.ok, status: response.status, statusText: response.statusText, text: await response.text() };
+}
 
+function networkErrorText(error) {
+  const cause = error && error.cause;
+  return (cause && (cause.message || cause.code)) || (error && error.message) || String(error);
+}
 
-def main():
-    parser = argparse.ArgumentParser(description="Pause VCM workflow for an exact user question.")
-    parser.add_argument("--question", required=True)
-    args = parser.parse_args()
+function emit(status, message, state) {
+  const payload = { status };
+  if (message) {
+    payload.message = message;
+  }
+  if (state !== undefined) {
+    payload.state = state;
+  }
+  process.stdout.write(JSON.stringify(payload) + "\n");
+}
 
-    if os.environ.get("VCM_ROLE") != "project-manager":
-        emit("failed", "Only project-manager may ask the user through VCM workflow control.")
-        return 2
+async function main() {
+  const args = parseToolArguments(process.argv.slice(2), {
+    description: "Pause VCM workflow for an exact user question.",
+    options: { "--question": { dest: "question", required: true } }
+  });
 
-    question = args.question.strip()
-    if not question:
-        emit("failed", "A non-empty user question is required.")
-        return 2
+  if (process.env.VCM_ROLE !== "project-manager") {
+    emit("failed", "Only project-manager may ask the user through VCM workflow control.");
+    return 2;
+  }
 
-    api_url = os.environ.get("VCM_API_URL", "").rstrip("/")
-    task_slug = os.environ.get("VCM_TASK_SLUG", "").strip()
-    if not api_url or not task_slug:
-        emit("failed", "VCM_API_URL or VCM_TASK_SLUG is unavailable; the workflow was not paused.")
-        return 2
+  const question = args.question.trim();
+  if (!question) {
+    emit("failed", "A non-empty user question is required.");
+    return 2;
+  }
 
-    url = f"{api_url}/api/tasks/{urllib.parse.quote(task_slug, safe='')}/ask-user"
-    request = urllib.request.Request(
-        url,
-        data=json.dumps({"question": question}).encode("utf-8"),
-        headers={"content-type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=5) as response:
-            state = json.loads(response.read().decode("utf-8"))
-        emit("awaiting_user", state=state)
-        return 0
-    except urllib.error.HTTPError as error:
-        detail = error.read().decode("utf-8", errors="replace")
-        emit("failed", f"VCM rejected the user question: HTTP {error.code} {detail}")
-    except (OSError, ValueError, urllib.error.URLError) as error:
-        emit("failed", f"VCM could not register the user question: {error}")
-    return 1
+  const apiUrl = (process.env.VCM_API_URL || "").replace(/\/+$/, "");
+  const taskSlug = (process.env.VCM_TASK_SLUG || "").trim();
+  if (!apiUrl || !taskSlug) {
+    emit("failed", "VCM_API_URL or VCM_TASK_SLUG is unavailable; the workflow was not paused.");
+    return 2;
+  }
 
+  const url = apiUrl + "/api/tasks/" + encodeURIComponent(taskSlug) + "/ask-user";
+  let response;
+  try {
+    response = await postJson(url, { question }, 5000);
+  } catch (error) {
+    emit("failed", "VCM could not register the user question: " + networkErrorText(error));
+    return 1;
+  }
+  if (!response.ok) {
+    emit("failed", "VCM rejected the user question: HTTP " + response.status + " " + response.text);
+    return 1;
+  }
+  try {
+    emit("awaiting_user", undefined, JSON.parse(response.text));
+    return 0;
+  } catch (error) {
+    emit("failed", "VCM could not register the user question: " + error.message);
+    return 1;
+  }
+}
 
-if __name__ == "__main__":
-    sys.exit(main())
+main().then((code) => process.exit(code));

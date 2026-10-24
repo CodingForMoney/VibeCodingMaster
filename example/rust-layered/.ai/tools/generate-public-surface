@@ -1,1077 +1,1239 @@
-#!/usr/bin/env python3
-import argparse
-import json
-import re
-import sys
-from dataclasses import dataclass
-from pathlib import Path
+#!/usr/bin/env node
+"use strict";
+// Generate .ai/generated/public-surface.json from Rust or TypeScript source files.
 
+const fs = require("node:fs");
+const path = require("node:path");
 
-IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-ITEM_KINDS = {"fn": "fn", "struct": "struct", "enum": "enum", "trait": "trait"}
-ITEM_MODIFIERS = {"async", "const", "unsafe", "extern"}
-BLOCK_ITEM_KEYWORDS = {
-    "fn",
-    "struct",
-    "enum",
-    "trait",
-    "impl",
-    "mod",
-    "const",
-    "static",
-    "type",
-    "union",
-    "macro_rules",
+const IDENTIFIER = /[A-Za-z_][A-Za-z0-9_]*/y;
+const IDENTIFIER_FULL = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const ITEM_KINDS = { fn: "fn", struct: "struct", enum: "enum", trait: "trait" };
+const ITEM_MODIFIERS = new Set(["async", "const", "unsafe", "extern"]);
+const BLOCK_ITEM_KEYWORDS = new Set([
+  "fn",
+  "struct",
+  "enum",
+  "trait",
+  "impl",
+  "mod",
+  "const",
+  "static",
+  "type",
+  "union",
+  "macro_rules"
+]);
+const TS_SOURCE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"];
+const TS_ITEM_KINDS = ["function", "class", "interface", "type", "enum", "variable"];
+const TS_EXPORT_DECLARATION = /\bexport\s+(?:default\s+)?(?:declare\s+)?(?:(?:async\s+)?function\s+(?<function>[A-Za-z_$][A-Za-z0-9_$]*)|class\s+(?<class>[A-Za-z_$][A-Za-z0-9_$]*)|interface\s+(?<interface>[A-Za-z_$][A-Za-z0-9_$]*)|type\s+(?<type>[A-Za-z_$][A-Za-z0-9_$]*)|enum\s+(?<enum>[A-Za-z_$][A-Za-z0-9_$]*)|(?:const|let|var)\s+(?<variable>[A-Za-z_$][A-Za-z0-9_$]*))/g;
+const TS_REEXPORT = /\bexport\s+(?:type\s+)?(?<form>\*|\{[^}]*\})\s+from\s+(?<quote>["'`])(?<specifier>[^"'`]+)\k<quote>/g;
+const TS_ROUTE_CALL = /\.\s*(?<method>get|post|put|patch|delete|options|head)\s*(?:<(?:(?!>\s*\()[\s\S])*>\s*)?\(\s*(?<quote>["'`])(?<path>[^"'`]+)\k<quote>/gi;
+const TS_ROUTE_OBJECT = /\.route\s*\(\s*\{(?<body>.*?)\}\s*\)/gis;
+const TS_ROUTE_METHOD = /\bmethod\s*:\s*(?<quote>["'`])(?<method>[A-Za-z]+)\k<quote>/i;
+const TS_ROUTE_URL = /\b(?:url|path)\s*:\s*(?<quote>["'`])(?<path>[^"'`]+)\k<quote>/i;
+const USAGE = "usage: generate-public-surface [-h] [--check] [--print] [--output OUTPUT]";
+
+class ToolExit extends Error {}
+
+function fail(message) {
+  throw new ToolExit(message);
 }
-TS_SOURCE_EXTENSIONS = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
-TS_EXPORT_DECLARATION = re.compile(
-    r"\bexport\s+(?:default\s+)?(?:declare\s+)?(?:(?:async\s+)?function\s+(?P<function>[A-Za-z_$][A-Za-z0-9_$]*)|class\s+(?P<class>[A-Za-z_$][A-Za-z0-9_$]*)|interface\s+(?P<interface>[A-Za-z_$][A-Za-z0-9_$]*)|type\s+(?P<type>[A-Za-z_$][A-Za-z0-9_$]*)|enum\s+(?P<enum>[A-Za-z_$][A-Za-z0-9_$]*)|(?:const|let|var)\s+(?P<variable>[A-Za-z_$][A-Za-z0-9_$]*))"
-)
-TS_REEXPORT = re.compile(
-    r"\bexport\s+(?:type\s+)?(?P<form>\*|\{[^}]*\})\s+from\s+(?P<quote>[\"'`])(?P<specifier>[^\"'`]+)(?P=quote)"
-)
-TS_ROUTE_CALL = re.compile(
-    r"\.\s*(?P<method>get|post|put|patch|delete|options|head)\s*(?:<(?:(?!>\s*\()[\s\S])*>\s*)?\(\s*(?P<quote>[\"'`])(?P<path>[^\"'`]+)(?P=quote)",
-    re.IGNORECASE,
-)
-TS_ROUTE_OBJECT = re.compile(r"\.route\s*\(\s*\{(?P<body>.*?)\}\s*\)", re.IGNORECASE | re.DOTALL)
-TS_ROUTE_METHOD = re.compile(r"\bmethod\s*:\s*(?P<quote>[\"'`])(?P<method>[A-Za-z]+)(?P=quote)", re.IGNORECASE)
-TS_ROUTE_URL = re.compile(r"\b(?:url|path)\s*:\s*(?P<quote>[\"'`])(?P<path>[^\"'`]+)(?P=quote)", re.IGNORECASE)
 
-
-@dataclass(frozen=True)
-class Token:
-    value: str
-    start: int
-    end: int
-    line: int
-
-
-@dataclass(frozen=True)
-class PublicDecl:
-    kind: str
-    name: str
-    pub_index: int
-    keyword_index: int
-    name_index: int
-
-
-@dataclass(frozen=True)
-class UseExport:
-    path: tuple[str, ...]
-    alias: str | None = None
-    wildcard: bool = False
-
-
-def load_module_index(root: Path) -> dict:
-    path = root / ".ai/generated/module-index.json"
-    if not path.is_file():
-        raise SystemExit("Missing .ai/generated/module-index.json; run .ai/tools/generate-module-index first.")
-    return json.loads(path.read_text())
-
-
-def load_optional_json(path: Path) -> dict:
-    if not path.is_file():
-        return {}
-    return json.loads(path.read_text())
-
-
-def relative_path(path: Path, root: Path) -> str:
-    try:
-        rel = path.absolute().relative_to(root.absolute())
-    except ValueError:
-        rel = path.resolve().relative_to(root.resolve())
-    return "." if str(rel) == "." else rel.as_posix()
-
-
-def line_number_from_offset(source: str, offset: int) -> int:
-    return source.count("\n", 0, offset) + 1
-
-
-def raw_string_end(source: str, index: int) -> int | None:
-    for prefix in ("br", "rb", "r"):
-        if not source.startswith(prefix, index):
-            continue
-        cursor = index + len(prefix)
-        hashes = 0
-        while cursor < len(source) and source[cursor] == "#":
-            hashes += 1
-            cursor += 1
-        if cursor >= len(source) or source[cursor] != '"':
-            continue
-        delimiter = '"' + ("#" * hashes)
-        end = source.find(delimiter, cursor + 1)
-        return len(source) if end == -1 else end + len(delimiter)
-    return None
-
-
-def quoted_literal_end(source: str, index: int) -> int:
-    quote = source[index]
-    cursor = index + 1
-    escaped = False
-    while cursor < len(source):
-        char = source[cursor]
-        if escaped:
-            escaped = False
-        elif char == "\\":
-            escaped = True
-        elif char == quote:
-            return cursor + 1
-        cursor += 1
-    return len(source)
-
-
-def block_comment_end(source: str, index: int) -> int:
-    cursor = index + 2
-    depth = 1
-    while cursor < len(source) and depth:
-        if source.startswith("/*", cursor):
-            depth += 1
-            cursor += 2
-        elif source.startswith("*/", cursor):
-            depth -= 1
-            cursor += 2
-        else:
-            cursor += 1
-    return cursor
-
-
-def scan_tokens(source: str) -> list[Token]:
-    tokens: list[Token] = []
-    cursor = 0
-    line = 1
-
-    while cursor < len(source):
-        char = source[cursor]
-
-        if char.isspace():
-            if char == "\n":
-                line += 1
-            cursor += 1
-            continue
-
-        if source.startswith("//", cursor):
-            end = source.find("\n", cursor + 2)
-            cursor = len(source) if end == -1 else end
-            continue
-
-        if source.startswith("/*", cursor):
-            end = block_comment_end(source, cursor)
-            line += source[cursor:end].count("\n")
-            cursor = end
-            continue
-
-        raw_end = raw_string_end(source, cursor)
-        if raw_end is not None:
-            line += source[cursor:raw_end].count("\n")
-            cursor = raw_end
-            continue
-
-        if char == '"' or (char == "b" and cursor + 1 < len(source) and source[cursor + 1] == '"'):
-            start = cursor + 1 if char == "b" else cursor
-            end = quoted_literal_end(source, start)
-            line += source[cursor:end].count("\n")
-            cursor = end
-            continue
-
-        if char == "'" and cursor + 1 < len(source) and not source[cursor + 1].isalpha():
-            end = quoted_literal_end(source, cursor)
-            line += source[cursor:end].count("\n")
-            cursor = end
-            continue
-
-        match = IDENTIFIER.match(source, cursor)
-        if match:
-            tokens.append(Token(match.group(0), cursor, match.end(), line))
-            cursor = match.end()
-            continue
-
-        tokens.append(Token(char, cursor, cursor + 1, line))
-        cursor += 1
-
-    return tokens
-
-
-def remove_comments_preserve_literals(text: str) -> str:
-    output: list[str] = []
-    cursor = 0
-    while cursor < len(text):
-        if text.startswith("//", cursor):
-            end = text.find("\n", cursor + 2)
-            if end == -1:
-                break
-            output.append("\n")
-            cursor = end + 1
-            continue
-
-        if text.startswith("/*", cursor):
-            end = block_comment_end(text, cursor)
-            output.append("\n" * text[cursor:end].count("\n"))
-            cursor = end
-            continue
-
-        raw_end = raw_string_end(text, cursor)
-        if raw_end is not None:
-            output.append(text[cursor:raw_end])
-            cursor = raw_end
-            continue
-
-        char = text[cursor]
-        if char == '"' or (char == "b" and cursor + 1 < len(text) and text[cursor + 1] == '"'):
-            start = cursor + 1 if char == "b" else cursor
-            end = quoted_literal_end(text, start)
-            output.append(text[cursor:end])
-            cursor = end
-            continue
-
-        if char == "'" and cursor + 1 < len(text) and not text[cursor + 1].isalpha():
-            end = quoted_literal_end(text, cursor)
-            output.append(text[cursor:end])
-            cursor = end
-            continue
-
-        output.append(char)
-        cursor += 1
-
-    return "".join(output)
-
-
-def normalize_signature(signature: str) -> str:
-    return " ".join(remove_comments_preserve_literals(signature).split())
-
-
-def signature_from_source(source: str, start: int) -> str:
-    cursor = start
-    depth_angle = 0
-    depth_paren = 0
-    depth_bracket = 0
-
-    while cursor < len(source):
-        if source.startswith("//", cursor):
-            end = source.find("\n", cursor + 2)
-            cursor = len(source) if end == -1 else end
-            continue
-
-        if source.startswith("/*", cursor):
-            cursor = block_comment_end(source, cursor)
-            continue
-
-        raw_end = raw_string_end(source, cursor)
-        if raw_end is not None:
-            cursor = raw_end
-            continue
-
-        char = source[cursor]
-        if char == '"' or (char == "b" and cursor + 1 < len(source) and source[cursor + 1] == '"'):
-            start_quote = cursor + 1 if char == "b" else cursor
-            cursor = quoted_literal_end(source, start_quote)
-            continue
-
-        if char == "'" and cursor + 1 < len(source) and not source[cursor + 1].isalpha():
-            cursor = quoted_literal_end(source, cursor)
-            continue
-
-        if char == "<":
-            depth_angle += 1
-        elif char == ">" and depth_angle:
-            depth_angle -= 1
-        elif char == "(":
-            depth_paren += 1
-        elif char == ")" and depth_paren:
-            depth_paren -= 1
-        elif char == "[":
-            depth_bracket += 1
-        elif char == "]" and depth_bracket:
-            depth_bracket -= 1
-
-        at_top_level = depth_angle == 0 and depth_paren == 0 and depth_bracket == 0
-        if at_top_level and char in "{;":
-            return normalize_signature(source[start:cursor])
-
-        cursor += 1
-
-    return normalize_signature(source[start:])
-
-
-def child_module_candidates(current_file: Path, module_name: str) -> list[Path]:
-    if current_file.name in {"lib.rs", "main.rs", "mod.rs"}:
-        base = current_file.parent
-    else:
-        base = current_file.with_suffix("")
-    return [
-        base / f"{module_name}.rs",
-        base / module_name / "mod.rs",
-    ]
-
-
-def is_bare_pub(tokens: list[Token], index: int) -> bool:
-    return tokens[index].value == "pub" and not (
-        index + 1 < len(tokens) and tokens[index + 1].value == "("
-    )
-
-
-def public_decl_at(tokens: list[Token], index: int) -> PublicDecl | None:
-    if not is_bare_pub(tokens, index):
-        return None
-
-    cursor = index + 1
-    while cursor < len(tokens) and tokens[cursor].value in ITEM_MODIFIERS:
-        cursor += 1
-
-    if cursor >= len(tokens):
-        return None
-
-    kind = tokens[cursor].value
-    if kind == "mod":
-        if cursor + 1 < len(tokens) and IDENTIFIER.fullmatch(tokens[cursor + 1].value):
-            return PublicDecl("mod", tokens[cursor + 1].value, index, cursor, cursor + 1)
-        return None
-
-    if kind in ITEM_KINDS and cursor + 1 < len(tokens):
-        name = tokens[cursor + 1].value
-        if IDENTIFIER.fullmatch(name):
-            return PublicDecl(ITEM_KINDS[kind], name, index, cursor, cursor + 1)
-
-    return None
-
-
-def skip_brace_block(tokens: list[Token], index: int) -> int:
-    depth = 0
-    cursor = index
-    while cursor < len(tokens):
-        if tokens[cursor].value == "{":
-            depth += 1
-        elif tokens[cursor].value == "}":
-            depth -= 1
-            if depth == 0:
-                return cursor + 1
-        cursor += 1
-    return cursor
-
-
-def skip_item(tokens: list[Token], index: int) -> int:
-    cursor = index
-    while cursor < len(tokens):
-        if tokens[cursor].value == ";":
-            return cursor + 1
-        if tokens[cursor].value == "{":
-            return skip_brace_block(tokens, cursor)
-        cursor += 1
-    return cursor
-
-
-def file_module_parts(source_file: str, module: dict) -> list[str]:
-    module_path = module.get("path", ".")
-    prefix = "src/" if module_path == "." else f"{module_path}/src/"
-    if source_file.endswith("/src/lib.rs") or source_file.endswith("/src/main.rs"):
-        return []
-    relative = source_file.removeprefix(prefix).removesuffix(".rs")
-    return [part for part in relative.split("/") if part and part != "mod"]
-
-
-def public_path(parts: list[str], item_name: str) -> str:
-    return "::".join([*parts, item_name])
-
-
-def join_path(parts: list[str] | tuple[str, ...]) -> str:
-    return "::".join(parts)
-
-
-def is_path_separator(tokens: list[Token], index: int) -> bool:
-    return (
-        index + 1 < len(tokens)
-        and tokens[index].value == ":"
-        and tokens[index + 1].value == ":"
-    )
-
-
-def public_file_module_names(source: str) -> list[str]:
-    tokens = scan_tokens(source)
-    names: list[str] = []
-
-    for index, token in enumerate(tokens):
-        if token.value != "pub":
-            continue
-        decl = public_decl_at(tokens, index)
-        if decl is None or decl.kind != "mod":
-            continue
-        if decl.name_index + 1 < len(tokens) and tokens[decl.name_index + 1].value == ";":
-            names.append(decl.name)
-
-    return names
-
-
-def parse_pub_use_exports(source: str) -> list[UseExport]:
-    tokens = scan_tokens(source)
-    exports: list[UseExport] = []
-
-    def parse_group(index: int, prefix: list[str]) -> int:
-        cursor = index + 1
-        while cursor < len(tokens):
-            if tokens[cursor].value == "}":
-                return cursor + 1
-            if tokens[cursor].value == ",":
-                cursor += 1
-                continue
-            cursor = parse_tree(cursor, prefix)
-            if cursor < len(tokens) and tokens[cursor].value == ",":
-                cursor += 1
-        return cursor
-
-    def parse_tree(index: int, prefix: list[str]) -> int:
-        cursor = index
-        parts = list(prefix)
-
-        while cursor < len(tokens):
-            token = tokens[cursor]
-
-            if token.value == "{":
-                return parse_group(cursor, parts)
-
-            if token.value == "*":
-                exports.append(UseExport(tuple(parts), wildcard=True))
-                return cursor + 1
-
-            if not IDENTIFIER.fullmatch(token.value):
-                return cursor + 1
-
-            name = token.value
-            if name == "self":
-                cursor += 1
-                if is_path_separator(tokens, cursor):
-                    cursor += 2
-                    continue
-                return cursor
-
-            parts.append(name)
-            cursor += 1
-
-            if is_path_separator(tokens, cursor):
-                cursor += 2
-                if cursor < len(tokens) and tokens[cursor].value in {"{", "*"}:
-                    continue
-                continue
-
-            alias = None
-            if cursor + 1 < len(tokens) and tokens[cursor].value == "as":
-                if IDENTIFIER.fullmatch(tokens[cursor + 1].value):
-                    alias = tokens[cursor + 1].value
-                    cursor += 2
-
-            exports.append(UseExport(tuple(parts), alias=alias))
-            return cursor
-
-        return cursor
-
-    index = 0
-    while index < len(tokens):
-        if (
-            tokens[index].value == "pub"
-            and is_bare_pub(tokens, index)
-            and index + 1 < len(tokens)
-            and tokens[index + 1].value == "use"
-        ):
-            cursor = parse_tree(index + 2, [])
-            while cursor < len(tokens) and tokens[cursor].value != ";":
-                cursor += 1
-            index = cursor + 1
-            continue
-        index += 1
-
-    return exports
-
-
-def resolve_use_path(parts: tuple[str, ...], current_parts: list[str], definitions: dict[str, dict]) -> tuple[str, ...] | None:
-    if not parts:
-        return None
-
-    if parts[0] == "crate":
-        return parts[1:]
-
-    if parts[0] == "self":
-        return tuple([*current_parts, *parts[1:]])
-
-    if parts[0] == "super":
-        cursor = 0
-        base = list(current_parts)
-        while cursor < len(parts) and parts[cursor] == "super":
-            if base:
-                base.pop()
-            cursor += 1
-        return tuple([*base, *parts[cursor:]])
-
-    candidate = parts
-    if join_path(candidate) in definitions or any(path.startswith(f"{join_path(candidate)}::") for path in definitions):
-        return candidate
-
-    relative = tuple([*current_parts, *parts])
-    if join_path(relative) in definitions or any(path.startswith(f"{join_path(relative)}::") for path in definitions):
-        return relative
-
-    return None
-
-
-def reexported_items_from_source(source: str, source_file: str, module: dict, definitions: dict[str, dict]) -> list[dict]:
-    items: list[dict] = []
-    current_parts = file_module_parts(source_file, module)
-
-    for export in parse_pub_use_exports(source):
-        target_parts = resolve_use_path(export.path, current_parts, definitions)
-        if target_parts is None:
-            continue
-
-        target_path = join_path(target_parts)
-        public_base = current_parts
-
-        if export.wildcard:
-            prefix = f"{target_path}::"
-            for definition_path, definition in definitions.items():
-                if not definition_path.startswith(prefix):
-                    continue
-                alias_path = definition_path.removeprefix(prefix)
-                if "::" in alias_path:
-                    continue
-                items.append({**definition, "path": public_path(public_base, definition["name"])})
-            continue
-
-        definition = definitions.get(target_path)
-        if definition is None:
-            continue
-        name = export.alias or definition["name"]
-        items.append({**definition, "path": public_path(public_base, name), "name": name})
-
-    return items
-
-
-def reachable_public_source_files(root: Path, module: dict) -> list[str]:
-    indexed_sources = {
-        (root / source_file).resolve(): source_file
-        for source_file in module.get("files", {}).get("source", [])
+function isObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function get(container, key, fallback) {
+  return isObject(container) && key in container ? container[key] : fallback;
+}
+
+function isFile(target) {
+  try {
+    return fs.statSync(target).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function readText(target) {
+  return fs.readFileSync(target, "utf8").replace(/\r\n?/g, "\n");
+}
+
+function resolvePath(target) {
+  const absolute = path.resolve(target);
+  try {
+    return fs.realpathSync(absolute);
+  } catch {
+    const parent = path.dirname(absolute);
+    return parent === absolute ? absolute : path.join(resolvePath(parent), path.basename(absolute));
+  }
+}
+
+function isInside(relative) {
+  return relative !== ".." && !relative.startsWith(".." + path.sep) && !path.isAbsolute(relative);
+}
+
+function relativePath(target, root) {
+  let relative = path.relative(path.resolve(root), path.resolve(target));
+  if (!isInside(relative)) {
+    relative = path.relative(resolvePath(root), resolvePath(target));
+    if (!isInside(relative)) {
+      fail("'" + target + "' is not in the subpath of '" + root + "'");
     }
-    module_path = module.get("path", ".")
-    module_root = root if module_path == "." else root / module_path
-    crate_roots = [
-        module_root / "src/lib.rs",
-        module_root / "src/main.rs",
-    ]
-
-    reachable: list[str] = []
-    visited: set[Path] = set()
-
-    def visit(path: Path) -> None:
-        resolved = path.resolve()
-        if resolved in visited or resolved not in indexed_sources:
-            return
-        visited.add(resolved)
-        reachable.append(indexed_sources[resolved])
-
-        for module_name in public_file_module_names(path.read_text()):
-            for candidate in child_module_candidates(path, module_name):
-                if candidate.resolve() in indexed_sources:
-                    visit(candidate)
-                    break
-
-    for crate_root in crate_roots:
-        if crate_root.resolve() in indexed_sources:
-            visit(crate_root)
-            break
-
-    return reachable
-
-
-def extract_items_from_source(source: str, source_file: str, module: dict) -> list[dict]:
-    tokens = scan_tokens(source)
-    items: list[dict] = []
-    base_parts = file_module_parts(source_file, module)
-
-    def parse_scope(start_index: int, path_parts: list[str], stop_at_brace: bool) -> int:
-        cursor = start_index
-        while cursor < len(tokens):
-            token = tokens[cursor]
-
-            if stop_at_brace and token.value == "}":
-                return cursor + 1
-
-            if token.value == "pub":
-                decl = public_decl_at(tokens, cursor)
-                if decl is not None:
-                    after_name = decl.name_index + 1
-                    if decl.kind == "mod":
-                        if after_name < len(tokens) and tokens[after_name].value == "{":
-                            cursor = parse_scope(after_name + 1, [*path_parts, decl.name], True)
-                            continue
-                        cursor = skip_item(tokens, cursor)
-                        continue
-
-                    items.append(
-                        {
-                            "path": public_path(path_parts, decl.name),
-                            "kind": decl.kind,
-                            "name": decl.name,
-                            "source": {
-                                "path": source_file,
-                                "line": tokens[decl.pub_index].line,
-                            },
-                            "signature": signature_from_source(source, tokens[decl.pub_index].start),
-                        }
-                    )
-                    cursor = skip_item(tokens, cursor)
-                    continue
-
-            if token.value in BLOCK_ITEM_KEYWORDS:
-                cursor = skip_item(tokens, cursor)
-                continue
-
-            if token.value == "{":
-                cursor = skip_brace_block(tokens, cursor)
-                continue
-
-            cursor += 1
-
-        return cursor
-
-    parse_scope(0, base_parts, False)
-    return items
-
-
-def extract_public_items(root: Path, module: dict) -> list[dict]:
-    definitions: dict[str, dict] = {}
-    for source_file in module.get("files", {}).get("source", []):
-        path = root / source_file
-        if not path.is_file():
-            raise SystemExit(f"Missing source file from module index: {source_file}")
-        for item in extract_items_from_source(path.read_text(), source_file, module):
-            definitions.setdefault(item["path"], item)
-
-    items: list[dict] = []
-
-    for source_file in reachable_public_source_files(root, module):
-        path = root / source_file
-        if not path.is_file():
-            raise SystemExit(f"Missing source file from module index: {source_file}")
-        source = path.read_text()
-        items.extend(extract_items_from_source(source, source_file, module))
-        items.extend(reexported_items_from_source(source, source_file, module, definitions))
-
-    seen: set[tuple[str, str, str, int]] = set()
-    unique_items: list[dict] = []
-    for item in items:
-        key = (item["path"], item["kind"], item["source"]["path"], item["source"]["line"])
-        if key in seen:
-            continue
-        seen.add(key)
-        unique_items.append(item)
-
-    return unique_items
-
-
-def remove_ts_comments_preserve_literals(source: str) -> str:
-    output: list[str] = []
-    cursor = 0
-    quote: str | None = None
-    escaped = False
-
-    while cursor < len(source):
-        char = source[cursor]
-
-        if quote is not None:
-            output.append(char)
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == quote:
-                quote = None
-            cursor += 1
-            continue
-
-        if source.startswith("//", cursor):
-            end = source.find("\n", cursor + 2)
-            if end == -1:
-                output.append(" " * (len(source) - cursor))
-                break
-            output.append(" " * (end - cursor))
-            output.append("\n")
-            cursor = end + 1
-            continue
-
-        if source.startswith("/*", cursor):
-            end = source.find("*/", cursor + 2)
-            end = len(source) if end == -1 else end + 2
-            chunk = source[cursor:end]
-            output.append("".join("\n" if item == "\n" else " " for item in chunk))
-            cursor = end
-            continue
-
-        if char in {"'", '"', "`"}:
-            quote = char
-            escaped = False
-            output.append(char)
-            cursor += 1
-            continue
-
-        output.append(char)
-        cursor += 1
-
-    return "".join(output)
-
-
-def ts_signature_from_source(source: str, start: int) -> str:
-    cursor = start
-    depth_angle = 0
-    depth_paren = 0
-    depth_bracket = 0
-
-    while cursor < len(source):
-        char = source[cursor]
-        if char in {"'", '"', "`"}:
-            cursor = quoted_literal_end(source, cursor) if char != "`" else quoted_literal_end(source.replace("`", '"'), cursor)
-            continue
-
-        if char == "<":
-            depth_angle += 1
-        elif char == ">" and depth_angle:
-            depth_angle -= 1
-        elif char == "(":
-            depth_paren += 1
-        elif char == ")" and depth_paren:
-            depth_paren -= 1
-        elif char == "[":
-            depth_bracket += 1
-        elif char == "]" and depth_bracket:
-            depth_bracket -= 1
-
-        at_top_level = depth_angle == 0 and depth_paren == 0 and depth_bracket == 0
-        if at_top_level and char in "{;":
-            return " ".join(source[start:cursor].split())
-        cursor += 1
-
-    return " ".join(source[start:].split())
-
-
-def ts_item_kind(match: re.Match) -> tuple[str, str] | None:
-    for kind in ("function", "class", "interface", "type", "enum", "variable"):
-        name = match.group(kind)
-        if name:
-            return ("const" if kind == "variable" else kind, name)
-    return None
-
-
-def extract_ts_exported_declarations(source: str, source_file: str) -> list[dict]:
-    sanitized = remove_ts_comments_preserve_literals(source)
-    items: list[dict] = []
-
-    for match in TS_EXPORT_DECLARATION.finditer(sanitized):
-        kind_and_name = ts_item_kind(match)
-        if kind_and_name is None:
-            continue
-        kind, name = kind_and_name
-        items.append(
-            {
-                "path": name,
-                "kind": kind,
-                "name": name,
-                "source": {
-                    "path": source_file,
-                    "line": line_number_from_offset(sanitized, match.start()),
-                },
-                "signature": ts_signature_from_source(source, match.start()),
-            }
-        )
-
-    return items
-
-
-def exported_names_from_group(group: str) -> list[tuple[str, str]]:
-    names: list[tuple[str, str]] = []
-    body = group.strip()[1:-1]
-    for raw_part in body.split(","):
-        part = raw_part.strip()
-        if not part:
-            continue
-        if part.startswith("type "):
-            part = part.removeprefix("type ").strip()
-        pieces = [piece.strip() for piece in re.split(r"\s+as\s+", part, maxsplit=1)]
-        source_name = pieces[0]
-        public_name = pieces[1] if len(pieces) == 2 else source_name
-        if source_name and source_name != "default":
-            names.append((source_name, public_name))
-    return names
-
-
-def resolve_ts_specifier(current_file: Path, specifier: str, indexed_sources: dict[Path, str]) -> str | None:
-    if not specifier.startswith("."):
-        return None
-
-    base = (current_file.parent / specifier).resolve()
-    candidates: list[Path] = []
-
-    if base.suffix:
-        candidates.append(base)
-        for extension in TS_SOURCE_EXTENSIONS:
-            candidates.append(base.with_suffix(extension))
-    else:
-        for extension in TS_SOURCE_EXTENSIONS:
-            candidates.append(base.with_suffix(extension))
-        for extension in TS_SOURCE_EXTENSIONS:
-            candidates.append(base / f"index{extension}")
-
-    for candidate in candidates:
-        source_file = indexed_sources.get(candidate.resolve())
-        if source_file is not None:
-            return source_file
-
-    return None
-
-
-def package_export_targets(value) -> list[str]:
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, list):
-        targets: list[str] = []
-        for item in value:
-            targets.extend(package_export_targets(item))
-        return targets
-    if isinstance(value, dict):
-        targets: list[str] = []
-        for key, item in value.items():
-            if key in {"types", "import", "require", "default", "module"} or key.startswith("."):
-                targets.extend(package_export_targets(item))
-        return targets
-    return []
-
-
-def ts_entrypoint_files(root: Path, module: dict) -> list[str]:
-    indexed_sources = set(module.get("files", {}).get("source", []))
-    module_path = module.get("path", ".")
-    module_root = root if module_path == "." else root / module_path
-    manifest = load_optional_json(root / module.get("manifest", ""))
-    targets: list[str] = []
-
-    for key in ("exports", "main", "module", "types"):
-        targets.extend(package_export_targets(manifest.get(key)))
-
-    candidates: list[str] = []
-    for target in targets:
-        if not isinstance(target, str):
-            continue
-        target_path = (module_root / target).resolve()
-        for candidate in [target_path, *[target_path.with_suffix(ext) for ext in TS_SOURCE_EXTENSIONS]]:
-            rel = relative_path(candidate, root)
-            if rel in indexed_sources:
-                candidates.append(rel)
-
-    if not candidates:
-        for name in ("index", "main", "app"):
-            for extension in TS_SOURCE_EXTENSIONS:
-                rel = relative_path(module_root / "src" / f"{name}{extension}", root)
-                if rel in indexed_sources:
-                    candidates.append(rel)
-
-    if not candidates and module_path.startswith("apps/"):
-        candidates.extend(module.get("files", {}).get("source", []))
-
-    return sorted(dict.fromkeys(candidates))
-
-
-def collect_ts_public_items(
-    root: Path,
-    source_file: str,
-    module: dict,
-    direct_definitions: dict[str, dict[str, dict]],
-    indexed_sources: dict[Path, str],
-    visited: set[str],
-) -> list[dict]:
-    if source_file in visited:
-        return []
-    visited.add(source_file)
-
-    path = root / source_file
-    source = path.read_text()
-    sanitized = remove_ts_comments_preserve_literals(source)
-    items = list(direct_definitions.get(source_file, {}).values())
-
-    for match in TS_REEXPORT.finditer(sanitized):
-        target_file = resolve_ts_specifier(path, match.group("specifier"), indexed_sources)
-        if target_file is None:
-            continue
-
-        form = match.group("form")
-        if form == "*":
-            items.extend(collect_ts_public_items(root, target_file, module, direct_definitions, indexed_sources, visited))
-            continue
-
-        target_definitions = direct_definitions.get(target_file, {})
-        for source_name, public_name in exported_names_from_group(form):
-            definition = target_definitions.get(source_name)
-            if definition is None:
-                items.append(
-                    {
-                        "path": public_name,
-                        "kind": "re-export",
-                        "name": public_name,
-                        "source": {
-                            "path": source_file,
-                            "line": line_number_from_offset(sanitized, match.start()),
-                        },
-                    }
-                )
-                continue
-            items.append({**definition, "path": public_name, "name": public_name})
-
-    return items
-
-
-def extract_ts_routes(source: str, source_file: str) -> list[dict]:
-    sanitized = remove_ts_comments_preserve_literals(source)
-    items: list[dict] = []
-
-    for match in TS_ROUTE_CALL.finditer(sanitized):
-        method = match.group("method").upper()
-        route_path = match.group("path")
-        name = f"{method} {route_path}"
-        items.append(
-            {
-                "path": name,
-                "kind": "route",
-                "name": name,
-                "source": {
-                    "path": source_file,
-                    "line": line_number_from_offset(sanitized, match.start()),
-                },
-            }
-        )
-
-    for match in TS_ROUTE_OBJECT.finditer(sanitized):
-        body = match.group("body")
-        method_match = TS_ROUTE_METHOD.search(body)
-        path_match = TS_ROUTE_URL.search(body)
-        if method_match is None or path_match is None:
-            continue
-        name = f"{method_match.group('method').upper()} {path_match.group('path')}"
-        items.append(
-            {
-                "path": name,
-                "kind": "route",
-                "name": name,
-                "source": {
-                    "path": source_file,
-                    "line": line_number_from_offset(sanitized, match.start()),
-                },
-            }
-        )
-
-    return items
-
-
-def extract_typescript_public_items(root: Path, module: dict) -> list[dict]:
-    indexed_sources = {
-        (root / source_file).resolve(): source_file
-        for source_file in module.get("files", {}).get("source", [])
+  }
+  return relative === "" ? "." : relative.split(path.sep).join("/");
+}
+
+function pathSuffix(target) {
+  const name = path.basename(target);
+  const index = name.lastIndexOf(".");
+  return index > 0 && index < name.length - 1 ? name.slice(index) : "";
+}
+
+function withSuffix(target, suffix) {
+  const current = pathSuffix(target);
+  return (current ? target.slice(0, -current.length) : target) + suffix;
+}
+
+function isSpace(character) {
+  return /\s/.test(character);
+}
+
+function isAlpha(character) {
+  return /\p{L}/u.test(character);
+}
+
+function collapseWhitespace(text) {
+  return text.split(/\s+/).filter(Boolean).join(" ");
+}
+
+function uniqueItems(items) {
+  const seen = new Set();
+  return items.filter((item) => {
+    const key = JSON.stringify([item.path, item.kind, item.source.path, item.source.line]);
+    if (seen.has(key)) {
+      return false;
     }
-    direct_definitions: dict[str, dict[str, dict]] = {}
+    seen.add(key);
+    return true;
+  });
+}
 
-    for source_file in module.get("files", {}).get("source", []):
-        path = root / source_file
-        if not path.is_file():
-            raise SystemExit(f"Missing source file from module index: {source_file}")
-        direct_definitions[source_file] = {
-            item["name"]: item
-            for item in extract_ts_exported_declarations(path.read_text(), source_file)
+function loadModuleIndex(root) {
+  const target = path.join(root, ".ai/generated/module-index.json");
+  if (!isFile(target)) {
+    fail("Missing .ai/generated/module-index.json; run .ai/tools/generate-module-index first.");
+  }
+  return JSON.parse(readText(target));
+}
+
+function loadOptionalJson(target) {
+  if (!isFile(target)) {
+    return {};
+  }
+  return JSON.parse(readText(target));
+}
+
+function lineNumberFromOffset(source, offset) {
+  let count = 1;
+  for (let index = source.indexOf("\n"); index >= 0 && index < offset; index = source.indexOf("\n", index + 1)) {
+    count += 1;
+  }
+  return count;
+}
+
+function countNewlines(text) {
+  return text.split("\n").length - 1;
+}
+
+function rawStringEnd(source, index) {
+  for (const prefix of ["br", "rb", "r"]) {
+    if (!source.startsWith(prefix, index)) {
+      continue;
+    }
+    let cursor = index + prefix.length;
+    let hashes = 0;
+    while (cursor < source.length && source[cursor] === "#") {
+      hashes += 1;
+      cursor += 1;
+    }
+    if (cursor >= source.length || source[cursor] !== "\"") {
+      continue;
+    }
+    const delimiter = "\"" + "#".repeat(hashes);
+    const end = source.indexOf(delimiter, cursor + 1);
+    return end === -1 ? source.length : end + delimiter.length;
+  }
+  return null;
+}
+
+function quotedLiteralEnd(source, index) {
+  const quote = source[index];
+  let escaped = false;
+  for (let cursor = index + 1; cursor < source.length; cursor += 1) {
+    const character = source[cursor];
+    if (escaped) {
+      escaped = false;
+    } else if (character === "\\") {
+      escaped = true;
+    } else if (character === quote) {
+      return cursor + 1;
+    }
+  }
+  return source.length;
+}
+
+function blockCommentEnd(source, index) {
+  let cursor = index + 2;
+  let depth = 1;
+  while (cursor < source.length && depth) {
+    if (source.startsWith("/*", cursor)) {
+      depth += 1;
+      cursor += 2;
+    } else if (source.startsWith("*/", cursor)) {
+      depth -= 1;
+      cursor += 2;
+    } else {
+      cursor += 1;
+    }
+  }
+  return cursor;
+}
+
+function isByteStringStart(source, cursor) {
+  return source[cursor] === "\"" || (source[cursor] === "b" && cursor + 1 < source.length && source[cursor + 1] === "\"");
+}
+
+function isCharLiteralStart(source, cursor) {
+  return source[cursor] === "'" && cursor + 1 < source.length && !isAlpha(source[cursor + 1]);
+}
+
+function scanTokens(source) {
+  const tokens = [];
+  let cursor = 0;
+  let line = 1;
+
+  while (cursor < source.length) {
+    const character = source[cursor];
+
+    if (isSpace(character)) {
+      if (character === "\n") {
+        line += 1;
+      }
+      cursor += 1;
+      continue;
+    }
+
+    if (source.startsWith("//", cursor)) {
+      const end = source.indexOf("\n", cursor + 2);
+      cursor = end === -1 ? source.length : end;
+      continue;
+    }
+
+    if (source.startsWith("/*", cursor)) {
+      const end = blockCommentEnd(source, cursor);
+      line += countNewlines(source.slice(cursor, end));
+      cursor = end;
+      continue;
+    }
+
+    const rawEnd = rawStringEnd(source, cursor);
+    if (rawEnd !== null) {
+      line += countNewlines(source.slice(cursor, rawEnd));
+      cursor = rawEnd;
+      continue;
+    }
+
+    if (isByteStringStart(source, cursor)) {
+      const end = quotedLiteralEnd(source, character === "b" ? cursor + 1 : cursor);
+      line += countNewlines(source.slice(cursor, end));
+      cursor = end;
+      continue;
+    }
+
+    if (isCharLiteralStart(source, cursor)) {
+      const end = quotedLiteralEnd(source, cursor);
+      line += countNewlines(source.slice(cursor, end));
+      cursor = end;
+      continue;
+    }
+
+    IDENTIFIER.lastIndex = cursor;
+    const match = IDENTIFIER.exec(source);
+    if (match) {
+      tokens.push({ value: match[0], start: cursor, end: IDENTIFIER.lastIndex, line });
+      cursor = IDENTIFIER.lastIndex;
+      continue;
+    }
+
+    tokens.push({ value: character, start: cursor, end: cursor + 1, line });
+    cursor += 1;
+  }
+
+  return tokens;
+}
+
+function removeCommentsPreserveLiterals(text) {
+  const output = [];
+  let cursor = 0;
+  while (cursor < text.length) {
+    if (text.startsWith("//", cursor)) {
+      const end = text.indexOf("\n", cursor + 2);
+      if (end === -1) {
+        break;
+      }
+      output.push("\n");
+      cursor = end + 1;
+      continue;
+    }
+
+    if (text.startsWith("/*", cursor)) {
+      const end = blockCommentEnd(text, cursor);
+      output.push("\n".repeat(countNewlines(text.slice(cursor, end))));
+      cursor = end;
+      continue;
+    }
+
+    const rawEnd = rawStringEnd(text, cursor);
+    if (rawEnd !== null) {
+      output.push(text.slice(cursor, rawEnd));
+      cursor = rawEnd;
+      continue;
+    }
+
+    const character = text[cursor];
+    if (isByteStringStart(text, cursor)) {
+      const end = quotedLiteralEnd(text, character === "b" ? cursor + 1 : cursor);
+      output.push(text.slice(cursor, end));
+      cursor = end;
+      continue;
+    }
+
+    if (isCharLiteralStart(text, cursor)) {
+      const end = quotedLiteralEnd(text, cursor);
+      output.push(text.slice(cursor, end));
+      cursor = end;
+      continue;
+    }
+
+    output.push(character);
+    cursor += 1;
+  }
+
+  return output.join("");
+}
+
+function normalizeSignature(signature) {
+  return collapseWhitespace(removeCommentsPreserveLiterals(signature));
+}
+
+function trackDepth(depth, character) {
+  if (character === "<") {
+    depth.angle += 1;
+  } else if (character === ">" && depth.angle) {
+    depth.angle -= 1;
+  } else if (character === "(") {
+    depth.paren += 1;
+  } else if (character === ")" && depth.paren) {
+    depth.paren -= 1;
+  } else if (character === "[") {
+    depth.bracket += 1;
+  } else if (character === "]" && depth.bracket) {
+    depth.bracket -= 1;
+  }
+  return depth.angle === 0 && depth.paren === 0 && depth.bracket === 0;
+}
+
+function signatureFromSource(source, start) {
+  let cursor = start;
+  const depth = { angle: 0, paren: 0, bracket: 0 };
+
+  while (cursor < source.length) {
+    if (source.startsWith("//", cursor)) {
+      const end = source.indexOf("\n", cursor + 2);
+      cursor = end === -1 ? source.length : end;
+      continue;
+    }
+
+    if (source.startsWith("/*", cursor)) {
+      cursor = blockCommentEnd(source, cursor);
+      continue;
+    }
+
+    const rawEnd = rawStringEnd(source, cursor);
+    if (rawEnd !== null) {
+      cursor = rawEnd;
+      continue;
+    }
+
+    const character = source[cursor];
+    if (isByteStringStart(source, cursor)) {
+      cursor = quotedLiteralEnd(source, character === "b" ? cursor + 1 : cursor);
+      continue;
+    }
+
+    if (isCharLiteralStart(source, cursor)) {
+      cursor = quotedLiteralEnd(source, cursor);
+      continue;
+    }
+
+    if (trackDepth(depth, character) && (character === "{" || character === ";")) {
+      return normalizeSignature(source.slice(start, cursor));
+    }
+
+    cursor += 1;
+  }
+
+  return normalizeSignature(source.slice(start));
+}
+
+function childModuleCandidates(currentFile, moduleName) {
+  const base = ["lib.rs", "main.rs", "mod.rs"].includes(path.basename(currentFile))
+    ? path.dirname(currentFile)
+    : withSuffix(currentFile, "");
+  return [path.join(base, moduleName + ".rs"), path.join(base, moduleName, "mod.rs")];
+}
+
+function isBarePub(tokens, index) {
+  return tokens[index].value === "pub" && !(index + 1 < tokens.length && tokens[index + 1].value === "(");
+}
+
+function publicDeclAt(tokens, index) {
+  if (!isBarePub(tokens, index)) {
+    return null;
+  }
+
+  let cursor = index + 1;
+  while (cursor < tokens.length && ITEM_MODIFIERS.has(tokens[cursor].value)) {
+    cursor += 1;
+  }
+
+  if (cursor >= tokens.length) {
+    return null;
+  }
+
+  const kind = tokens[cursor].value;
+  if (kind === "mod") {
+    if (cursor + 1 < tokens.length && IDENTIFIER_FULL.test(tokens[cursor + 1].value)) {
+      return { kind: "mod", name: tokens[cursor + 1].value, pubIndex: index, keywordIndex: cursor, nameIndex: cursor + 1 };
+    }
+    return null;
+  }
+
+  if (Object.hasOwn(ITEM_KINDS, kind) && cursor + 1 < tokens.length) {
+    const name = tokens[cursor + 1].value;
+    if (IDENTIFIER_FULL.test(name)) {
+      return { kind: ITEM_KINDS[kind], name, pubIndex: index, keywordIndex: cursor, nameIndex: cursor + 1 };
+    }
+  }
+
+  return null;
+}
+
+function skipBraceBlock(tokens, index) {
+  let depth = 0;
+  let cursor = index;
+  while (cursor < tokens.length) {
+    if (tokens[cursor].value === "{") {
+      depth += 1;
+    } else if (tokens[cursor].value === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return cursor + 1;
+      }
+    }
+    cursor += 1;
+  }
+  return cursor;
+}
+
+function skipItem(tokens, index) {
+  for (let cursor = index; cursor < tokens.length; cursor += 1) {
+    if (tokens[cursor].value === ";") {
+      return cursor + 1;
+    }
+    if (tokens[cursor].value === "{") {
+      return skipBraceBlock(tokens, cursor);
+    }
+  }
+  return tokens.length;
+}
+
+function fileModuleParts(sourceFile, module) {
+  const modulePath = get(module, "path", ".");
+  const prefix = modulePath === "." ? "src/" : modulePath + "/src/";
+  if (sourceFile.endsWith("/src/lib.rs") || sourceFile.endsWith("/src/main.rs")) {
+    return [];
+  }
+  let relative = sourceFile.startsWith(prefix) ? sourceFile.slice(prefix.length) : sourceFile;
+  relative = relative.endsWith(".rs") ? relative.slice(0, -3) : relative;
+  return relative.split("/").filter((part) => part && part !== "mod");
+}
+
+function joinPath(parts) {
+  return parts.join("::");
+}
+
+function publicPath(parts, itemName) {
+  return joinPath([...parts, itemName]);
+}
+
+function isPathSeparator(tokens, index) {
+  return index + 1 < tokens.length && tokens[index].value === ":" && tokens[index + 1].value === ":";
+}
+
+function publicFileModuleNames(source) {
+  const tokens = scanTokens(source);
+  const names = [];
+  tokens.forEach((token, index) => {
+    if (token.value !== "pub") {
+      return;
+    }
+    const decl = publicDeclAt(tokens, index);
+    if (decl === null || decl.kind !== "mod") {
+      return;
+    }
+    if (decl.nameIndex + 1 < tokens.length && tokens[decl.nameIndex + 1].value === ";") {
+      names.push(decl.name);
+    }
+  });
+  return names;
+}
+
+function parsePubUseExports(source) {
+  const tokens = scanTokens(source);
+  const exports = [];
+
+  function parseGroup(index, prefix) {
+    let cursor = index + 1;
+    while (cursor < tokens.length) {
+      if (tokens[cursor].value === "}") {
+        return cursor + 1;
+      }
+      if (tokens[cursor].value === ",") {
+        cursor += 1;
+        continue;
+      }
+      cursor = parseTree(cursor, prefix);
+      if (cursor < tokens.length && tokens[cursor].value === ",") {
+        cursor += 1;
+      }
+    }
+    return cursor;
+  }
+
+  function parseTree(index, prefix) {
+    let cursor = index;
+    const parts = [...prefix];
+
+    while (cursor < tokens.length) {
+      const token = tokens[cursor];
+
+      if (token.value === "{") {
+        return parseGroup(cursor, parts);
+      }
+
+      if (token.value === "*") {
+        exports.push({ path: [...parts], alias: null, wildcard: true });
+        return cursor + 1;
+      }
+
+      if (!IDENTIFIER_FULL.test(token.value)) {
+        return cursor + 1;
+      }
+
+      const name = token.value;
+      if (name === "self") {
+        cursor += 1;
+        if (isPathSeparator(tokens, cursor)) {
+          cursor += 2;
+          continue;
         }
+        return cursor;
+      }
 
-    entrypoints = ts_entrypoint_files(root, module)
-    if not entrypoints:
-        entrypoints = list(module.get("files", {}).get("source", []))
+      parts.push(name);
+      cursor += 1;
 
-    items: list[dict] = []
-    for entrypoint in entrypoints:
-        items.extend(collect_ts_public_items(root, entrypoint, module, direct_definitions, indexed_sources, set()))
+      if (isPathSeparator(tokens, cursor)) {
+        cursor += 2;
+        continue;
+      }
 
-    if module.get("path", "").startswith("apps/"):
-        for source_file in module.get("files", {}).get("source", []):
-            items.extend(extract_ts_routes((root / source_file).read_text(), source_file))
+      let alias = null;
+      if (cursor + 1 < tokens.length && tokens[cursor].value === "as") {
+        if (IDENTIFIER_FULL.test(tokens[cursor + 1].value)) {
+          alias = tokens[cursor + 1].value;
+          cursor += 2;
+        }
+      }
 
-    seen: set[tuple[str, str, str, int]] = set()
-    unique_items: list[dict] = []
-    for item in items:
-        key = (item["path"], item["kind"], item["source"]["path"], item["source"]["line"])
-        if key in seen:
-            continue
-        seen.add(key)
-        unique_items.append(item)
-
-    return unique_items
-
-
-def module_index_is_typescript(module_index: dict) -> bool:
-    workspace = module_index.get("workspace", {})
-    workspace_type = workspace.get("type")
-    if workspace_type in {"npm-workspaces", "npm-package"}:
-        return True
-    manifest = workspace.get("manifest")
-    return isinstance(manifest, str) and manifest.endswith("package.json")
-
-
-def build_surface(root: Path) -> dict:
-    module_index = load_module_index(root)
-    is_typescript = module_index_is_typescript(module_index)
-    modules = []
-
-    for layer in module_index.get("layers", []):
-        for module in layer.get("modules", []):
-            public_items = (
-                extract_typescript_public_items(root, module)
-                if is_typescript or module.get("language") == "typescript"
-                else extract_public_items(root, module)
-            )
-            modules.append(
-                {
-                    "name": module["name"],
-                    "items": public_items,
-                }
-            )
-
-    return {
-        "schemaVersion": 1,
-        "kind": "public-surface",
-        "generatedBy": ".ai/tools/generate-public-surface",
-        "visibility": "project-public" if is_typescript else "crate-external",
-        "modules": modules,
+      exports.push({ path: [...parts], alias, wildcard: false });
+      return cursor;
     }
 
+    return cursor;
+  }
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Generate .ai/generated/public-surface.json from Rust or TypeScript source files.")
-    parser.add_argument("--check", action="store_true", help="Fail if the generated public surface differs from the current file.")
-    parser.add_argument("--print", action="store_true", help="Print generated JSON instead of writing it.")
-    parser.add_argument("--output", default=".ai/generated/public-surface.json", help="Output path relative to the project root.")
-    args = parser.parse_args()
+  let index = 0;
+  while (index < tokens.length) {
+    if (
+      tokens[index].value === "pub"
+      && isBarePub(tokens, index)
+      && index + 1 < tokens.length
+      && tokens[index + 1].value === "use"
+    ) {
+      let cursor = parseTree(index + 2, []);
+      while (cursor < tokens.length && tokens[cursor].value !== ";") {
+        cursor += 1;
+      }
+      index = cursor + 1;
+      continue;
+    }
+    index += 1;
+  }
 
-    root = Path(__file__).resolve().parents[2]
-    generated = json.dumps(build_surface(root), indent=2, sort_keys=False) + "\n"
-    output_path = root / args.output
+  return exports;
+}
 
-    if args.check:
-        if not output_path.is_file():
-            sys.stderr.write(f"Missing generated public surface: {output_path.relative_to(root)}\n")
-            return 1
-        current = output_path.read_text()
-        if current != generated:
-            sys.stderr.write(f"Stale generated public surface: {output_path.relative_to(root)}\n")
-            return 1
-        print("generate-public-surface check passed")
-        return 0
+function definesPath(parts, definitions) {
+  const joined = joinPath(parts);
+  return definitions.has(joined) || [...definitions.keys()].some((key) => key.startsWith(joined + "::"));
+}
 
-    if args.print:
-        sys.stdout.write(generated)
-        return 0
+function resolveUsePath(parts, currentParts, definitions) {
+  if (parts.length === 0) {
+    return null;
+  }
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(generated)
-    print(f"wrote {output_path.relative_to(root)}")
-    return 0
+  if (parts[0] === "crate") {
+    return parts.slice(1);
+  }
 
+  if (parts[0] === "self") {
+    return [...currentParts, ...parts.slice(1)];
+  }
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+  if (parts[0] === "super") {
+    let cursor = 0;
+    const base = [...currentParts];
+    while (cursor < parts.length && parts[cursor] === "super") {
+      base.pop();
+      cursor += 1;
+    }
+    return [...base, ...parts.slice(cursor)];
+  }
+
+  if (definesPath(parts, definitions)) {
+    return parts;
+  }
+
+  const relative = [...currentParts, ...parts];
+  if (definesPath(relative, definitions)) {
+    return relative;
+  }
+
+  return null;
+}
+
+function reexportedItemsFromSource(source, sourceFile, module, definitions) {
+  const items = [];
+  const currentParts = fileModuleParts(sourceFile, module);
+
+  for (const exported of parsePubUseExports(source)) {
+    const targetParts = resolveUsePath(exported.path, currentParts, definitions);
+    if (targetParts === null) {
+      continue;
+    }
+
+    const targetPath = joinPath(targetParts);
+
+    if (exported.wildcard) {
+      const prefix = targetPath + "::";
+      for (const [definitionPath, definition] of definitions) {
+        if (!definitionPath.startsWith(prefix) || definitionPath.slice(prefix.length).includes("::")) {
+          continue;
+        }
+        items.push({ ...definition, path: publicPath(currentParts, definition.name) });
+      }
+      continue;
+    }
+
+    const definition = definitions.get(targetPath);
+    if (definition === undefined) {
+      continue;
+    }
+    const name = exported.alias || definition.name;
+    items.push({ ...definition, path: publicPath(currentParts, name), name });
+  }
+
+  return items;
+}
+
+function moduleSourceFiles(module) {
+  return get(get(module, "files", {}), "source", []);
+}
+
+function moduleRoot(root, module) {
+  const modulePath = get(module, "path", ".");
+  return modulePath === "." ? root : path.join(root, modulePath);
+}
+
+function indexedSourceMap(root, module) {
+  return new Map(moduleSourceFiles(module).map((sourceFile) => [resolvePath(path.join(root, sourceFile)), sourceFile]));
+}
+
+function reachablePublicSourceFiles(root, module) {
+  const indexedSources = indexedSourceMap(root, module);
+  const crateRoots = [path.join(moduleRoot(root, module), "src/lib.rs"), path.join(moduleRoot(root, module), "src/main.rs")];
+  const reachable = [];
+  const visited = new Set();
+
+  function visit(target) {
+    const resolved = resolvePath(target);
+    if (visited.has(resolved) || !indexedSources.has(resolved)) {
+      return;
+    }
+    visited.add(resolved);
+    reachable.push(indexedSources.get(resolved));
+
+    for (const moduleName of publicFileModuleNames(readText(target))) {
+      for (const candidate of childModuleCandidates(target, moduleName)) {
+        if (indexedSources.has(resolvePath(candidate))) {
+          visit(candidate);
+          break;
+        }
+      }
+    }
+  }
+
+  for (const crateRoot of crateRoots) {
+    if (indexedSources.has(resolvePath(crateRoot))) {
+      visit(crateRoot);
+      break;
+    }
+  }
+
+  return reachable;
+}
+
+function extractItemsFromSource(source, sourceFile, module) {
+  const tokens = scanTokens(source);
+  const items = [];
+
+  function parseScope(startIndex, pathParts, stopAtBrace) {
+    let cursor = startIndex;
+    while (cursor < tokens.length) {
+      const token = tokens[cursor];
+
+      if (stopAtBrace && token.value === "}") {
+        return cursor + 1;
+      }
+
+      if (token.value === "pub") {
+        const decl = publicDeclAt(tokens, cursor);
+        if (decl !== null) {
+          const afterName = decl.nameIndex + 1;
+          if (decl.kind === "mod") {
+            if (afterName < tokens.length && tokens[afterName].value === "{") {
+              cursor = parseScope(afterName + 1, [...pathParts, decl.name], true);
+              continue;
+            }
+            cursor = skipItem(tokens, cursor);
+            continue;
+          }
+
+          items.push({
+            path: publicPath(pathParts, decl.name),
+            kind: decl.kind,
+            name: decl.name,
+            source: { path: sourceFile, line: tokens[decl.pubIndex].line },
+            signature: signatureFromSource(source, tokens[decl.pubIndex].start)
+          });
+          cursor = skipItem(tokens, cursor);
+          continue;
+        }
+      }
+
+      if (BLOCK_ITEM_KEYWORDS.has(token.value)) {
+        cursor = skipItem(tokens, cursor);
+        continue;
+      }
+
+      if (token.value === "{") {
+        cursor = skipBraceBlock(tokens, cursor);
+        continue;
+      }
+
+      cursor += 1;
+    }
+
+    return cursor;
+  }
+
+  parseScope(0, fileModuleParts(sourceFile, module), false);
+  return items;
+}
+
+function readModuleSource(root, sourceFile) {
+  const target = path.join(root, sourceFile);
+  if (!isFile(target)) {
+    fail("Missing source file from module index: " + sourceFile);
+  }
+  return readText(target);
+}
+
+function extractPublicItems(root, module) {
+  const definitions = new Map();
+  for (const sourceFile of moduleSourceFiles(module)) {
+    for (const item of extractItemsFromSource(readModuleSource(root, sourceFile), sourceFile, module)) {
+      if (!definitions.has(item.path)) {
+        definitions.set(item.path, item);
+      }
+    }
+  }
+
+  const items = [];
+  for (const sourceFile of reachablePublicSourceFiles(root, module)) {
+    const source = readModuleSource(root, sourceFile);
+    items.push(...extractItemsFromSource(source, sourceFile, module));
+    items.push(...reexportedItemsFromSource(source, sourceFile, module, definitions));
+  }
+
+  return uniqueItems(items);
+}
+
+function removeTsCommentsPreserveLiterals(source) {
+  const output = [];
+  let cursor = 0;
+  let quote = null;
+  let escaped = false;
+
+  while (cursor < source.length) {
+    const character = source[cursor];
+
+    if (quote !== null) {
+      output.push(character);
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === quote) {
+        quote = null;
+      }
+      cursor += 1;
+      continue;
+    }
+
+    if (source.startsWith("//", cursor)) {
+      const end = source.indexOf("\n", cursor + 2);
+      if (end === -1) {
+        output.push(" ".repeat(source.length - cursor));
+        break;
+      }
+      output.push(" ".repeat(end - cursor));
+      output.push("\n");
+      cursor = end + 1;
+      continue;
+    }
+
+    if (source.startsWith("/*", cursor)) {
+      const found = source.indexOf("*/", cursor + 2);
+      const end = found === -1 ? source.length : found + 2;
+      output.push(source.slice(cursor, end).replace(/[^\n]/g, " "));
+      cursor = end;
+      continue;
+    }
+
+    if (character === "'" || character === "\"" || character === "`") {
+      quote = character;
+      escaped = false;
+      output.push(character);
+      cursor += 1;
+      continue;
+    }
+
+    output.push(character);
+    cursor += 1;
+  }
+
+  return output.join("");
+}
+
+function tsSignatureFromSource(source, start) {
+  let cursor = start;
+  const depth = { angle: 0, paren: 0, bracket: 0 };
+  let backtickSource = null;
+
+  while (cursor < source.length) {
+    const character = source[cursor];
+    if (character === "'" || character === "\"") {
+      cursor = quotedLiteralEnd(source, cursor);
+      continue;
+    }
+    if (character === "`") {
+      backtickSource = backtickSource || source.replace(/`/g, "\"");
+      cursor = quotedLiteralEnd(backtickSource, cursor);
+      continue;
+    }
+
+    if (trackDepth(depth, character) && (character === "{" || character === ";")) {
+      return collapseWhitespace(source.slice(start, cursor));
+    }
+    cursor += 1;
+  }
+
+  return collapseWhitespace(source.slice(start));
+}
+
+function tsItemKind(match) {
+  for (const kind of TS_ITEM_KINDS) {
+    const name = match.groups[kind];
+    if (name) {
+      return [kind === "variable" ? "const" : kind, name];
+    }
+  }
+  return null;
+}
+
+function extractTsExportedDeclarations(source, sourceFile) {
+  const sanitized = removeTsCommentsPreserveLiterals(source);
+  const items = [];
+
+  for (const match of sanitized.matchAll(TS_EXPORT_DECLARATION)) {
+    const kindAndName = tsItemKind(match);
+    if (kindAndName === null) {
+      continue;
+    }
+    const [kind, name] = kindAndName;
+    items.push({
+      path: name,
+      kind,
+      name,
+      source: { path: sourceFile, line: lineNumberFromOffset(sanitized, match.index) },
+      signature: tsSignatureFromSource(source, match.index)
+    });
+  }
+
+  return items;
+}
+
+function exportedNamesFromGroup(group) {
+  const names = [];
+  const body = group.trim().slice(1, -1);
+  for (const rawPart of body.split(",")) {
+    let part = rawPart.trim();
+    if (!part) {
+      continue;
+    }
+    if (part.startsWith("type ")) {
+      part = part.slice("type ".length).trim();
+    }
+    const separator = /\s+as\s+/.exec(part);
+    const pieces = separator
+      ? [part.slice(0, separator.index).trim(), part.slice(separator.index + separator[0].length).trim()]
+      : [part.trim()];
+    const sourceName = pieces[0];
+    const publicName = pieces.length === 2 ? pieces[1] : sourceName;
+    if (sourceName && sourceName !== "default") {
+      names.push([sourceName, publicName]);
+    }
+  }
+  return names;
+}
+
+function resolveTsSpecifier(currentFile, specifier, indexedSources) {
+  if (!specifier.startsWith(".")) {
+    return null;
+  }
+
+  const base = resolvePath(path.join(path.dirname(currentFile), specifier));
+  const candidates = [];
+
+  if (pathSuffix(base)) {
+    candidates.push(base);
+    for (const extension of TS_SOURCE_EXTENSIONS) {
+      candidates.push(withSuffix(base, extension));
+    }
+  } else {
+    for (const extension of TS_SOURCE_EXTENSIONS) {
+      candidates.push(withSuffix(base, extension));
+    }
+    for (const extension of TS_SOURCE_EXTENSIONS) {
+      candidates.push(path.join(base, "index" + extension));
+    }
+  }
+
+  for (const candidate of candidates) {
+    const sourceFile = indexedSources.get(resolvePath(candidate));
+    if (sourceFile !== undefined) {
+      return sourceFile;
+    }
+  }
+
+  return null;
+}
+
+function packageExportTargets(value) {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap(packageExportTargets);
+  }
+  if (isObject(value)) {
+    return Object.entries(value)
+      .filter(([key]) => ["types", "import", "require", "default", "module"].includes(key) || key.startsWith("."))
+      .flatMap(([, item]) => packageExportTargets(item));
+  }
+  return [];
+}
+
+function tsEntrypointFiles(root, module) {
+  const indexedSources = new Set(moduleSourceFiles(module));
+  const modulePath = get(module, "path", ".");
+  const base = moduleRoot(root, module);
+  const manifest = loadOptionalJson(path.join(root, get(module, "manifest", "")));
+  const targets = ["exports", "main", "module", "types"].flatMap((key) => packageExportTargets(get(manifest, key, null)));
+
+  const candidates = [];
+  for (const target of targets) {
+    const targetPath = resolvePath(path.resolve(base, target));
+    for (const candidate of [targetPath, ...TS_SOURCE_EXTENSIONS.map((extension) => withSuffix(targetPath, extension))]) {
+      const relative = relativePath(candidate, root);
+      if (indexedSources.has(relative)) {
+        candidates.push(relative);
+      }
+    }
+  }
+
+  if (candidates.length === 0) {
+    for (const name of ["index", "main", "app"]) {
+      for (const extension of TS_SOURCE_EXTENSIONS) {
+        const relative = relativePath(path.join(base, "src", name + extension), root);
+        if (indexedSources.has(relative)) {
+          candidates.push(relative);
+        }
+      }
+    }
+  }
+
+  if (candidates.length === 0 && modulePath.startsWith("apps/")) {
+    candidates.push(...moduleSourceFiles(module));
+  }
+
+  return [...new Set(candidates)].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+}
+
+function collectTsPublicItems(root, sourceFile, module, directDefinitions, indexedSources, visited) {
+  if (visited.has(sourceFile)) {
+    return [];
+  }
+  visited.add(sourceFile);
+
+  const target = path.join(root, sourceFile);
+  const sanitized = removeTsCommentsPreserveLiterals(readText(target));
+  const items = [...(directDefinitions.get(sourceFile) || new Map()).values()];
+
+  for (const match of sanitized.matchAll(TS_REEXPORT)) {
+    const targetFile = resolveTsSpecifier(target, match.groups.specifier, indexedSources);
+    if (targetFile === null) {
+      continue;
+    }
+
+    const form = match.groups.form;
+    if (form === "*") {
+      items.push(...collectTsPublicItems(root, targetFile, module, directDefinitions, indexedSources, visited));
+      continue;
+    }
+
+    const targetDefinitions = directDefinitions.get(targetFile) || new Map();
+    for (const [sourceName, publicName] of exportedNamesFromGroup(form)) {
+      const definition = targetDefinitions.get(sourceName);
+      if (definition === undefined) {
+        items.push({
+          path: publicName,
+          kind: "re-export",
+          name: publicName,
+          source: { path: sourceFile, line: lineNumberFromOffset(sanitized, match.index) }
+        });
+        continue;
+      }
+      items.push({ ...definition, path: publicName, name: publicName });
+    }
+  }
+
+  return items;
+}
+
+function routeItem(name, sourceFile, sanitized, offset) {
+  return {
+    path: name,
+    kind: "route",
+    name,
+    source: { path: sourceFile, line: lineNumberFromOffset(sanitized, offset) }
+  };
+}
+
+function extractTsRoutes(source, sourceFile) {
+  const sanitized = removeTsCommentsPreserveLiterals(source);
+  const items = [];
+
+  for (const match of sanitized.matchAll(TS_ROUTE_CALL)) {
+    items.push(routeItem(match.groups.method.toUpperCase() + " " + match.groups.path, sourceFile, sanitized, match.index));
+  }
+
+  for (const match of sanitized.matchAll(TS_ROUTE_OBJECT)) {
+    const body = match.groups.body;
+    const methodMatch = TS_ROUTE_METHOD.exec(body);
+    const pathMatch = TS_ROUTE_URL.exec(body);
+    if (methodMatch === null || pathMatch === null) {
+      continue;
+    }
+    items.push(routeItem(methodMatch.groups.method.toUpperCase() + " " + pathMatch.groups.path, sourceFile, sanitized, match.index));
+  }
+
+  return items;
+}
+
+function extractTypescriptPublicItems(root, module) {
+  const indexedSources = indexedSourceMap(root, module);
+  const directDefinitions = new Map();
+
+  for (const sourceFile of moduleSourceFiles(module)) {
+    const definitions = new Map();
+    for (const item of extractTsExportedDeclarations(readModuleSource(root, sourceFile), sourceFile)) {
+      definitions.set(item.name, item);
+    }
+    directDefinitions.set(sourceFile, definitions);
+  }
+
+  let entrypoints = tsEntrypointFiles(root, module);
+  if (entrypoints.length === 0) {
+    entrypoints = [...moduleSourceFiles(module)];
+  }
+
+  const items = [];
+  for (const entrypoint of entrypoints) {
+    items.push(...collectTsPublicItems(root, entrypoint, module, directDefinitions, indexedSources, new Set()));
+  }
+
+  if (get(module, "path", "").startsWith("apps/")) {
+    for (const sourceFile of moduleSourceFiles(module)) {
+      items.push(...extractTsRoutes(readText(path.join(root, sourceFile)), sourceFile));
+    }
+  }
+
+  return uniqueItems(items);
+}
+
+function moduleIndexIsTypescript(moduleIndex) {
+  const workspace = get(moduleIndex, "workspace", {});
+  const workspaceType = get(workspace, "type", null);
+  if (workspaceType === "npm-workspaces" || workspaceType === "npm-package") {
+    return true;
+  }
+  const manifest = get(workspace, "manifest", null);
+  return typeof manifest === "string" && manifest.endsWith("package.json");
+}
+
+function buildSurface(root) {
+  const moduleIndex = loadModuleIndex(root);
+  const isTypescript = moduleIndexIsTypescript(moduleIndex);
+  const modules = [];
+
+  for (const layer of get(moduleIndex, "layers", [])) {
+    for (const module of get(layer, "modules", [])) {
+      const publicItems = isTypescript || get(module, "language", null) === "typescript"
+        ? extractTypescriptPublicItems(root, module)
+        : extractPublicItems(root, module);
+      modules.push({ name: module.name, items: publicItems });
+    }
+  }
+
+  return {
+    schemaVersion: 1,
+    kind: "public-surface",
+    generatedBy: ".ai/tools/generate-public-surface",
+    visibility: isTypescript ? "project-public" : "crate-external",
+    modules
+  };
+}
+
+// Matches Python json.dumps(indent=2) with ensure_ascii.
+function toJson(data) {
+  return JSON.stringify(data, null, 2)
+    .replace(/[\u007f-￿]/g, (character) => "\\u" + character.charCodeAt(0).toString(16).padStart(4, "0")) + "\n";
+}
+
+function parseArgs(argv) {
+  const args = { check: false, print: false, output: ".ai/generated/public-surface.json" };
+  const usageError = (message) => {
+    process.stderr.write(USAGE + "\ngenerate-public-surface: error: " + message + "\n");
+    process.exit(2);
+  };
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === "-h" || argument === "--help") {
+      process.stdout.write(USAGE + "\n\nGenerate .ai/generated/public-surface.json from Rust or TypeScript source files.\n");
+      process.exit(0);
+    } else if (argument === "--check") {
+      args.check = true;
+    } else if (argument === "--print") {
+      args.print = true;
+    } else if (argument === "--output" || argument.startsWith("--output=")) {
+      if (argument === "--output") {
+        if (index + 1 >= argv.length) {
+          usageError("argument --output: expected one argument");
+        }
+        index += 1;
+        args.output = argv[index];
+      } else {
+        args.output = argument.slice("--output=".length);
+      }
+    } else {
+      usageError("unrecognized arguments: " + argv.slice(index).join(" "));
+    }
+  }
+  return args;
+}
+
+function main(argv) {
+  const args = parseArgs(argv);
+  const root = path.resolve(path.dirname(fs.realpathSync(__filename)), "..", "..");
+  const generated = toJson(buildSurface(root));
+  const outputPath = path.join(root, args.output);
+  const displayPath = path.relative(root, outputPath).split(path.sep).join("/");
+
+  if (args.check) {
+    if (!isFile(outputPath)) {
+      process.stderr.write("Missing generated public surface: " + displayPath + "\n");
+      return 1;
+    }
+    if (readText(outputPath) !== generated) {
+      process.stderr.write("Stale generated public surface: " + displayPath + "\n");
+      return 1;
+    }
+    process.stdout.write("generate-public-surface check passed\n");
+    return 0;
+  }
+
+  if (args.print) {
+    process.stdout.write(generated);
+    return 0;
+  }
+
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, generated);
+  process.stdout.write("wrote " + displayPath + "\n");
+  return 0;
+}
+
+try {
+  process.exitCode = main(process.argv.slice(2));
+} catch (error) {
+  if (!(error instanceof ToolExit)) {
+    throw error;
+  }
+  process.stderr.write(error.message + "\n");
+  process.exitCode = 1;
+}

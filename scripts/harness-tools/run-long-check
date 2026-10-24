@@ -1,536 +1,613 @@
-#!/usr/bin/env python3
-"""Start one VCM long-running validation job with a worker-enforced ceiling.
+#!/usr/bin/env node
+"use strict";
+// Start one VCM long-running validation job with a worker-enforced ceiling.
+//
+// Usage:
+//   .ai/tools/run-long-check [--timeout <duration>] -- <command> [args...]
+//
+// Pass the validation executable and its arguments directly. Shell command-string
+// wrappers are rejected because they can hide the validation command's exit code.
+//
+// The command runs in a detached worker process group. The worker itself
+// enforces the job ceiling (--timeout, max 60m) and a supervision lease: when
+// no foreground watcher renews .ai/vcm/jobs/<job-id>/lease, the worker kills
+// the command process group and records the job as orphaned. Watch the job
+// with .ai/tools/watch-job in the same turn.
+//
+// Only one validation job may be active at a time.
 
-Usage:
-  .ai/tools/run-long-check [--timeout <duration>] -- <command> [args...]
+const childProcess = require("node:child_process");
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 
-Pass the validation executable and its arguments directly. Shell command-string
-wrappers are rejected because they can hide the validation command's exit code.
+const MAX_TIMEOUT_SECONDS = 60 * 60;
+const DEFAULT_TIMEOUT_SECONDS = MAX_TIMEOUT_SECONDS;
+const QUEUED_STALE_SECONDS = 60;
+const ACTIVE_STATUSES = new Set(["queued", "starting", "running"]);
+const DEFAULT_LEASE_START_GRACE_SECONDS = 300;
+const DEFAULT_LEASE_RENEW_GRACE_SECONDS = 120;
+const SHELL_EXECUTABLES = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish", "csh", "tcsh"]);
 
-The command runs in a detached worker process group. The worker itself
-enforces the job ceiling (--timeout, max 60m) and a supervision lease: when
-no foreground watcher renews .ai/vcm/jobs/<job-id>/lease, the worker kills
-the command process group and records the job as orphaned. Watch the job
-with .ai/tools/watch-job in the same turn.
+function scriptPath() {
+  return fs.realpathSync(__filename);
+}
 
-Only one validation job may be active at a time.
-"""
-import json
-import os
-import shutil
-import signal
-import subprocess
-import sys
-import time
-import uuid
-from datetime import datetime, timezone
-from pathlib import Path
+function rootDir() {
+  return path.resolve(path.dirname(scriptPath()), "..", "..");
+}
 
-MAX_TIMEOUT_SECONDS = 60 * 60
-DEFAULT_TIMEOUT_SECONDS = MAX_TIMEOUT_SECONDS
-QUEUED_STALE_SECONDS = 60
-ACTIVE_STATUSES = {"queued", "starting", "running"}
-DEFAULT_LEASE_START_GRACE_SECONDS = 300
-DEFAULT_LEASE_RENEW_GRACE_SECONDS = 120
-SHELL_EXECUTABLES = {"sh", "bash", "zsh", "dash", "ksh", "fish", "csh", "tcsh"}
+function jobsRoot() {
+  return path.join(rootDir(), ".ai/vcm/jobs");
+}
 
+function nowIso() {
+  return new Date().toISOString();
+}
 
-def root_dir() -> Path:
-    return Path(__file__).resolve().parents[2]
+function sortKeys(value) {
+  if (Array.isArray(value)) {
+    return value.map(sortKeys);
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortKeys(value[key])]));
+  }
+  return value;
+}
 
+function jsonText(data) {
+  return JSON.stringify(sortKeys(data), null, 2) + "\n";
+}
 
-def jobs_root() -> Path:
-    return root_dir() / ".ai/vcm/jobs"
+function writeJson(target, data) {
+  const temporary = target + ".tmp";
+  fs.writeFileSync(temporary, jsonText(data));
+  fs.renameSync(temporary, target);
+}
 
+function readOptionalJson(target) {
+  try {
+    return JSON.parse(fs.readFileSync(target, "utf8"));
+  } catch {
+    return null;
+  }
+}
 
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+function parseNumber(value) {
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(value)) {
+    throw new Error("invalid number: " + value);
+  }
+  return Number(value);
+}
 
+function parseDuration(value) {
+  const normalized = value.trim().toLowerCase();
+  if (normalized.endsWith("ms")) {
+    return parseNumber(normalized.slice(0, -2)) / 1000;
+  }
+  if (normalized.endsWith("s")) {
+    return parseNumber(normalized.slice(0, -1));
+  }
+  if (normalized.endsWith("m")) {
+    return parseNumber(normalized.slice(0, -1)) * 60;
+  }
+  if (normalized.endsWith("h")) {
+    return parseNumber(normalized.slice(0, -1)) * 3600;
+  }
+  return parseNumber(normalized);
+}
 
-def write_json(path: Path, data: dict) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
-    tmp.replace(path)
+function envSeconds(name, fallback) {
+  const raw = process.env[name];
+  if (!raw) {
+    return fallback;
+  }
+  try {
+    return Math.max(1, parseNumber(raw));
+  } catch {
+    return fallback;
+  }
+}
 
+function newJobId() {
+  const timestamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+  return timestamp + "-" + crypto.randomUUID().replace(/-/g, "").slice(0, 8);
+}
 
-def read_optional_json(path: Path) -> dict | None:
-    try:
-        return json.loads(path.read_text())
-    except (OSError, ValueError):
-        return None
-
-
-def parse_duration(value: str) -> float:
-    value = value.strip().lower()
-    if value.endswith("ms"):
-        return float(value[:-2]) / 1000
-    if value.endswith("s"):
-        return float(value[:-1])
-    if value.endswith("m"):
-        return float(value[:-1]) * 60
-    if value.endswith("h"):
-        return float(value[:-1]) * 3600
-    return float(value)
-
-
-def env_seconds(name: str, default: float) -> float:
-    raw = os.environ.get(name)
-    if not raw:
-        return default
-    try:
-        return max(1.0, float(raw))
-    except ValueError:
-        return default
-
-
-def job_id() -> str:
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    return f"{timestamp}-{uuid.uuid4().hex[:8]}"
-
-
-def shell_command_wrapper(command: list[str]) -> str | None:
-    if not command:
-        return None
-
-    candidates = range(len(command)) if Path(command[0]).name == "env" else range(1)
-    for index in candidates:
-        executable = Path(command[index]).name
-        if executable not in SHELL_EXECUTABLES:
-            continue
-        if any(
-            option.startswith("-")
-            and not option.startswith("--")
-            and "c" in option[1:]
-            for option in command[index + 1:]
-        ):
-            return executable
-    return None
-
-
-def process_exists(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-
-
-def process_group_exists(pgid: int) -> bool:
-    try:
-        os.killpg(pgid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-
-
-def wait_for_process_group_exit(process: subprocess.Popen, timeout: float) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        process.poll()
-        if not process_group_exists(process.pid):
-            return True
-        time.sleep(0.05)
-    process.poll()
-    return not process_group_exists(process.pid)
-
-
-def stop_command(process: subprocess.Popen) -> str:
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
-        mode = "process-group"
-    except ProcessLookupError:
-        return "not-running"
-    except PermissionError:
-        process.terminate()
-        mode = "process"
-
-    if wait_for_process_group_exit(process, 2):
-        return f"terminated-{mode}"
-
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
-        if process.poll() is None:
-            process.kill()
-    return f"killed-{mode}" if wait_for_process_group_exit(process, 2) else f"cleanup-incomplete-{mode}"
-
-
-def lease_age_seconds(lease_path: Path) -> float | None:
-    try:
-        return max(0.0, time.time() - lease_path.stat().st_mtime)
-    except OSError:
-        return None
-
-
-def lease_iso(lease_path: Path) -> str | None:
-    try:
-        mtime = lease_path.stat().st_mtime
-    except OSError:
-        return None
-    return datetime.fromtimestamp(mtime, timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def handoff_deadline(handoff_path: Path) -> tuple[float, str] | None:
-    handoff = read_optional_json(handoff_path)
-    if not handoff or not isinstance(handoff.get("nextWatchDueAt"), str):
-        return None
-    due_at = handoff["nextWatchDueAt"]
-    try:
-        deadline = datetime.fromisoformat(due_at.replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return None
-    return deadline, due_at
-
-
-def clear_handoff(handoff_path: Path) -> None:
-    try:
-        handoff_path.unlink()
-    except FileNotFoundError:
-        pass
-
-
-def mark_stale(status_path: Path, status: dict, reason: str) -> None:
-    stale = dict(status)
-    stale.update({"status": "stale", "finishedAt": now_iso(), "staleReason": reason})
-    write_json(status_path, stale)
-
-
-def find_active_job() -> dict | None:
-    root = jobs_root()
-    if not root.is_dir():
-        return None
-    for directory in sorted(root.iterdir()):
-        if not directory.is_dir():
-            continue
-        status_path = directory / "status.json"
-        status = read_optional_json(status_path)
-        if not status or status.get("status") not in ACTIVE_STATUSES:
-            continue
-        pid = status.get("processId") or status.get("workerPid")
-        if isinstance(pid, int):
-            if process_exists(pid):
-                return status
-            mark_stale(status_path, status, "job process not running")
-            continue
-        try:
-            age = time.time() - status_path.stat().st_mtime
-        except OSError:
-            continue
-        if age < QUEUED_STALE_SECONDS:
-            return status
-        mark_stale(status_path, status, "queued job never started")
-    return None
-
-
-def resolve_executable(executable: str) -> str:
-    root = root_dir()
-    if os.path.dirname(executable):
-        candidate = root / executable
-        if not candidate.exists():
-            raise ValueError(f"executable does not exist: {candidate}")
-        if not candidate.is_file():
-            raise ValueError(f"executable is not a regular file: {candidate}")
-        if not os.access(candidate, os.X_OK):
-            raise ValueError(f"file is not executable: {candidate}")
-        return str(candidate)
-
-    # Popen runs in the worktree root, including for relative PATH entries.
-    search_path = os.pathsep.join(str(root / entry) for entry in os.get_exec_path())
-    resolved = shutil.which(executable, path=search_path)
-    if resolved is None:
-        raise ValueError(f"executable not found or not executable on PATH: {executable}")
-    return resolved
-
-
-def record_launch_failure(directory: Path, status: dict, stage: str, error: OSError) -> str:
-    message = (
-        f"Unable to start {stage} for job {status['jobId']}: "
-        f"command={status['command'][0]!r}, cwd={root_dir()}: {error}"
-    )
-    with (directory / "stderr.log").open("a", encoding="utf-8") as stderr:
-        stderr.write(message + "\n")
-    write_json(
-        directory / "status.json",
-        {**status, "status": "failed", "finishedAt": now_iso(), "exitCode": None},
-    )
-    return message
-
-
-def start_job(command: list[str], timeout_seconds: float) -> int:
-    try:
-        executable = resolve_executable(command[0])
-    except (OSError, ValueError) as error:
-        print(f"error: cannot start {command[0]!r} in {root_dir()}: {error}", file=sys.stderr)
-        return 2
-    command = [executable, *command[1:]]
-
-    active = find_active_job()
-    if active:
-        print(
-            f"error: validation job {active.get('jobId')} is already {active.get('status')}",
-            file=sys.stderr,
-        )
-        print(f"watch it: .ai/tools/watch-job {active.get('jobId')}", file=sys.stderr)
-        print("VCM allows one validation job at a time.", file=sys.stderr)
-        return 3
-
-    job = job_id()
-    directory = jobs_root() / job
-    directory.mkdir(parents=True, exist_ok=False)
-
-    (directory / "command.json").write_text(
-        json.dumps(
-            {
-                "command": command,
-                "cwd": ".",
-                "timeoutSeconds": timeout_seconds,
-                "createdAt": now_iso(),
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n"
-    )
-    queued = {
-        "jobId": job,
-        "status": "queued",
-        "command": command,
-        "cwd": ".",
-        "timeoutSeconds": timeout_seconds,
-        "startedAt": None,
-        "finishedAt": None,
-        "exitCode": None,
-        "durationSeconds": None,
-        "workerPid": None,
-        "processId": None,
+function shellCommandWrapper(command) {
+  if (command.length === 0) {
+    return null;
+  }
+  const candidates = path.basename(command[0]) === "env" ? command.map((_, index) => index) : [0];
+  for (const index of candidates) {
+    const executable = path.basename(command[index]);
+    if (!SHELL_EXECUTABLES.has(executable)) {
+      continue;
     }
-    write_json(directory / "status.json", queued)
-
-    try:
-        subprocess.Popen(
-            [sys.executable, str(Path(__file__).resolve()), "--worker", job],
-            cwd=root_dir(),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-    except OSError as error:
-        message = record_launch_failure(directory, queued, "job worker", error)
-        print(f"error: {message}", file=sys.stderr)
-        return 1
-
-    print(f"job: {job}")
-    print(f"ceiling: {int(timeout_seconds)}s (worker-enforced)")
-    print(f"watch: .ai/tools/watch-job {job}")
-    return 0
-
-
-def run_worker(job: str) -> int:
-    directory = jobs_root() / job
-    command_path = directory / "command.json"
-    status_path = directory / "status.json"
-    lease_path = directory / "lease"
-    handoff_path = directory / "watch-handoff.json"
-
-    payload = json.loads(command_path.read_text())
-    command = payload["command"]
-    timeout_seconds = min(
-        float(payload.get("timeoutSeconds") or DEFAULT_TIMEOUT_SECONDS),
-        MAX_TIMEOUT_SECONDS,
-    )
-    start_grace = env_seconds("VCM_JOB_LEASE_START_GRACE_SECONDS", DEFAULT_LEASE_START_GRACE_SECONDS)
-    renew_grace = env_seconds("VCM_JOB_LEASE_RENEW_GRACE_SECONDS", DEFAULT_LEASE_RENEW_GRACE_SECONDS)
-
-    worker_started = time.time()
-    base = {
-        "jobId": job,
-        "command": command,
-        "cwd": ".",
-        "timeoutSeconds": timeout_seconds,
-        "workerPid": os.getpid(),
+    if (command.slice(index + 1).some((option) => option.startsWith("-") && !option.startsWith("--") && option.slice(1).includes("c"))) {
+      return executable;
     }
-    starting = {
-        **base,
-        "status": "starting",
-        "startedAt": None,
-        "finishedAt": None,
-        "exitCode": None,
-        "durationSeconds": None,
-        "processId": None,
-    }
-    write_json(status_path, starting)
+  }
+  return null;
+}
 
-    started = time.time()
-    started_at = now_iso()
-    verdict = None
-    with (directory / "stdout.log").open("wb") as stdout, (directory / "stderr.log").open("wb") as stderr:
-        try:
-            process = subprocess.Popen(
-                command,
-                cwd=root_dir(),
-                stdout=stdout,
-                stderr=stderr,
-                start_new_session=True,
-            )
-        except OSError as error:
-            record_launch_failure(directory, starting, "validation command", error)
-            return 1
-        running = {
-            **base,
-            "status": "running",
-            "startedAt": started_at,
-            "finishedAt": None,
-            "exitCode": None,
-            "durationSeconds": None,
-            "processId": process.pid,
+function signalExists(target) {
+  try {
+    process.kill(target, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function waitForProcessGroupExit(child, timeoutSeconds) {
+  const deadline = Date.now() + timeoutSeconds * 1000;
+  while (Date.now() < deadline) {
+    if (!signalExists(-child.pid)) {
+      return true;
+    }
+    await sleep(50);
+  }
+  return !signalExists(-child.pid);
+}
+
+async function stopCommand(child) {
+  let mode;
+  try {
+    process.kill(-child.pid, "SIGTERM");
+    mode = "process-group";
+  } catch (error) {
+    if (error.code === "ESRCH") {
+      return "not-running";
+    }
+    child.kill("SIGTERM");
+    mode = "process";
+  }
+
+  if (await waitForProcessGroupExit(child, 2)) {
+    return "terminated-" + mode;
+  }
+
+  try {
+    process.kill(-child.pid, "SIGKILL");
+  } catch {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+    }
+  }
+  return (await waitForProcessGroupExit(child, 2)) ? "killed-" + mode : "cleanup-incomplete-" + mode;
+}
+
+function leaseAgeSeconds(leasePath) {
+  try {
+    return Math.max(0, (Date.now() - fs.statSync(leasePath).mtimeMs) / 1000);
+  } catch {
+    return null;
+  }
+}
+
+function leaseIso(leasePath) {
+  try {
+    return new Date(fs.statSync(leasePath).mtimeMs).toISOString();
+  } catch {
+    return null;
+  }
+}
+
+function handoffDeadline(handoffPath) {
+  const handoff = readOptionalJson(handoffPath);
+  if (!handoff || typeof handoff.nextWatchDueAt !== "string") {
+    return null;
+  }
+  const deadline = Date.parse(handoff.nextWatchDueAt);
+  return Number.isNaN(deadline) ? null : { deadline, dueAt: handoff.nextWatchDueAt };
+}
+
+function clearHandoff(handoffPath) {
+  fs.rmSync(handoffPath, { force: true });
+}
+
+function markStale(statusPath, status, reason) {
+  writeJson(statusPath, { ...status, status: "stale", finishedAt: nowIso(), staleReason: reason });
+}
+
+function findActiveJob() {
+  const root = jobsRoot();
+  let entries;
+  try {
+    entries = fs.readdirSync(root, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const statusPath = path.join(root, entry.name, "status.json");
+    const status = readOptionalJson(statusPath);
+    if (!status || !ACTIVE_STATUSES.has(status.status)) {
+      continue;
+    }
+    const pid = status.processId || status.workerPid;
+    if (Number.isInteger(pid)) {
+      if (signalExists(pid)) {
+        return status;
+      }
+      markStale(statusPath, status, "job process not running");
+      continue;
+    }
+    let age;
+    try {
+      age = (Date.now() - fs.statSync(statusPath).mtimeMs) / 1000;
+    } catch {
+      continue;
+    }
+    if (age < QUEUED_STALE_SECONDS) {
+      return status;
+    }
+    markStale(statusPath, status, "queued job never started");
+  }
+  return null;
+}
+
+function isExecutableFile(candidate) {
+  try {
+    if (!fs.statSync(candidate).isFile()) {
+      return false;
+    }
+    fs.accessSync(candidate, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveExecutable(executable) {
+  const root = rootDir();
+  if (executable.includes("/")) {
+    const candidate = path.resolve(root, executable);
+    let stat;
+    try {
+      stat = fs.statSync(candidate);
+    } catch {
+      throw new Error("executable does not exist: " + candidate);
+    }
+    if (!stat.isFile()) {
+      throw new Error("executable is not a regular file: " + candidate);
+    }
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+    } catch {
+      throw new Error("file is not executable: " + candidate);
+    }
+    return candidate;
+  }
+
+  // The command runs in the worktree root, including for relative PATH entries.
+  const entries = (process.env.PATH || "/bin:/usr/bin").split(path.delimiter);
+  for (const entry of entries) {
+    const candidate = path.join(path.resolve(root, entry), executable);
+    if (isExecutableFile(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error("executable not found or not executable on PATH: " + executable);
+}
+
+// Python's subprocess fails with ENOEXEC for a file the kernel cannot execute,
+// while libuv falls back to /bin/sh on some platforms. Check the header so an
+// unrunnable validation file is always a launch failure.
+function assertExecutableFormat(executable) {
+  let header;
+  try {
+    const descriptor = fs.openSync(executable, "r");
+    header = Buffer.alloc(4);
+    fs.readSync(descriptor, header, 0, 4, 0);
+    fs.closeSync(descriptor);
+  } catch {
+    return;
+  }
+  const magic = header.readUInt32BE(0);
+  const known = header.subarray(0, 2).toString("latin1") === "#!"
+    || header.toString("latin1") === "\x7fELF"
+    || [0xfeedface, 0xfeedfacf, 0xcefaedfe, 0xcffaedfe, 0xcafebabe, 0xbebafeca].includes(magic)
+    || header.subarray(0, 2).toString("latin1") === "MZ";
+  if (!known) {
+    const error = new Error("Exec format error: '" + executable + "'");
+    error.code = "ENOEXEC";
+    throw error;
+  }
+}
+
+function launchErrorText(error) {
+  return (error.code ? error.code + ": " : "") + error.message;
+}
+
+function recordLaunchFailure(directory, status, stage, error) {
+  const message = "Unable to start " + stage + " for job " + status.jobId + ": "
+    + "command='" + status.command[0] + "', cwd=" + rootDir() + ": " + launchErrorText(error);
+  fs.appendFileSync(path.join(directory, "stderr.log"), message + "\n", "utf8");
+  writeJson(path.join(directory, "status.json"), { ...status, status: "failed", finishedAt: nowIso(), exitCode: null });
+  return message;
+}
+
+// Resolves with the spawned child once it starts, or rejects with its launch error.
+function spawnStarted(command, args, options) {
+  return new Promise((resolve, reject) => {
+    let child;
+    try {
+      child = childProcess.spawn(command, args, options);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    child.once("spawn", () => resolve(child));
+    child.once("error", reject);
+  });
+}
+
+async function startJob(commandArgs, timeoutSeconds) {
+  let executable;
+  try {
+    executable = resolveExecutable(commandArgs[0]);
+  } catch (error) {
+    process.stderr.write("error: cannot start '" + commandArgs[0] + "' in " + rootDir() + ": " + error.message + "\n");
+    return 2;
+  }
+  const command = [executable, ...commandArgs.slice(1)];
+
+  const active = findActiveJob();
+  if (active) {
+    process.stderr.write("error: validation job " + active.jobId + " is already " + active.status + "\n");
+    process.stderr.write("watch it: .ai/tools/watch-job " + active.jobId + "\n");
+    process.stderr.write("VCM allows one validation job at a time.\n");
+    return 3;
+  }
+
+  const job = newJobId();
+  const directory = path.join(jobsRoot(), job);
+  fs.mkdirSync(path.dirname(directory), { recursive: true });
+  fs.mkdirSync(directory);
+
+  fs.writeFileSync(path.join(directory, "command.json"), jsonText({
+    command,
+    cwd: ".",
+    timeoutSeconds,
+    createdAt: nowIso()
+  }));
+  const queued = {
+    jobId: job,
+    status: "queued",
+    command,
+    cwd: ".",
+    timeoutSeconds,
+    startedAt: null,
+    finishedAt: null,
+    exitCode: null,
+    durationSeconds: null,
+    workerPid: null,
+    processId: null
+  };
+  writeJson(path.join(directory, "status.json"), queued);
+
+  try {
+    const worker = await spawnStarted(process.execPath, [scriptPath(), "--worker", job], {
+      cwd: rootDir(),
+      stdio: "ignore",
+      detached: true
+    });
+    worker.unref();
+  } catch (error) {
+    const message = recordLaunchFailure(directory, queued, "job worker", error);
+    process.stderr.write("error: " + message + "\n");
+    return 1;
+  }
+
+  process.stdout.write("job: " + job + "\n");
+  process.stdout.write("ceiling: " + Math.trunc(timeoutSeconds) + "s (worker-enforced)\n");
+  process.stdout.write("watch: .ai/tools/watch-job " + job + "\n");
+  return 0;
+}
+
+function exitCodeOf(code, signal) {
+  if (code !== null && code !== undefined) {
+    return code;
+  }
+  return signal ? -(os.constants.signals[signal] || 1) : null;
+}
+
+async function runWorker(job) {
+  const directory = path.join(jobsRoot(), job);
+  const statusPath = path.join(directory, "status.json");
+  const leasePath = path.join(directory, "lease");
+  const handoffPath = path.join(directory, "watch-handoff.json");
+
+  const payload = JSON.parse(fs.readFileSync(path.join(directory, "command.json"), "utf8"));
+  const command = payload.command;
+  const timeoutSeconds = Math.min(Number(payload.timeoutSeconds) || DEFAULT_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS);
+  const startGrace = envSeconds("VCM_JOB_LEASE_START_GRACE_SECONDS", DEFAULT_LEASE_START_GRACE_SECONDS);
+  const renewGrace = envSeconds("VCM_JOB_LEASE_RENEW_GRACE_SECONDS", DEFAULT_LEASE_RENEW_GRACE_SECONDS);
+
+  const workerStarted = Date.now();
+  const base = { jobId: job, command, cwd: ".", timeoutSeconds, workerPid: process.pid };
+  const starting = {
+    ...base,
+    status: "starting",
+    startedAt: null,
+    finishedAt: null,
+    exitCode: null,
+    durationSeconds: null,
+    processId: null
+  };
+  writeJson(statusPath, starting);
+
+  const started = Date.now();
+  const startedAt = nowIso();
+  const stdout = fs.openSync(path.join(directory, "stdout.log"), "w");
+  const stderr = fs.openSync(path.join(directory, "stderr.log"), "w");
+  let child;
+  try {
+    assertExecutableFormat(command[0]);
+    child = await spawnStarted(command[0], command.slice(1), {
+      cwd: rootDir(),
+      stdio: ["ignore", stdout, stderr],
+      detached: true
+    });
+  } catch (error) {
+    fs.closeSync(stdout);
+    fs.closeSync(stderr);
+    recordLaunchFailure(directory, starting, "validation command", error);
+    return 1;
+  }
+  const exited = new Promise((resolve) => child.once("exit", (code, signal) => resolve(exitCodeOf(code, signal))));
+  let hasExited = false;
+  exited.then(() => {
+    hasExited = true;
+  });
+  writeJson(statusPath, {
+    ...base,
+    status: "running",
+    startedAt,
+    finishedAt: null,
+    exitCode: null,
+    durationSeconds: null,
+    processId: child.pid
+  });
+
+  let verdict = null;
+  while (!hasExited) {
+    if ((Date.now() - started) / 1000 >= timeoutSeconds) {
+      verdict = { kind: "timeout", extra: { processStopResult: await stopCommand(child) } };
+      break;
+    }
+
+    const leaseAge = leaseAgeSeconds(leasePath);
+    if (leaseAge === null) {
+      if ((Date.now() - workerStarted) / 1000 >= startGrace) {
+        verdict = {
+          kind: "orphaned",
+          extra: {
+            orphanReason: "no watcher within " + Math.trunc(startGrace) + "s",
+            lastWatchedAt: null,
+            processStopResult: await stopCommand(child)
+          }
+        };
+        break;
+      }
+    } else if (leaseAge >= renewGrace) {
+      const handoff = handoffDeadline(handoffPath);
+      if (handoff === null || Date.now() >= handoff.deadline) {
+        const extra = { lastWatchedAt: leaseIso(leasePath), processStopResult: await stopCommand(child) };
+        if (handoff !== null) {
+          extra.nextWatchDueAt = handoff.dueAt;
+          extra.orphanReason = "next watcher did not resume before handoff deadline";
+        } else {
+          extra.orphanReason = "lease not renewed for " + Math.trunc(leaseAge) + "s";
         }
-        write_json(status_path, running)
-
-        while True:
-            exit_code = process.poll()
-            if exit_code is not None:
-                break
-
-            if time.time() - started >= timeout_seconds:
-                stop_result = stop_command(process)
-                verdict = (
-                    "timeout",
-                    {"processStopResult": stop_result},
-                )
-                exit_code = process.wait()
-                break
-
-            lease_age = lease_age_seconds(lease_path)
-            if lease_age is None:
-                if time.time() - worker_started >= start_grace:
-                    stop_result = stop_command(process)
-                    verdict = (
-                        "orphaned",
-                        {
-                            "orphanReason": f"no watcher within {int(start_grace)}s",
-                            "lastWatchedAt": None,
-                            "processStopResult": stop_result,
-                        },
-                    )
-                    exit_code = process.wait()
-                    break
-            elif lease_age >= renew_grace:
-                handoff = handoff_deadline(handoff_path)
-                if handoff is not None and time.time() < handoff[0]:
-                    time.sleep(1)
-                    continue
-
-                stop_result = stop_command(process)
-                extra = {
-                    "lastWatchedAt": lease_iso(lease_path),
-                    "processStopResult": stop_result,
-                }
-                if handoff is not None:
-                    extra.update({
-                        "nextWatchDueAt": handoff[1],
-                        "orphanReason": "next watcher did not resume before handoff deadline",
-                    })
-                else:
-                    extra["orphanReason"] = f"lease not renewed for {int(lease_age)}s"
-                verdict = ("orphaned", extra)
-                exit_code = process.wait()
-                break
-
-            time.sleep(1)
-
-    duration = round(time.time() - started, 3)
-    clear_handoff(handoff_path)
-    current = read_optional_json(status_path) or {}
-    if current.get("status") in {"timeout", "orphaned", "stale"}:
-        current["processExitCode"] = exit_code
-        current["processFinishedAt"] = now_iso()
-        current["processDurationSeconds"] = duration
-        write_json(status_path, current)
-        return 0
-
-    final = {
-        **base,
-        "startedAt": started_at,
-        "finishedAt": now_iso(),
-        "durationSeconds": duration,
-        "processId": process.pid,
+        verdict = { kind: "orphaned", extra };
+        break;
+      }
     }
-    if verdict is None:
-        final.update({"status": "success" if exit_code == 0 else "failed", "exitCode": exit_code})
-    else:
-        kind, extra = verdict
-        final.update({"status": kind, "exitCode": None, "processExitCode": exit_code, **extra})
-    write_json(status_path, final)
-    return 0
 
+    await Promise.race([sleep(1000), exited]);
+  }
+  const exitCode = await exited;
+  fs.closeSync(stdout);
+  fs.closeSync(stderr);
 
-def main() -> int:
-    argv = sys.argv[1:]
-    if len(argv) >= 2 and argv[0] == "--worker":
-        return run_worker(argv[1])
+  const duration = Math.round(Date.now() - started) / 1000;
+  clearHandoff(handoffPath);
+  const current = readOptionalJson(statusPath) || {};
+  if (["timeout", "orphaned", "stale"].includes(current.status)) {
+    writeJson(statusPath, {
+      ...current,
+      processExitCode: exitCode,
+      processFinishedAt: nowIso(),
+      processDurationSeconds: duration
+    });
+    return 0;
+  }
 
-    timeout_seconds = DEFAULT_TIMEOUT_SECONDS
-    index = 0
-    while index < len(argv) and argv[index] != "--":
-        arg = argv[index]
-        raw = None
-        if arg == "--timeout":
-            if index + 1 >= len(argv):
-                print("error: --timeout needs a duration", file=sys.stderr)
-                return 2
-            raw = argv[index + 1]
-            index += 2
-        elif arg.startswith("--timeout="):
-            raw = arg[len("--timeout="):]
-            index += 1
-        else:
-            print(f"error: unknown option: {arg}", file=sys.stderr)
-            return 2
-        try:
-            timeout_seconds = parse_duration(raw)
-        except ValueError:
-            print(f"error: invalid duration: {raw}", file=sys.stderr)
-            return 2
+  const final = { ...base, startedAt, finishedAt: nowIso(), durationSeconds: duration, processId: child.pid };
+  if (verdict === null) {
+    Object.assign(final, { status: exitCode === 0 ? "success" : "failed", exitCode });
+  } else {
+    Object.assign(final, { status: verdict.kind, exitCode: null, processExitCode: exitCode, ...verdict.extra });
+  }
+  writeJson(statusPath, final);
+  return 0;
+}
 
-    if index >= len(argv) or argv[index] != "--" or index + 1 >= len(argv):
-        print(
-            "Usage: .ai/tools/run-long-check [--timeout <duration>] -- <command> [args...]",
-            file=sys.stderr,
-        )
-        return 2
-    if timeout_seconds <= 0:
-        print("error: timeout must be positive", file=sys.stderr)
-        return 2
-    if timeout_seconds > MAX_TIMEOUT_SECONDS:
-        print(
-            "error: timeout exceeds maximum 60m; split the work or get user approval",
-            file=sys.stderr,
-        )
-        return 2
+async function main(argv) {
+  if (argv.length >= 2 && argv[0] === "--worker") {
+    return runWorker(argv[1]);
+  }
 
-    command = argv[index + 1:]
-    shell_wrapper = shell_command_wrapper(command)
-    if shell_wrapper:
-        print(
-            f"error: {shell_wrapper} command-string wrappers are not allowed; "
-            "pass the validation executable and its arguments directly so its "
-            "exit code remains authoritative",
-            file=sys.stderr,
-        )
-        print(
-            "run-long-check already captures stdout/stderr; do not add pipelines "
-            "or trailing commands to trim output",
-            file=sys.stderr,
-        )
-        return 2
+  let timeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
+  let index = 0;
+  while (index < argv.length && argv[index] !== "--") {
+    const argument = argv[index];
+    let raw;
+    if (argument === "--timeout") {
+      if (index + 1 >= argv.length) {
+        process.stderr.write("error: --timeout needs a duration\n");
+        return 2;
+      }
+      raw = argv[index + 1];
+      index += 2;
+    } else if (argument.startsWith("--timeout=")) {
+      raw = argument.slice("--timeout=".length);
+      index += 1;
+    } else {
+      process.stderr.write("error: unknown option: " + argument + "\n");
+      return 2;
+    }
+    try {
+      timeoutSeconds = parseDuration(raw);
+    } catch {
+      process.stderr.write("error: invalid duration: " + raw + "\n");
+      return 2;
+    }
+  }
 
-    return start_job(command, timeout_seconds)
+  if (index >= argv.length || argv[index] !== "--" || index + 1 >= argv.length) {
+    process.stderr.write("Usage: .ai/tools/run-long-check [--timeout <duration>] -- <command> [args...]\n");
+    return 2;
+  }
+  if (timeoutSeconds <= 0) {
+    process.stderr.write("error: timeout must be positive\n");
+    return 2;
+  }
+  if (timeoutSeconds > MAX_TIMEOUT_SECONDS) {
+    process.stderr.write("error: timeout exceeds maximum 60m; split the work or get user approval\n");
+    return 2;
+  }
 
+  const command = argv.slice(index + 1);
+  const shellWrapper = shellCommandWrapper(command);
+  if (shellWrapper) {
+    process.stderr.write(
+      "error: " + shellWrapper + " command-string wrappers are not allowed; "
+      + "pass the validation executable and its arguments directly so its "
+      + "exit code remains authoritative\n"
+    );
+    process.stderr.write(
+      "run-long-check already captures stdout/stderr; do not add pipelines "
+      + "or trailing commands to trim output\n"
+    );
+    return 2;
+  }
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+  return startJob(command, timeoutSeconds);
+}
+
+if (require.main === module) {
+  main(process.argv.slice(2)).then((code) => process.exit(code));
+} else {
+  module.exports = { startJob };
+}

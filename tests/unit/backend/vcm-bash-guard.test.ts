@@ -13,7 +13,7 @@ interface GuardPayload {
 
 async function runGuard(payload: GuardPayload, role = "coder"): Promise<string | undefined> {
   const reason = await new Promise<string>((resolve, reject) => {
-    const child = execFile("python3", [guardPath], {
+    const child = execFile(process.execPath, [guardPath], {
       env: { ...process.env, VCM_ROLE: role }
     }, (error, stdout) => {
       if (error) {

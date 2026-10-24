@@ -1,660 +1,781 @@
-#!/usr/bin/env python3
-"""Request a VCM-managed Gate Review Gate."""
-import argparse
-import hashlib
-import json
-import os
-import re
-import subprocess
-import sys
-import urllib.error
-import urllib.parse
-import urllib.request
-import uuid
-from datetime import datetime, timezone
-from pathlib import Path
+#!/usr/bin/env node
+"use strict";
+// Request a VCM-managed Gate Review Gate.
 
-
-GATES = ("architecture-plan", "validation-adequacy", "code-diff")
-CODE_DIFF_SOURCES = ("coder", "architect-debug", "architect-diagnosis")
-HARNESS_COMMIT_PREFIX = "[VCM Harness] "
-LATEST_REPORTS = {
-    "architecture-plan": ".ai/vcm/gate-reviews/architecture-plan-review.md",
-    "validation-adequacy": ".ai/vcm/gate-reviews/validation-adequacy-review.md",
-    "code-diff": ".ai/vcm/gate-reviews/code-diff-review.md",
+function parseToolArguments(argv, spec) {
+  const prog = require("node:path").basename(process.argv[1] || "tool");
+  const options = spec.options || {};
+  const positionals = spec.positionals || [];
+  const usage = "usage: " + prog
+    + Object.keys(options).map((name) => " [" + name + (options[name].flag ? "" : " " + name.slice(2).toUpperCase()) + "]").join("")
+    + positionals.map((name) => " " + name).join("");
+  const fail = (message) => {
+    process.stderr.write(usage + "\n" + prog + ": error: " + message + "\n");
+    process.exit(2);
+  };
+  const values = {};
+  for (const [name, option] of Object.entries(options)) {
+    values[option.dest] = option.append ? [] : option.flag ? false : option.default;
+  }
+  const remaining = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === "-h" || argument === "--help") {
+      process.stdout.write(usage + "\n\n" + (spec.description || "") + "\n");
+      process.exit(0);
+    }
+    if (!argument.startsWith("--") || argument === "--") {
+      remaining.push(argument);
+      continue;
+    }
+    const separator = argument.indexOf("=");
+    const name = separator >= 0 ? argument.slice(0, separator) : argument;
+    const option = options[name];
+    if (!option) {
+      fail("unrecognized arguments: " + argument);
+    }
+    if (option.flag) {
+      values[option.dest] = true;
+      continue;
+    }
+    let value;
+    if (separator >= 0) {
+      value = argument.slice(separator + 1);
+    } else {
+      if (index + 1 >= argv.length) {
+        fail("argument " + name + ": expected one argument");
+      }
+      index += 1;
+      value = argv[index];
+    }
+    if (option.choices && !option.choices.includes(value)) {
+      fail("argument " + name + ": invalid choice: '" + value + "' (choose from " + option.choices.map((choice) => "'" + choice + "'").join(", ") + ")");
+    }
+    if (option.append) {
+      values[option.dest].push(value);
+    } else {
+      values[option.dest] = value;
+    }
+  }
+  if (remaining.length > positionals.length) {
+    fail("unrecognized arguments: " + remaining.slice(positionals.length).join(" "));
+  }
+  positionals.forEach((name, index) => {
+    values[name] = remaining[index];
+  });
+  const missing = [
+    ...positionals.filter((name) => values[name] === undefined),
+    ...Object.entries(options).filter(([, option]) => option.required && values[option.dest] === undefined).map(([name]) => name)
+  ];
+  if (missing.length > 0) {
+    fail("the following arguments are required: " + missing.join(", "));
+  }
+  return values;
 }
-SOURCE_ARTIFACTS = {
-    "architecture-plan": [
-        ".ai/vcm/handoffs/architecture-brief.md",
-        ".ai/vcm/handoffs/architecture-evidence.md",
-        ".ai/vcm/handoffs/architecture-plan.md",
-    ],
-    "validation-adequacy": [
-        ".ai/vcm/handoffs/architecture-plan.md",
-        ".ai/vcm/handoffs/test-report.md",
-        "docs/TESTING.md",
-    ],
-    "code-diff": [
-        ".ai/vcm/handoffs/test-report.md",
-        ".ai/vcm/gate-reviews/validation-adequacy-review.md",
-    ],
-}
-CODE_DIFF_SOURCE_ARTIFACTS = {
-    "coder": [
-        ".ai/vcm/handoffs/architecture-plan.md",
-        ".ai/vcm/handoffs/coder-completion.md",
-    ],
-    "architect-debug": [
-        ".ai/vcm/handoffs/role-commands/architect.md",
-        ".ai/vcm/handoffs/architect-debug.md",
-    ],
-    "architect-diagnosis": [".ai/vcm/handoffs/architecture-diagnosis.md"],
-}
-CORE_INPUT_ARTIFACTS = {
-    "architecture-plan": ".ai/vcm/handoffs/architecture-plan.md",
-    "validation-adequacy": ".ai/vcm/handoffs/test-report.md",
+
+async function postJson(url, body, timeoutMs) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs)
+  });
+  return { ok: response.ok, status: response.status, statusText: response.statusText, text: await response.text() };
 }
 
+function networkErrorText(error) {
+  const cause = error && error.cause;
+  return (cause && (cause.message || cause.code)) || (error && error.message) || String(error);
+}
+const crypto = require("node:crypto");
+const childProcess = require("node:child_process");
+const fs = require("node:fs");
+const path = require("node:path");
 
-def root_dir() -> Path:
-    return Path(__file__).resolve().parents[2]
+const GATES = ["architecture-plan", "validation-adequacy", "code-diff"];
+const CODE_DIFF_SOURCES = ["coder", "architect-debug", "architect-diagnosis"];
+const HARNESS_COMMIT_PREFIX = "[VCM Harness] ";
+const LATEST_REPORTS = {
+  "architecture-plan": ".ai/vcm/gate-reviews/architecture-plan-review.md",
+  "validation-adequacy": ".ai/vcm/gate-reviews/validation-adequacy-review.md",
+  "code-diff": ".ai/vcm/gate-reviews/code-diff-review.md"
+};
+const SOURCE_ARTIFACTS = {
+  "architecture-plan": [
+    ".ai/vcm/handoffs/architecture-brief.md",
+    ".ai/vcm/handoffs/architecture-evidence.md",
+    ".ai/vcm/handoffs/architecture-plan.md"
+  ],
+  "validation-adequacy": [
+    ".ai/vcm/handoffs/architecture-plan.md",
+    ".ai/vcm/handoffs/test-report.md",
+    "docs/TESTING.md"
+  ],
+  "code-diff": [
+    ".ai/vcm/handoffs/test-report.md",
+    ".ai/vcm/gate-reviews/validation-adequacy-review.md"
+  ]
+};
+const CODE_DIFF_SOURCE_ARTIFACTS = {
+  "coder": [
+    ".ai/vcm/handoffs/architecture-plan.md",
+    ".ai/vcm/handoffs/coder-completion.md"
+  ],
+  "architect-debug": [
+    ".ai/vcm/handoffs/role-commands/architect.md",
+    ".ai/vcm/handoffs/architect-debug.md"
+  ],
+  "architect-diagnosis": [".ai/vcm/handoffs/architecture-diagnosis.md"]
+};
+const CORE_INPUT_ARTIFACTS = {
+  "architecture-plan": ".ai/vcm/handoffs/architecture-plan.md",
+  "validation-adequacy": ".ai/vcm/handoffs/test-report.md"
+};
+const MAX_COMMAND_OUTPUT_BYTES = 1024 * 1024 * 1024;
 
+function rootDir() {
+  return path.resolve(path.dirname(fs.realpathSync(__filename)), "..", "..");
+}
 
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+function nowIso() {
+  return new Date().toISOString();
+}
 
+function isObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
 
-def print_result(status: str, **fields: str) -> None:
-    print(status)
-    for key, value in fields.items():
-        if value is not None:
-            print(f"{key}={value}")
+// Python truthiness, so empty lists and objects in the index count as false.
+function truthy(value) {
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+  if (isObject(value)) {
+    return Object.keys(value).length > 0;
+  }
+  return Boolean(value);
+}
 
+function unique(values) {
+  return [...new Set(values)];
+}
 
-def call_vcm_api(gate: str, source: str | None) -> int | None:
-    base_url = os.environ.get("VCM_API_URL")
-    task_slug = os.environ.get("VCM_TASK_SLUG")
-    if not base_url or not task_slug:
-        return None
+function splitLines(text) {
+  return text ? text.split(/\r\n|[\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]/) : [];
+}
 
-    url = (
-        base_url.rstrip("/")
-        + "/api/tasks/"
-        + urllib.parse.quote(task_slug, safe="")
-        + "/gate-review/"
-        + urllib.parse.quote(gate, safe="")
-        + "/request"
-    )
-    request = urllib.request.Request(
-        url,
-        data=json.dumps({"codeDiffSource": source}).encode("utf-8"),
-        method="POST",
-        headers={"content-type": "application/json"},
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as error:
-        try:
-            payload = json.loads(error.read().decode("utf-8"))
-            reason = payload.get("error", {}).get("message", str(error))
-        except Exception:
-            reason = str(error)
-        print_result("failed_to_start", gate=gate, reason=reason)
-        return 2
-    except Exception as error:
-        print_result("failed_to_start", gate=gate, reason=str(error))
-        return 2
+function printResult(status, fields) {
+  const lines = [status];
+  for (const [key, value] of Object.entries(fields || {})) {
+    if (value !== null && value !== undefined) {
+      lines.push(key + "=" + (value === true ? "True" : value === false ? "False" : String(value)));
+    }
+  }
+  process.stdout.write(lines.join("\n") + "\n");
+}
 
-    record = payload.get("record", {}) if isinstance(payload, dict) else {}
-    print_result(
-        payload.get("status", "failed_to_start"),
-        gate=gate,
-        request=record.get("requestPath"),
-        report=record.get("reportPath"),
-        message=payload.get("message"),
-    )
-    return 0
+function quoteSegment(value) {
+  return encodeURIComponent(value).replace(/[!'()*]/g, (character) => "%" + character.charCodeAt(0).toString(16).toUpperCase());
+}
 
+async function callVcmApi(gate, source) {
+  const baseUrl = process.env.VCM_API_URL;
+  const taskSlug = process.env.VCM_TASK_SLUG;
+  if (!baseUrl || !taskSlug) {
+    return null;
+  }
 
-def read_json(path: Path) -> dict:
-    try:
-        return json.loads(path.read_text())
-    except (OSError, ValueError):
-        return {"version": 1, "enabled": False, "activeGate": None, "gates": {}}
+  const url = baseUrl.replace(/\/+$/, "")
+    + "/api/tasks/" + quoteSegment(taskSlug)
+    + "/gate-review/" + quoteSegment(gate)
+    + "/request";
+  let response;
+  try {
+    response = await postJson(url, { codeDiffSource: source ?? null }, 10000);
+  } catch (error) {
+    printResult("failed_to_start", { gate, reason: networkErrorText(error) });
+    return 2;
+  }
+  if (!response.ok) {
+    let reason = "HTTP Error " + response.status + ": " + response.statusText;
+    try {
+      const payload = JSON.parse(response.text);
+      const error = isObject(payload) && "error" in payload ? payload.error : {};
+      if (isObject(error) && "message" in error) {
+        reason = error.message;
+      }
+    } catch {
+      // Keep the HTTP status message when the error body is not JSON.
+    }
+    printResult("failed_to_start", { gate, reason });
+    return 2;
+  }
+  let payload;
+  try {
+    payload = JSON.parse(response.text);
+  } catch (error) {
+    printResult("failed_to_start", { gate, reason: error.message });
+    return 2;
+  }
+  payload = isObject(payload) ? payload : {};
+  const record = isObject(payload.record) ? payload.record : {};
+  printResult(payload.status ?? "failed_to_start", {
+    gate,
+    request: record.requestPath,
+    report: record.reportPath,
+    message: payload.message
+  });
+  return 0;
+}
 
+function readJson(target) {
+  try {
+    const data = JSON.parse(fs.readFileSync(target, "utf8"));
+    if (isObject(data)) {
+      return data;
+    }
+  } catch {
+    // Fall through to the empty index.
+  }
+  return { version: 1, enabled: false, activeGate: null, gates: {} };
+}
 
-def write_json(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
-    tmp.replace(path)
+function sortKeys(value) {
+  if (Array.isArray(value)) {
+    return value.map(sortKeys);
+  }
+  if (isObject(value)) {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortKeys(value[key])]));
+  }
+  return value;
+}
 
+// Matches Python json.dumps(indent=2, sort_keys=True) with ensure_ascii.
+function writeJson(target, data) {
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  const temporary = target + ".tmp";
+  const text = JSON.stringify(sortKeys(data), null, 2)
+    .replace(/[\u007f-\uffff]/g, (character) => "\\u" + character.charCodeAt(0).toString(16).padStart(4, "0"));
+  fs.writeFileSync(temporary, text + "\n");
+  fs.renameSync(temporary, target);
+}
 
-def command_output(root: Path, command: list[str]) -> bytes:
-    result = subprocess.run(
-        command,
-        cwd=root,
-        check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-    )
-    return result.stdout if result.returncode == 0 else b""
+function run(root, command, stdout) {
+  return childProcess.spawnSync(command[0], command.slice(1), {
+    cwd: root,
+    stdio: ["inherit", stdout, "ignore"],
+    maxBuffer: MAX_COMMAND_OUTPUT_BYTES
+  });
+}
 
+function commandOutput(root, command) {
+  const result = run(root, command, "pipe");
+  return result.status === 0 && result.stdout ? result.stdout : Buffer.alloc(0);
+}
 
-def command_text(root: Path, command: list[str]) -> str:
-    return command_output(root, command).decode("utf-8", errors="replace").strip()
+function commandText(root, command) {
+  return commandOutput(root, command).toString("utf8").trim();
+}
 
+function isAncestor(root, ancestor, descendant) {
+  return run(root, ["git", "merge-base", "--is-ancestor", String(ancestor), String(descendant)], "ignore").status === 0;
+}
 
-def is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
-    result = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
-        cwd=root,
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    return result.returncode == 0
+function codeDiffRange(root, gateRecord) {
+  const head = commandText(root, ["git", "rev-parse", "HEAD"]);
+  if (!head) {
+    return [null, null];
+  }
 
+  let base;
+  if (
+    gateRecord.status === "completed"
+    && gateRecord.decision === "request_changes"
+    && truthy(gateRecord.baseCommit)
+    && isAncestor(root, gateRecord.baseCommit, head)
+  ) {
+    base = gateRecord.baseCommit;
+  } else if (
+    gateRecord.status === "failed"
+    && truthy(gateRecord.baseCommit)
+    && isAncestor(root, gateRecord.baseCommit, head)
+  ) {
+    base = gateRecord.baseCommit;
+  } else if (
+    gateRecord.status === "completed"
+    && gateRecord.decision === "approve"
+    && truthy(gateRecord.headCommit)
+    && isAncestor(root, gateRecord.headCommit, head)
+  ) {
+    base = gateRecord.headCommit;
+  } else if (
+    gateRecord.status === "not_required"
+    && truthy(gateRecord.headCommit)
+    && isAncestor(root, gateRecord.headCommit, head)
+  ) {
+    base = gateRecord.headCommit;
+  } else {
+    base = (process.env.VCM_BASE_COMMIT || "").trim();
+    if (!base || !isAncestor(root, base, head)) {
+      const upstream = commandText(root, ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]);
+      base = upstream ? commandText(root, ["git", "merge-base", "HEAD", upstream]) : "";
+    }
+  }
 
-def code_diff_range(root: Path, gate_record: dict):
-    head = command_text(root, ["git", "rev-parse", "HEAD"])
-    if not head:
-        return (None, None)
+  return [base || head, head];
+}
 
-    base = None
-    if (
-        gate_record.get("status") == "completed"
-        and gate_record.get("decision") == "request_changes"
-        and gate_record.get("baseCommit")
-        and is_ancestor(root, gate_record["baseCommit"], head)
-    ):
-        base = gate_record["baseCommit"]
-    elif (
-        gate_record.get("status") == "failed"
-        and gate_record.get("baseCommit")
-        and is_ancestor(root, gate_record["baseCommit"], head)
-    ):
-        base = gate_record["baseCommit"]
-    elif (
-        gate_record.get("status") == "completed"
-        and gate_record.get("decision") == "approve"
-        and gate_record.get("headCommit")
-        and is_ancestor(root, gate_record["headCommit"], head)
-    ):
-        base = gate_record["headCommit"]
-    elif (
-        gate_record.get("status") == "not_required"
-        and gate_record.get("headCommit")
-        and is_ancestor(root, gate_record["headCommit"], head)
-    ):
-        base = gate_record["headCommit"]
-    else:
-        base = os.environ.get("VCM_BASE_COMMIT", "").strip()
-        if not base or not is_ancestor(root, base, head):
-            upstream = command_text(root, ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])
-            base = command_text(root, ["git", "merge-base", "HEAD", upstream]) if upstream else ""
+function normalizeCodeDiffSources(gateRecord) {
+  const sources = gateRecord.codeDiffSources;
+  const normalized = Array.isArray(sources) ? sources.filter((item) => CODE_DIFF_SOURCES.includes(item)) : [];
+  const source = gateRecord.codeDiffSource;
+  if (normalized.length === 0 && CODE_DIFF_SOURCES.includes(source)) {
+    normalized.push(source);
+  }
+  return unique(normalized);
+}
 
-    return (base or head, head)
+function codeDiffSources(gateRecord, source, codeDiff) {
+  if (!CODE_DIFF_SOURCES.includes(source)) {
+    return [];
+  }
+  const continuingRecordedRange = (gateRecord.baseCommit ?? null) === (codeDiff.baseCommit ?? null)
+    && (
+      (gateRecord.status === "completed" && gateRecord.decision === "request_changes")
+      || gateRecord.status === "failed"
+    );
+  const previous = continuingRecordedRange ? normalizeCodeDiffSources(gateRecord) : [];
+  return unique([...previous, source]);
+}
 
+function sourceArtifacts(gate, sources) {
+  if (gate !== "code-diff") {
+    return SOURCE_ARTIFACTS[gate];
+  }
+  return unique([
+    ...SOURCE_ARTIFACTS["code-diff"],
+    ...(sources || []).flatMap((source) => CODE_DIFF_SOURCE_ARTIFACTS[source] || [])
+  ]);
+}
 
-def normalize_code_diff_sources(gate_record: dict) -> list[str]:
-    sources = gate_record.get("codeDiffSources")
-    normalized = [item for item in sources if item in CODE_DIFF_SOURCES] if isinstance(sources, list) else []
-    source = gate_record.get("codeDiffSource")
-    if not normalized and source in CODE_DIFF_SOURCES:
-        normalized.append(source)
-    return list(dict.fromkeys(normalized))
+function reviewableCodeDiff(root, base, head) {
+  const allCommits = splitLines(commandText(root, ["git", "log", "--oneline", "--reverse", base + ".." + head]));
+  if (allCommits.length === 0) {
+    return null;
+  }
+  const commits = [];
+  const commitShas = [];
+  const changedFiles = [];
+  const diffStats = [];
+  const patches = [];
+  for (const line of allCommits) {
+    const separator = line.indexOf(" ");
+    if (separator >= 0 && line.slice(separator + 1).startsWith(HARNESS_COMMIT_PREFIX)) {
+      continue;
+    }
+    const commitSha = line.trim().split(/\s+/)[0];
+    commits.push(line);
+    commitShas.push(commitSha);
+    for (const changedFile of splitLines(commandText(root, ["git", "show", "--format=", "--name-only", "--find-renames", commitSha]))) {
+      if (changedFile && !changedFiles.includes(changedFile)) {
+        changedFiles.push(changedFile);
+      }
+    }
+    const diffStat = commandText(root, ["git", "show", "--format=", "--stat", "--find-renames", commitSha]);
+    if (diffStat) {
+      diffStats.push(diffStat);
+    }
+    const patch = commandOutput(root, ["git", "show", "--format=", "--binary", "--find-renames", commitSha]);
+    if (patch.length > 0) {
+      patches.push(patch);
+    }
+  }
+  const joined = Buffer.concat(patches.flatMap((patch, index) => index === 0 ? [patch] : [Buffer.from("\n"), patch]));
+  return {
+    baseCommit: base,
+    headCommit: head,
+    commits,
+    commitShas,
+    changedFiles,
+    diffStat: diffStats.join("\n"),
+    diffHash: crypto.createHash("sha256").update(joined).digest("hex")
+  };
+}
 
+function isFile(target) {
+  try {
+    return fs.statSync(target).isFile();
+  } catch {
+    return false;
+  }
+}
 
-def code_diff_sources(gate_record: dict, source: str | None, code_diff: dict) -> list[str]:
-    if source not in CODE_DIFF_SOURCES:
-        return []
-    continuing_recorded_range = (
-        gate_record.get("baseCommit") == code_diff.get("baseCommit")
-        and (
-            (gate_record.get("status") == "completed" and gate_record.get("decision") == "request_changes")
-            or gate_record.get("status") == "failed"
-        )
-    )
-    previous = normalize_code_diff_sources(gate_record) if continuing_recorded_range else []
-    return list(dict.fromkeys([*previous, source]))
+function hashEvidence(root, digest, untrackedLabel, pathspec, extraCommands) {
+  for (const [name, command] of extraCommands) {
+    digest.update(name);
+    digest.update(commandOutput(root, command));
+  }
+  for (const relative of splitLines(commandText(root, ["git", "ls-files", "--others", "--exclude-standard", ...pathspec]))) {
+    digest.update(untrackedLabel);
+    digest.update(relative);
+    digest.update(commandOutput(root, ["git", "hash-object", "--", relative]));
+  }
+}
 
+function inputHash(root, gate, sources, codeDiff) {
+  const digest = crypto.createHash("sha256");
+  const coreArtifact = CORE_INPUT_ARTIFACTS[gate];
+  if (coreArtifact) {
+    digest.update(coreArtifact);
+    digest.update(fs.readFileSync(path.join(root, coreArtifact)));
+  }
 
-def source_artifacts(gate: str, sources: list[str] | None) -> list[str]:
-    if gate != "code-diff":
-        return SOURCE_ARTIFACTS[gate]
-    return list(dict.fromkeys([
-        *SOURCE_ARTIFACTS["code-diff"],
-        *(
-        artifact
-        for source in (sources or [])
-        for artifact in CODE_DIFF_SOURCE_ARTIFACTS.get(source, [])
-        ),
-    ]))
+  const common = gate === "code-diff" ? [] : [
+    "CLAUDE.md",
+    ".claude/agents/architect.md",
+    ".claude/agents/coder.md",
+    ".claude/agents/reviewer.md",
+    ".claude/agents/tester.md",
+    ".claude/skills/vcm-gate-review/SKILL.md",
+    ".ai/tools/request-gate-review",
+    "docs/CODING_STANDARDS.md"
+  ];
+  const inputs = unique([...common, ...sourceArtifacts(gate, sources)].filter((relative) => relative !== coreArtifact));
+  for (const relative of inputs) {
+    const target = path.join(root, relative);
+    digest.update(relative);
+    digest.update(isFile(target) ? fs.readFileSync(target) : "<missing>");
+  }
+  if (gate === "architecture-plan") {
+    const pathspec = ["--", ".", ":(exclude).ai/vcm/**"];
+    hashEvidence(root, digest, "untracked", pathspec, [
+      ["head", ["git", "rev-parse", "HEAD"]],
+      ["workingDiff", ["git", "diff", "--binary", ...pathspec]],
+      ["stagedDiff", ["git", "diff", "--cached", "--binary", ...pathspec]]
+    ]);
+  }
+  if (gate === "validation-adequacy") {
+    const pathspec = ["--", ".", ":(exclude).ai/vcm/**", ":(exclude)docs/**"];
+    hashEvidence(root, digest, "untrackedEvidence", pathspec, [
+      ["trackedEvidence", ["git", "ls-files", "-s", ...pathspec]],
+      ["workingEvidence", ["git", "diff", "--binary", ...pathspec]],
+      ["stagedEvidence", ["git", "diff", "--cached", "--binary", ...pathspec]]
+    ]);
+  }
+  if (gate === "code-diff") {
+    digest.update((sources || []).join("\n") || "<missing>");
+    if (truthy(codeDiff)) {
+      digest.update((codeDiff.commits || []).join("\n"));
+      digest.update((codeDiff.changedFiles || []).join("\n"));
+      digest.update(codeDiff.diffHash || "");
+    }
+  }
+  return digest.digest("hex");
+}
 
+function coreInputStatus(root, gate) {
+  const coreArtifact = CORE_INPUT_ARTIFACTS[gate];
+  if (!coreArtifact) {
+    return null;
+  }
+  const target = path.join(root, coreArtifact);
+  if (!isFile(target)) {
+    return [coreArtifact, "missing"];
+  }
+  if (!fs.readFileSync(target, "utf8").trim()) {
+    return [coreArtifact, "empty"];
+  }
+  return [coreArtifact, "ready"];
+}
 
-def reviewable_code_diff(root: Path, base: str, head: str) -> dict | None:
-    all_commits = command_text(root, ["git", "log", "--oneline", "--reverse", f"{base}..{head}"]).splitlines()
-    if not all_commits:
-        return None
-    commits = []
-    commit_shas = []
-    changed_files = []
-    diff_stats = []
-    patches = []
-    for line in all_commits:
-        _, separator, subject = line.partition(" ")
-        if separator and subject.startswith(HARNESS_COMMIT_PREFIX):
-            continue
-        commit_sha = line.split(maxsplit=1)[0]
-        commits.append(line)
-        commit_shas.append(commit_sha)
-        for changed_file in command_text(root, ["git", "show", "--format=", "--name-only", "--find-renames", commit_sha]).splitlines():
-            if changed_file and changed_file not in changed_files:
-                changed_files.append(changed_file)
-        diff_stat = command_text(root, ["git", "show", "--format=", "--stat", "--find-renames", commit_sha])
-        if diff_stat:
-            diff_stats.append(diff_stat)
-        patch = command_output(root, ["git", "show", "--format=", "--binary", "--find-renames", commit_sha])
-        if patch:
-            patches.append(patch)
-    return {
-        "baseCommit": base,
-        "headCommit": head,
-        "commits": commits,
-        "commitShas": commit_shas,
-        "changedFiles": changed_files,
-        "diffStat": "\n".join(diff_stats),
-        "diffHash": hashlib.sha256(b"\n".join(patches)).hexdigest(),
+function codeDiffPrerequisiteError(root, index, checkValidationGate = true) {
+  let report;
+  try {
+    report = fs.readFileSync(path.join(root, ".ai/vcm/handoffs/test-report.md"), "utf8");
+  } catch {
+    return "code-diff requires completed Tester validation. .ai/vcm/handoffs/test-report.md is missing.";
+  }
+  const result = /^\s*Test Result\s*:\s*(pass|fail|incomplete)\s*$/im.exec(report.replace(/\r\n?/g, "\n"));
+  if (result === null) {
+    return "code-diff requires completed Tester validation. Test Result must be exactly pass or fail.";
+  }
+  if (result[1].toLowerCase() === "incomplete") {
+    return "code-diff requires completed Tester validation. Test Result is incomplete.";
+  }
+
+  if (!checkValidationGate) {
+    return null;
+  }
+
+  const gates = isObject(index.gates) ? index.gates : {};
+  const validation = "validation-adequacy" in gates ? gates["validation-adequacy"] : {};
+  if (!isObject(validation) || !truthy(validation.required)) {
+    return null;
+  }
+  if (validation.status === "skipped" || validation.status === "overridden") {
+    return null;
+  }
+  if (validation.status !== "completed" || validation.decision !== "approve") {
+    return "code-diff requires the validation-adequacy Gate to complete successfully for the current Tester evidence.";
+  }
+  const currentHash = inputHash(root, "validation-adequacy");
+  if (!truthy(validation.inputHash) || validation.inputHash !== currentHash) {
+    return "code-diff requires a current validation-adequacy approval; code or test evidence changed after the recorded approval.";
+  }
+  return null;
+}
+
+function requestId(gate) {
+  const stamp = new Date().toISOString().replace(/\.\d+Z$/, "Z").replace(/[-:]/g, "");
+  return stamp + "-" + gate + "-" + crypto.randomBytes(4).toString("hex");
+}
+
+function gateEntry(index, gate) {
+  if (!isObject(index.gates[gate])) {
+    index.gates[gate] = {};
+  }
+  return index.gates[gate];
+}
+
+function clearActiveGate(index, gate) {
+  if (index.activeGate === gate) {
+    index.activeGate = null;
+  }
+}
+
+function resetFields(status, completedAt, codeDiff) {
+  return {
+    required: true,
+    status,
+    decision: null,
+    error: null,
+    exceptionReason: null,
+    requestId: null,
+    requestPath: null,
+    inputHash: null,
+    baseCommit: codeDiff.baseCommit ?? null,
+    headCommit: codeDiff.headCommit ?? null,
+    commits: codeDiff.commits ?? null,
+    changedFiles: codeDiff.changedFiles ?? null,
+    diffStat: codeDiff.diffStat ?? null,
+    requestedAt: null,
+    startedAt: null,
+    completedAt,
+    callbackStatus: "not_sent",
+    callbackError: null,
+    updatedAt: nowIso()
+  };
+}
+
+function recordCodeDiffStartFailure(indexPath, index, gate, reason, codeDiff) {
+  Object.assign(gateEntry(index, gate), resetFields("failed", nowIso(), codeDiff || {}), { error: reason });
+  clearActiveGate(index, gate);
+  writeJson(indexPath, index);
+}
+
+function localRequest(gate, source) {
+  const root = rootDir();
+  const indexPath = path.join(root, ".ai/vcm/gate-reviews/index.json");
+  if (!isFile(indexPath)) {
+    // Reached only when the VCM API is unreachable (callVcmApi returned null)
+    // AND no local index exists, so the authoritative enable state is unknown.
+    // Fail safe instead of silently treating an indeterminate state as disabled.
+    printResult("failed_to_start", {
+      gate,
+      reason: "cannot reach VCM API and no local gate-review index; enable state is indeterminate"
+    });
+    return 2;
+  }
+  const index = readJson(indexPath);
+  const enabled = truthy(index.enabled ?? false);
+  let gateRecord = isObject(index.gates) && gate in index.gates ? index.gates[gate] : {};
+  const required = isObject(gateRecord) ? truthy(gateRecord.required ?? false) : false;
+  Object.assign(index, { version: 1, enabled });
+  if (!("gates" in index)) {
+    index.gates = {};
+  }
+
+  if (!enabled) {
+    index.activeGate = null;
+    writeJson(indexPath, index);
+    printResult("disabled", { gate });
+    return 0;
+  }
+
+  if (!required) {
+    Object.assign(gateEntry(index, gate), { required: false, status: "not_required", updatedAt: nowIso() });
+    writeJson(indexPath, index);
+    printResult("not_required", { gate });
+    return 0;
+  }
+
+  if (gate === "code-diff") {
+    const dirty = splitLines(commandText(root, ["git", "status", "--porcelain=v1"]));
+    if (dirty.length > 0) {
+      let reason = "code-diff requires committed inputs; commit or clean these changes first: " + dirty.slice(0, 8).join("; ");
+      if (dirty.length > 8) {
+        reason += "; ... " + (dirty.length - 8) + " more";
+      }
+      recordCodeDiffStartFailure(indexPath, index, gate, reason);
+      printResult("failed_to_start", { gate, reason });
+      return 2;
+    }
+  }
+
+  const coreStatus = coreInputStatus(root, gate);
+  if (coreStatus && coreStatus[1] !== "ready") {
+    const { required: _required, baseCommit, headCommit, commits, changedFiles, diffStat, ...fields } = resetFields("not_required", null, {});
+    Object.assign(gateEntry(index, gate), fields);
+    clearActiveGate(index, gate);
+    writeJson(indexPath, index);
+    printResult("not_required", { gate, message: coreStatus[0] + " is " + coreStatus[1] + "." });
+    return 0;
+  }
+
+  if (gate === "code-diff") {
+    const evidenceError = codeDiffPrerequisiteError(root, index, false);
+    if (evidenceError) {
+      recordCodeDiffStartFailure(indexPath, index, gate, evidenceError);
+      printResult("failed_to_start", { gate, reason: evidenceError });
+      return 2;
+    }
+  }
+
+  gateRecord = gate in index.gates ? index.gates[gate] : {};
+  let codeDiff = {};
+  if (gate === "code-diff") {
+    const [base, head] = codeDiffRange(root, isObject(gateRecord) ? gateRecord : {});
+    if (!base || !head || base === head) {
+      Object.assign(gateEntry(index, gate), resetFields("not_required", null, {}));
+      clearActiveGate(index, gate);
+      writeJson(indexPath, index);
+      printResult("not_required", { gate, message: "No new commits to review." });
+      return 0;
+    }
+    codeDiff = reviewableCodeDiff(root, base, head);
+    if (codeDiff === null) {
+      printResult("not_required", { gate, message: "No new commits to review." });
+      return 0;
+    }
+    if (codeDiff.commits.length === 0) {
+      Object.assign(gateEntry(index, gate), resetFields("not_required", nowIso(), {
+        baseCommit: base,
+        headCommit: head,
+        commits: [],
+        changedFiles: [],
+        diffStat: ""
+      }));
+      clearActiveGate(index, gate);
+      writeJson(indexPath, index);
+      printResult("not_required", { gate, message: "No non-Harness commits to review." });
+      return 0;
     }
 
-
-def input_hash(root: Path, gate: str, sources: list[str] | None = None, gate_record=None, code_diff=None) -> str:
-    gate_record = gate_record or {}
-    digest = hashlib.sha256()
-    core_artifact = CORE_INPUT_ARTIFACTS.get(gate)
-    if core_artifact:
-        path = root / core_artifact
-        digest.update(core_artifact.encode())
-        digest.update(path.read_bytes())
-
-    common = [] if gate == "code-diff" else [
-        "CLAUDE.md",
-        ".claude/agents/architect.md",
-        ".claude/agents/coder.md",
-        ".claude/agents/reviewer.md",
-        ".claude/agents/tester.md",
-        ".claude/skills/vcm-gate-review/SKILL.md",
-        ".ai/tools/request-gate-review",
-        "docs/CODING_STANDARDS.md",
-    ]
-    inputs = dict.fromkeys(relative for relative in common + source_artifacts(gate, sources) if relative != core_artifact)
-    for relative in inputs:
-        path = root / relative
-        digest.update(relative.encode())
-        if path.is_file():
-            digest.update(path.read_bytes())
-        else:
-            digest.update(b"<missing>")
-    if gate == "architecture-plan":
-        evidence_pathspec = ["--", ".", ":(exclude).ai/vcm/**"]
-        digest.update(b"head")
-        digest.update(command_output(root, ["git", "rev-parse", "HEAD"]))
-        digest.update(b"workingDiff")
-        digest.update(command_output(root, ["git", "diff", "--binary", *evidence_pathspec]))
-        digest.update(b"stagedDiff")
-        digest.update(command_output(root, ["git", "diff", "--cached", "--binary", *evidence_pathspec]))
-        untracked = command_text(root, ["git", "ls-files", "--others", "--exclude-standard", *evidence_pathspec]).splitlines()
-        for relative in untracked:
-            digest.update(b"untracked")
-            digest.update(relative.encode())
-            digest.update(command_output(root, ["git", "hash-object", "--", relative]))
-    if gate == "validation-adequacy":
-        evidence_pathspec = ["--", ".", ":(exclude).ai/vcm/**", ":(exclude)docs/**"]
-        digest.update(b"trackedEvidence")
-        digest.update(command_output(root, ["git", "ls-files", "-s", *evidence_pathspec]))
-        digest.update(b"workingEvidence")
-        digest.update(command_output(root, ["git", "diff", "--binary", *evidence_pathspec]))
-        digest.update(b"stagedEvidence")
-        digest.update(command_output(root, ["git", "diff", "--cached", "--binary", *evidence_pathspec]))
-        untracked = command_text(root, ["git", "ls-files", "--others", "--exclude-standard", *evidence_pathspec]).splitlines()
-        for relative in untracked:
-            digest.update(b"untrackedEvidence")
-            digest.update(relative.encode())
-            digest.update(command_output(root, ["git", "hash-object", "--", relative]))
-    if gate == "code-diff":
-        digest.update(("\n".join(sources or []) or "<missing>").encode())
-        if code_diff:
-            digest.update("\n".join(code_diff.get("commits", [])).encode())
-            digest.update("\n".join(code_diff.get("changedFiles", [])).encode())
-            digest.update(code_diff.get("diffHash", "").encode())
-    return digest.hexdigest()
-
-
-def core_input_status(root: Path, gate: str) -> tuple[str, str] | None:
-    core_artifact = CORE_INPUT_ARTIFACTS.get(gate)
-    if not core_artifact:
-        return None
-    path = root / core_artifact
-    if not path.is_file():
-        return (core_artifact, "missing")
-    if not path.read_text().strip():
-        return (core_artifact, "empty")
-    return (core_artifact, "ready")
-
-
-def code_diff_prerequisite_error(root: Path, index: dict, check_validation_gate: bool = True) -> str | None:
-    report_path = root / ".ai/vcm/handoffs/test-report.md"
-    try:
-        report = report_path.read_text()
-    except OSError:
-        return "code-diff requires completed Tester validation. .ai/vcm/handoffs/test-report.md is missing."
-    result = re.search(r"^\s*Test Result\s*:\s*(pass|fail|incomplete)\s*$", report, re.IGNORECASE | re.MULTILINE)
-    if result is None:
-        return "code-diff requires completed Tester validation. Test Result must be exactly pass or fail."
-    if result.group(1).lower() == "incomplete":
-        return "code-diff requires completed Tester validation. Test Result is incomplete."
-
-    if not check_validation_gate:
-        return None
-
-    validation = index.get("gates", {}).get("validation-adequacy", {})
-    if not isinstance(validation, dict) or not validation.get("required", False):
-        return None
-    if validation.get("status") in ("skipped", "overridden"):
-        return None
-    if validation.get("status") != "completed" or validation.get("decision") != "approve":
-        return "code-diff requires the validation-adequacy Gate to complete successfully for the current Tester evidence."
-    current_hash = input_hash(root, "validation-adequacy")
-    if not validation.get("inputHash") or validation.get("inputHash") != current_hash:
-        return "code-diff requires a current validation-adequacy approval; code or test evidence changed after the recorded approval."
-    return None
-
-
-def request_id(gate: str) -> str:
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    return f"{stamp}-{gate}-{uuid.uuid4().hex[:8]}"
-
-
-def record_code_diff_start_failure(index_path: Path, index: dict, gate: str, reason: str, code_diff=None) -> None:
-    code_diff = code_diff or {}
-    gate_record = index["gates"].setdefault(gate, {})
-    gate_record.update({
-        "required": True,
-        "status": "failed",
-        "decision": None,
-        "error": reason,
-        "exceptionReason": None,
-        "requestId": None,
-        "requestPath": None,
-        "inputHash": None,
-        "baseCommit": code_diff.get("baseCommit"),
-        "headCommit": code_diff.get("headCommit"),
-        "commits": code_diff.get("commits"),
-        "changedFiles": code_diff.get("changedFiles"),
-        "diffStat": code_diff.get("diffStat"),
-        "requestedAt": None,
-        "startedAt": None,
-        "completedAt": now_iso(),
-        "callbackStatus": "not_sent",
-        "callbackError": None,
-        "updatedAt": now_iso(),
-    })
-    if index.get("activeGate") == gate:
-        index["activeGate"] = None
-    write_json(index_path, index)
-
-
-def local_request(gate: str, source: str | None) -> int:
-    root = root_dir()
-    index_path = root / ".ai/vcm/gate-reviews/index.json"
-    if not index_path.is_file():
-        # Reached only when the VCM API is unreachable (call_vcm_api returned None)
-        # AND no local index exists, so the authoritative enable state is unknown.
-        # Fail safe instead of silently treating an indeterminate state as disabled.
-        print_result(
-            "failed_to_start",
-            gate=gate,
-            reason="cannot reach VCM API and no local gate-review index; enable state is indeterminate",
-        )
-        return 2
-    index = read_json(index_path)
-    enabled = bool(index.get("enabled", False))
-    gate_record = index.get("gates", {}).get(gate, {}) if isinstance(index.get("gates"), dict) else {}
-    required = bool(gate_record.get("required", False)) if isinstance(gate_record, dict) else False
-    index.update({"version": 1, "enabled": enabled})
-    index.setdefault("gates", {})
-
-    if not enabled:
-        index["activeGate"] = None
-        write_json(index_path, index)
-        print_result("disabled", gate=gate)
-        return 0
-
-    if not required:
-        gate_record = index["gates"].setdefault(gate, {})
-        gate_record.update({"required": False, "status": "not_required", "updatedAt": now_iso()})
-        write_json(index_path, index)
-        print_result("not_required", gate=gate)
-        return 0
-
-    if gate == "code-diff":
-        dirty = command_text(root, ["git", "status", "--porcelain=v1"]).splitlines()
-        if dirty:
-            reason = "code-diff requires committed inputs; commit or clean these changes first: " + "; ".join(dirty[:8])
-            if len(dirty) > 8:
-                reason += f"; ... {len(dirty) - 8} more"
-            gate_record = index["gates"].setdefault(gate, {})
-            gate_record.update({
-                "required": True,
-                "status": "failed",
-                "decision": None,
-                "error": reason,
-                "exceptionReason": None,
-                "requestId": None,
-                "requestPath": None,
-                "inputHash": None,
-                "baseCommit": None,
-                "headCommit": None,
-                "commits": None,
-                "changedFiles": None,
-                "diffStat": None,
-                "requestedAt": None,
-                "startedAt": None,
-                "completedAt": now_iso(),
-                "callbackStatus": "not_sent",
-                "callbackError": None,
-                "updatedAt": now_iso(),
-            })
-            if index.get("activeGate") == gate:
-                index["activeGate"] = None
-            write_json(index_path, index)
-            print_result("failed_to_start", gate=gate, reason=reason)
-            return 2
-
-    core_status = core_input_status(root, gate)
-    if core_status and core_status[1] != "ready":
-        gate_record = index["gates"].setdefault(gate, {})
-        gate_record.update({
-            "status": "not_required",
-            "decision": None,
-            "error": None,
-            "exceptionReason": None,
-            "requestId": None,
-            "requestPath": None,
-            "inputHash": None,
-            "requestedAt": None,
-            "startedAt": None,
-            "completedAt": None,
-            "callbackStatus": "not_sent",
-            "callbackError": None,
-            "updatedAt": now_iso(),
-        })
-        if index.get("activeGate") == gate:
-            index["activeGate"] = None
-        write_json(index_path, index)
-        print_result("not_required", gate=gate, message=f"{core_status[0]} is {core_status[1]}.")
-        return 0
-
-    if gate == "code-diff":
-        evidence_error = code_diff_prerequisite_error(root, index, False)
-        if evidence_error:
-            record_code_diff_start_failure(index_path, index, gate, evidence_error)
-            print_result("failed_to_start", gate=gate, reason=evidence_error)
-            return 2
-
-    gate_record = index["gates"].get(gate, {})
-    code_diff = {}
-    if gate == "code-diff":
-        base, head = code_diff_range(root, gate_record if isinstance(gate_record, dict) else {})
-        if not base or not head or base == head:
-            gate_record = index["gates"].setdefault(gate, {})
-            gate_record.update({
-                "required": True,
-                "status": "not_required",
-                "decision": None,
-                "error": None,
-                "exceptionReason": None,
-                "requestId": None,
-                "requestPath": None,
-                "inputHash": None,
-                "baseCommit": None,
-                "headCommit": None,
-                "commits": None,
-                "changedFiles": None,
-                "diffStat": None,
-                "requestedAt": None,
-                "startedAt": None,
-                "completedAt": None,
-                "callbackStatus": "not_sent",
-                "callbackError": None,
-                "updatedAt": now_iso(),
-            })
-            if index.get("activeGate") == gate:
-                index["activeGate"] = None
-            write_json(index_path, index)
-            print_result("not_required", gate=gate, message="No new commits to review.")
-            return 0
-        code_diff = reviewable_code_diff(root, base, head)
-        if code_diff is None:
-            print_result("not_required", gate=gate, message="No new commits to review.")
-            return 0
-        if not code_diff["commits"]:
-            gate_record = index["gates"].setdefault(gate, {})
-            gate_record.update({
-                "required": True,
-                "status": "not_required",
-                "decision": None,
-                "error": None,
-                "exceptionReason": None,
-                "requestId": None,
-                "requestPath": None,
-                "inputHash": None,
-                "baseCommit": base,
-                "headCommit": head,
-                "commits": [],
-                "changedFiles": [],
-                "diffStat": "",
-                "requestedAt": None,
-                "startedAt": None,
-                "completedAt": now_iso(),
-                "callbackStatus": "not_sent",
-                "callbackError": None,
-                "updatedAt": now_iso(),
-            })
-            if index.get("activeGate") == gate:
-                index["activeGate"] = None
-            write_json(index_path, index)
-            print_result("not_required", gate=gate, message="No non-Harness commits to review.")
-            return 0
-
-        prerequisite_error = code_diff_prerequisite_error(root, index)
-        if prerequisite_error:
-            record_code_diff_start_failure(index_path, index, gate, prerequisite_error, code_diff)
-            print_result("failed_to_start", gate=gate, reason=prerequisite_error)
-            return 2
-
-    sources = code_diff_sources(gate_record, source, code_diff) if gate == "code-diff" else None
-    current_hash = input_hash(root, gate, sources, gate_record if isinstance(gate_record, dict) else {}, code_diff)
-    if (
-        gate_record.get("status") == "completed"
-        and gate_record.get("decision") == "approve"
-        and gate_record.get("inputHash") == current_hash
-    ):
-        print_result("already_approved", gate=gate, report=gate_record.get("reportPath", LATEST_REPORTS[gate]))
-        return 0
-
-    rid = request_id(gate)
-    request_path = root / ".ai/vcm/gate-reviews/requests" / f"{rid}.json"
-    prompt_path = f".ai/vcm/gate-reviews/requests/{rid}.prompt.md"
-    report_path = f".ai/vcm/gate-reviews/requests/{rid}.report.md"
-    latest_report_path = LATEST_REPORTS[gate]
-    requested_at = now_iso()
-    write_json(request_path, {
-        "version": 1,
-        "requestId": rid,
-        "gate": gate,
-        "status": "requested",
-        "requestedAt": requested_at,
-        "inputHash": current_hash,
-        "codeDiffSource": source,
-        "codeDiffSources": sources,
-        "codeDiff": code_diff or None,
-        "reportPath": report_path,
-        "latestReportPath": latest_report_path,
-        "promptPath": prompt_path,
-    })
-
-    index["activeGate"] = gate
-    index["gates"][gate] = {
-        "gate": gate,
-        "required": True,
-        "status": "running",
-        "decision": None,
-        "reportPath": latest_report_path,
-        "promptPath": prompt_path,
-        "inputHash": current_hash,
-        "baseCommit": code_diff.get("baseCommit"),
-        "headCommit": code_diff.get("headCommit"),
-        "commits": code_diff.get("commits"),
-        "changedFiles": code_diff.get("changedFiles"),
-        "diffStat": code_diff.get("diffStat"),
-        "codeDiffSource": source,
-        "codeDiffSources": sources,
-        "requestId": rid,
-        "requestPath": request_path.relative_to(root).as_posix(),
-        "requestedAt": requested_at,
-        "updatedAt": requested_at,
+    const prerequisiteError = codeDiffPrerequisiteError(root, index);
+    if (prerequisiteError) {
+      recordCodeDiffStartFailure(indexPath, index, gate, prerequisiteError, codeDiff);
+      printResult("failed_to_start", { gate, reason: prerequisiteError });
+      return 2;
     }
-    write_json(index_path, index)
-    print_result("started", gate=gate, request=index["gates"][gate]["requestPath"], report=report_path)
-    return 0
+  }
 
+  const sources = gate === "code-diff" ? codeDiffSources(gateRecord, source, codeDiff) : null;
+  const currentHash = inputHash(root, gate, sources, codeDiff);
+  if (
+    gateRecord.status === "completed"
+    && gateRecord.decision === "approve"
+    && gateRecord.inputHash === currentHash
+  ) {
+    printResult("already_approved", { gate, report: "reportPath" in gateRecord ? gateRecord.reportPath : LATEST_REPORTS[gate] });
+    return 0;
+  }
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--gate", required=True, choices=GATES)
-    parser.add_argument("--source", choices=CODE_DIFF_SOURCES)
-    args = parser.parse_args()
+  const rid = requestId(gate);
+  const requestPath = ".ai/vcm/gate-reviews/requests/" + rid + ".json";
+  const promptPath = ".ai/vcm/gate-reviews/requests/" + rid + ".prompt.md";
+  const reportPath = ".ai/vcm/gate-reviews/requests/" + rid + ".report.md";
+  const latestReportPath = LATEST_REPORTS[gate];
+  const requestedAt = nowIso();
+  writeJson(path.join(root, requestPath), {
+    version: 1,
+    requestId: rid,
+    gate,
+    status: "requested",
+    requestedAt,
+    inputHash: currentHash,
+    codeDiffSource: source ?? null,
+    codeDiffSources: sources,
+    codeDiff: truthy(codeDiff) ? codeDiff : null,
+    reportPath,
+    latestReportPath,
+    promptPath
+  });
 
-    if args.gate == "code-diff" and not args.source:
-        print_result("failed_to_start", gate=args.gate, reason="code-diff requires --source coder, --source architect-debug, or --source architect-diagnosis")
-        return 2
-    if args.gate != "code-diff" and args.source:
-        print_result("failed_to_start", gate=args.gate, reason="--source is valid only for code-diff")
-        return 2
+  index.activeGate = gate;
+  index.gates[gate] = {
+    gate,
+    required: true,
+    status: "running",
+    decision: null,
+    reportPath: latestReportPath,
+    promptPath,
+    inputHash: currentHash,
+    baseCommit: codeDiff.baseCommit ?? null,
+    headCommit: codeDiff.headCommit ?? null,
+    commits: codeDiff.commits ?? null,
+    changedFiles: codeDiff.changedFiles ?? null,
+    diffStat: codeDiff.diffStat ?? null,
+    codeDiffSource: source ?? null,
+    codeDiffSources: sources,
+    requestId: rid,
+    requestPath,
+    requestedAt,
+    updatedAt: requestedAt
+  };
+  writeJson(indexPath, index);
+  printResult("started", { gate, request: requestPath, report: reportPath });
+  return 0;
+}
 
-    expected_root = os.environ.get("VCM_TASK_REPO_ROOT")
-    if expected_root and Path(expected_root).resolve() != Path.cwd().resolve():
-        print_result("failed_to_start", gate=args.gate, reason="cwd does not match VCM_TASK_REPO_ROOT")
-        return 2
+function resolvedPath(target) {
+  try {
+    return fs.realpathSync(target);
+  } catch {
+    return path.resolve(target);
+  }
+}
 
-    api_result = call_vcm_api(args.gate, args.source)
-    if api_result is not None:
-        return api_result
-    return local_request(args.gate, args.source)
+async function main() {
+  const args = parseToolArguments(process.argv.slice(2), {
+    options: {
+      "--gate": { dest: "gate", required: true, choices: GATES },
+      "--source": { dest: "source", choices: CODE_DIFF_SOURCES }
+    }
+  });
 
+  if (args.gate === "code-diff" && !args.source) {
+    printResult("failed_to_start", {
+      gate: args.gate,
+      reason: "code-diff requires --source coder, --source architect-debug, or --source architect-diagnosis"
+    });
+    return 2;
+  }
+  if (args.gate !== "code-diff" && args.source) {
+    printResult("failed_to_start", { gate: args.gate, reason: "--source is valid only for code-diff" });
+    return 2;
+  }
 
-if __name__ == "__main__":
-    sys.exit(main())
+  const expectedRoot = process.env.VCM_TASK_REPO_ROOT;
+  if (expectedRoot && resolvedPath(expectedRoot) !== resolvedPath(process.cwd())) {
+    printResult("failed_to_start", { gate: args.gate, reason: "cwd does not match VCM_TASK_REPO_ROOT" });
+    return 2;
+  }
+
+  const apiResult = await callVcmApi(args.gate, args.source);
+  if (apiResult !== null) {
+    return apiResult;
+  }
+  return localRequest(args.gate, args.source);
+}
+
+main().then((code) => process.exit(code));

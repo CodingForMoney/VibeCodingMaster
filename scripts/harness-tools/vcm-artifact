@@ -1,114 +1,182 @@
-#!/usr/bin/env python3
-"""Submit a VCM-managed Markdown artifact through the VCM backend."""
+#!/usr/bin/env node
+"use strict";
+// Submit a VCM-managed Markdown artifact through the VCM backend.
 
-import argparse
-import json
-import os
-from pathlib import Path
-import sys
-import urllib.error
-import urllib.parse
-import urllib.request
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Validate and atomically write a VCM-managed artifact."
-    )
-    parser.add_argument("kind", help="VCM-managed artifact kind.")
-    parser.add_argument("--file", required=True, help="Candidate Markdown file.")
-    parser.add_argument("--mode", choices=("draft", "final"), default="final")
-    parser.add_argument(
-        "--path",
-        help="Repository-relative VCM-assigned destination; never an absolute path. VCM selects the artifact's repository root.",
-    )
-    parser.add_argument(
-        "--keep-candidate",
-        action="store_true",
-        help="Keep the candidate after a successful submission.",
-    )
-    return parser.parse_args()
+function fail(message) {
+  process.stderr.write("VCM artifact submission failed: " + message + "\n");
+  process.exit(1);
+}
 
+function usageError(message) {
+  process.stderr.write(
+    "usage: vcm-artifact [-h] --file FILE [--mode {draft,final}] [--path PATH] [--keep-candidate] kind\n"
+    + "vcm-artifact: error: " + message + "\n"
+  );
+  process.exit(2);
+}
 
-def required_env(name: str) -> str:
-    value = os.environ.get(name, "").strip()
-    if not value:
-        fail(f"{name} is required. Run this tool from an active VCM role Session.")
-    return value
-
-
-def fail(message: str) -> None:
-    print(f"VCM artifact submission failed: {message}", file=sys.stderr)
-    raise SystemExit(1)
-
-
-def error_text(raw: str) -> str:
-    try:
-        payload = json.loads(raw)
-    except (ValueError, TypeError):
-        return raw.strip() or "VCM backend returned an empty error."
-    if isinstance(payload, dict):
-        message = payload.get("message")
-        hint = payload.get("hint")
-        if isinstance(payload.get("error"), dict):
-            message = payload["error"].get("message", message)
-            hint = payload["error"].get("hint", hint)
-        parts = [str(value).strip() for value in (message, hint) if value]
-        if parts:
-            return "\n".join(parts)
-    return raw.strip() or "VCM backend rejected the artifact."
-
-
-def main() -> int:
-    args = parse_args()
-
-    candidate = Path(args.file).expanduser()
-    if not candidate.is_file():
-        fail(f"candidate does not exist: {candidate}")
-    content = candidate.read_text(encoding="utf-8")
-    if not content.strip():
-        fail("candidate is empty.")
-
-    api_url = required_env("VCM_API_URL").rstrip("/")
-    task_slug = required_env("VCM_TASK_SLUG")
-    payload = {
-        "kind": args.kind,
-        "mode": args.mode,
-        "role": required_env("VCM_ROLE"),
-        "runtimeSessionToken": required_env("VCM_RUNTIME_SESSION_TOKEN"),
-        "content": content,
+function parseArgs(argv) {
+  const args = { kind: undefined, file: undefined, mode: "final", path: undefined, keepCandidate: false };
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === "-h" || argument === "--help") {
+      process.stdout.write(
+        "usage: vcm-artifact [-h] --file FILE [--mode {draft,final}] [--path PATH] [--keep-candidate] kind\n\n"
+        + "Validate and atomically write a VCM-managed artifact.\n\n"
+        + "  kind              VCM-managed artifact kind.\n"
+        + "  --file FILE       Candidate Markdown file.\n"
+        + "  --mode {draft,final}\n"
+        + "  --path PATH       Repository-relative VCM-assigned destination; never an absolute path. VCM selects the artifact's repository root.\n"
+        + "  --keep-candidate  Keep the candidate after a successful submission.\n"
+      );
+      process.exit(0);
     }
-    if args.path:
-        payload["path"] = args.path
+    if (argument === "--keep-candidate") {
+      args.keepCandidate = true;
+      continue;
+    }
+    const separator = argument.indexOf("=");
+    const name = argument.startsWith("--") && separator >= 0 ? argument.slice(0, separator) : argument;
+    if (name === "--file" || name === "--mode" || name === "--path") {
+      let value;
+      if (separator >= 0 && argument.startsWith("--")) {
+        value = argument.slice(separator + 1);
+      } else {
+        if (index + 1 >= argv.length) {
+          usageError("argument " + name + ": expected one argument");
+        }
+        index += 1;
+        value = argv[index];
+      }
+      if (name === "--mode" && value !== "draft" && value !== "final") {
+        usageError("argument --mode: invalid choice: '" + value + "' (choose from 'draft', 'final')");
+      }
+      args[name.slice(2)] = value;
+      continue;
+    }
+    if (argument.startsWith("--")) {
+      usageError("unrecognized arguments: " + argument);
+    }
+    if (args.kind !== undefined) {
+      usageError("unrecognized arguments: " + argument);
+    }
+    args.kind = argument;
+  }
+  const missing = [];
+  if (args.kind === undefined) {
+    missing.push("kind");
+  }
+  if (args.file === undefined) {
+    missing.push("--file");
+  }
+  if (missing.length > 0) {
+    usageError("the following arguments are required: " + missing.join(", "));
+  }
+  return args;
+}
 
-    request = urllib.request.Request(
-        f"{api_url}/api/tasks/{urllib.parse.quote(task_slug, safe='')}/artifacts/submit",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"content-type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            raw = response.read().decode("utf-8")
-    except urllib.error.HTTPError as error:
-        fail(error_text(error.read().decode("utf-8", errors="replace")))
-    except urllib.error.URLError as error:
-        fail(f"VCM backend could not be reached at {api_url}: {error.reason}")
+function requiredEnv(name) {
+  const value = (process.env[name] || "").trim();
+  if (!value) {
+    fail(name + " is required. Run this tool from an active VCM role Session.");
+  }
+  return value;
+}
 
-    try:
-        result = json.loads(raw)
-    except ValueError:
-        fail("VCM backend returned invalid JSON.")
-    if not isinstance(result, dict) or result.get("ok") is not True:
-        fail(error_text(raw))
+function errorText(raw) {
+  let payload;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    return raw.trim() || "VCM backend returned an empty error.";
+  }
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    let message = payload.message;
+    let hint = payload.hint;
+    if (payload.error && typeof payload.error === "object") {
+      message = payload.error.message ?? message;
+      hint = payload.error.hint ?? hint;
+    }
+    const parts = [message, hint].filter(Boolean).map((value) => String(value).trim());
+    if (parts.length > 0) {
+      return parts.join("\n");
+    }
+  }
+  return raw.trim() || "VCM backend rejected the artifact.";
+}
 
-    if not args.keep_candidate:
-        candidate.unlink(missing_ok=True)
-    print(
-        f"VCM artifact accepted: {result.get('kind')} -> {result.get('path')} "
-        f"({result.get('mode')}, {result.get('status')})"
-    )
-    return 0
+function expandUser(file) {
+  return file === "~" || file.startsWith("~/") ? path.join(os.homedir(), file.slice(1)) : file;
+}
 
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+  const candidate = expandUser(args.file);
+  let stat;
+  try {
+    stat = fs.statSync(candidate);
+  } catch {
+    stat = undefined;
+  }
+  if (!stat || !stat.isFile()) {
+    fail("candidate does not exist: " + candidate);
+  }
+  const content = fs.readFileSync(candidate, "utf8");
+  if (!content.trim()) {
+    fail("candidate is empty.");
+  }
+
+  const apiUrl = requiredEnv("VCM_API_URL").replace(/\/+$/, "");
+  const taskSlug = requiredEnv("VCM_TASK_SLUG");
+  const payload = {
+    kind: args.kind,
+    mode: args.mode,
+    role: requiredEnv("VCM_ROLE"),
+    runtimeSessionToken: requiredEnv("VCM_RUNTIME_SESSION_TOKEN"),
+    content
+  };
+  if (args.path) {
+    payload.path = args.path;
+  }
+
+  let response;
+  try {
+    response = await fetch(apiUrl + "/api/tasks/" + encodeURIComponent(taskSlug) + "/artifacts/submit", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(30000)
+    });
+  } catch (error) {
+    const cause = error && error.cause;
+    fail("VCM backend could not be reached at " + apiUrl + ": " + ((cause && (cause.message || cause.code)) || error.message));
+  }
+  const raw = await response.text();
+  if (!response.ok) {
+    fail(errorText(raw));
+  }
+
+  let result;
+  try {
+    result = JSON.parse(raw);
+  } catch {
+    fail("VCM backend returned invalid JSON.");
+  }
+  if (!result || typeof result !== "object" || result.ok !== true) {
+    fail(errorText(raw));
+  }
+
+  if (!args.keepCandidate) {
+    fs.rmSync(candidate, { force: true });
+  }
+  process.stdout.write(
+    "VCM artifact accepted: " + result.kind + " -> " + result.path + " (" + result.mode + ", " + result.status + ")\n"
+  );
+}
+
+main();

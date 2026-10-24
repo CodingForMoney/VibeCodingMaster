@@ -28,6 +28,7 @@ async function writeSource(filePath: string, content: string) {
 async function installHarnessTools(repoRoot: string) {
   const toolsRoot = path.join(repoRoot, ".ai/tools");
   await mkdir(toolsRoot, { recursive: true });
+  await cp(path.join(appRoot, "scripts/harness-tools/package.json"), path.join(toolsRoot, "package.json"));
   await cp(path.join(appRoot, "scripts/harness-tools/check-durable-docs"), path.join(toolsRoot, "check-durable-docs"));
   await writeFile(path.join(toolsRoot, "check-scaffold-ledger"), renderCheckScaffoldLedgerTool(), { mode: 0o755 });
   await cp(path.join(appRoot, "scripts/harness-tools/generate-module-index"), path.join(toolsRoot, "generate-module-index"));
@@ -175,7 +176,7 @@ describe("harness generated-context tools", () => {
     await installHarnessTools(tmpRepo);
     await createTypescriptWorkspace(tmpRepo);
 
-    await execFileAsync("python3", [path.join(tmpRepo, ".ai/tools/generate-module-index")], { cwd: tmpRepo });
+    await execFileAsync(process.execPath, [path.join(tmpRepo, ".ai/tools/generate-module-index")], { cwd: tmpRepo });
     const moduleIndex = JSON.parse(await readFile(path.join(tmpRepo, ".ai/generated/module-index.json"), "utf8"));
 
     expect(moduleIndex.workspace).toMatchObject({
@@ -203,7 +204,7 @@ describe("harness generated-context tools", () => {
       }
     });
 
-    await execFileAsync("python3", [path.join(tmpRepo, ".ai/tools/generate-public-surface")], { cwd: tmpRepo });
+    await execFileAsync(process.execPath, [path.join(tmpRepo, ".ai/tools/generate-public-surface")], { cwd: tmpRepo });
     const publicSurface = JSON.parse(await readFile(path.join(tmpRepo, ".ai/generated/public-surface.json"), "utf8"));
 
     expect(publicSurface.visibility).toBe("project-public");
@@ -229,7 +230,7 @@ describe("harness generated-context tools", () => {
     await installHarnessTools(tmpRepo);
     await createRustWorkspaceWithNestedTarget(tmpRepo);
 
-    await execFileAsync("python3", [path.join(tmpRepo, ".ai/tools/generate-module-index")], { cwd: tmpRepo });
+    await execFileAsync(process.execPath, [path.join(tmpRepo, ".ai/tools/generate-module-index")], { cwd: tmpRepo });
     const moduleIndex = JSON.parse(await readFile(path.join(tmpRepo, ".ai/generated/module-index.json"), "utf8"));
     const modules = moduleIndex.layers.flatMap(
       (layer: { modules: Array<{ files: { source: string[]; tests: string[] } }> }) => layer.modules
@@ -247,7 +248,7 @@ describe("harness generated-context tools", () => {
     expect(files.some((filePath: string) => filePath.includes("/target/"))).toBe(false);
 
     await expect(
-      execFileAsync("python3", [path.join(tmpRepo, ".ai/tools/generate-module-index"), "--check"], { cwd: tmpRepo })
+      execFileAsync(process.execPath, [path.join(tmpRepo, ".ai/tools/generate-module-index"), "--check"], { cwd: tmpRepo })
     ).resolves.toBeTruthy();
   });
 });
@@ -258,7 +259,7 @@ describe("long-running validation tools", () => {
     options: { timeout?: string; env?: NodeJS.ProcessEnv; cwd?: string } = {}
   ) {
     const result = await execFileAsync(
-      "python3",
+      process.execPath,
       [
         path.join(tmpRepo!, ".ai/tools/run-long-check"),
         "--timeout",
@@ -281,7 +282,7 @@ describe("long-running validation tools", () => {
   ) {
     try {
       const result = await execFileAsync(
-        "python3",
+        process.execPath,
         [
           path.join(tmpRepo!, ".ai/tools/watch-job"),
           jobId,
@@ -397,7 +398,7 @@ describe("long-running validation tools", () => {
     expect(watched.stdout).toContain("Unable to start validation command");
     expect(watched.stdout).toContain("broken-check");
     expect(watched.stdout).toContain(`cwd=${await realpath(tmpRepo)}`);
-    expect(watched.stdout).toMatch(/\[Errno \d+\]/);
+    expect(watched.stdout).toMatch(scenario === "missing interpreter" ? /\bENOENT\b/ : /\bENOEXEC\b/);
     expect(await readJobStatus(jobId)).toMatchObject({
       status: "failed", exitCode: null, processId: null, startedAt: null,
       finishedAt: expect.any(String), workerPid: expect.any(Number)
@@ -413,16 +414,12 @@ describe("long-running validation tools", () => {
     await installHarnessTools(tmpRepo);
     const executable = path.join(tmpRepo, "check-node");
     await symlink(process.execPath, executable);
-    const submitted = await execFileAsync("python3", ["-c", [
-      "import pathlib, runpy, subprocess, sys",
-      "from unittest.mock import patch",
-      "tool = runpy.run_path(sys.argv[1])",
-      "popen = subprocess.Popen",
-      "def delete_then_spawn(*args, **kwargs):",
-      "    pathlib.Path(sys.argv[2]).unlink()",
-      "    return popen(*args, **kwargs)",
-      "with patch('subprocess.Popen', side_effect=delete_then_spawn):",
-      "    sys.exit(tool['start_job']([sys.argv[2]], 3300))"
+    const submitted = await execFileAsync(process.execPath, ["-e", [
+      "const childProcess = require('node:child_process');",
+      "const fs = require('node:fs');",
+      "const spawn = childProcess.spawn;",
+      "childProcess.spawn = (...args) => { fs.unlinkSync(process.argv[2]); return spawn(...args); };",
+      "require(process.argv[1]).startJob([process.argv[2]], 3300).then((code) => process.exit(code));"
     ].join("\n"), path.join(tmpRepo, ".ai/tools/run-long-check"), executable], { cwd: tmpRepo });
     const jobId = submitted.stdout.match(/^job: (.+)$/m)?.[1];
     expect(jobId).toBeTruthy();
@@ -436,12 +433,10 @@ describe("long-running validation tools", () => {
   it("records worker-process launch failure and rejects submission without leaving a queued job", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-long-check-"));
     await installHarnessTools(tmpRepo);
-    await expect(execFileAsync("python3", ["-c", [
-      "import errno, runpy, sys",
-      "from unittest.mock import patch",
-      "tool = runpy.run_path(sys.argv[1])",
-      "with patch('subprocess.Popen', side_effect=OSError(errno.EAGAIN, 'injected process limit')):",
-      "    sys.exit(tool['start_job']([sys.argv[2]], 3300))"
+    await expect(execFileAsync(process.execPath, ["-e", [
+      "const childProcess = require('node:child_process');",
+      "childProcess.spawn = () => { const error = new Error('injected process limit'); error.code = 'EAGAIN'; throw error; };",
+      "require(process.argv[1]).startJob([process.argv[2]], 3300).then((code) => process.exit(code));"
     ].join("\n"), path.join(tmpRepo, ".ai/tools/run-long-check"), process.execPath], { cwd: tmpRepo }))
       .rejects.toMatchObject({ code: 1, stderr: expect.stringContaining("Unable to start job worker") });
     const jobs = await readdir(path.join(tmpRepo, ".ai/vcm/jobs"));
@@ -460,12 +455,12 @@ describe("long-running validation tools", () => {
   it("keeps interpreter argument errors as command failures with real exit codes", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-long-check-"));
     await installHarnessTools(tmpRepo);
-    const jobId = await startLongCheck(["python3", "missing-script.py"]);
+    const jobId = await startLongCheck([process.execPath, "missing-script.js"]);
     const watched = await watchLongCheck(jobId);
     expect(watched.exitCode).toBe(1);
-    expect(watched.stdout).toContain("missing-script.py");
+    expect(watched.stdout).toContain("missing-script.js");
     expect(await readJobStatus(jobId)).toMatchObject({
-      status: "failed", exitCode: 2, processId: expect.any(Number), startedAt: expect.any(String)
+      status: "failed", exitCode: 1, processId: expect.any(Number), startedAt: expect.any(String)
     });
   });
 
@@ -627,7 +622,7 @@ describe("long-running validation tools", () => {
     await expect(access(handoffPath)).resolves.toBeUndefined();
 
     const watcher = execFile(
-      "python3",
+      process.execPath,
       [path.join(tmpRepo, ".ai/tools/watch-job"), jobId, "--window", "3s", "--interval", "20ms"],
       { cwd: tmpRepo, env: { ...process.env, ...env } }
     );
@@ -648,7 +643,7 @@ describe("long-running validation tools", () => {
 
     await expect(
       execFileAsync(
-        "python3",
+        process.execPath,
         [
           runLongCheck,
           "--timeout",
@@ -667,7 +662,7 @@ describe("long-running validation tools", () => {
 
     await expect(
       execFileAsync(
-        "python3",
+        process.execPath,
         [
           runLongCheck,
           "--timeout",
@@ -736,7 +731,7 @@ describe("scaffold ledger audit", () => {
   async function runLedgerAuditFailure(mode: "scaffold" | "completion" = "scaffold") {
     try {
       await execFileAsync(
-        "python3",
+        process.execPath,
         [path.join(tmpRepo!, ".ai/tools/check-scaffold-ledger"), "--mode", mode],
         { cwd: tmpRepo }
       );
@@ -754,7 +749,7 @@ describe("scaffold ledger audit", () => {
 
     await expect(
       execFileAsync(
-        "python3",
+        process.execPath,
         [path.join(tmpRepo!, ".ai/tools/check-scaffold-ledger"), "--mode", "scaffold"],
         { cwd: tmpRepo }
       )
@@ -786,7 +781,7 @@ describe("scaffold ledger audit", () => {
 
     await expect(
       execFileAsync(
-        "python3",
+        process.execPath,
         [
           path.join(tmpRepo!, ".ai/tools/check-scaffold-ledger"),
           "--mode",
@@ -817,7 +812,7 @@ describe("scaffold ledger audit", () => {
 
     await expect(
       execFileAsync(
-        "python3",
+        process.execPath,
         [path.join(tmpRepo!, ".ai/tools/check-scaffold-ledger"), "--mode", "completion"],
         { cwd: tmpRepo }
       )
@@ -915,7 +910,7 @@ describe("scaffold ledger audit", () => {
 
     await expect(
       execFileAsync(
-        "python3",
+        process.execPath,
         [path.join(tmpRepo!, ".ai/tools/check-scaffold-ledger"), "--mode", "scaffold"],
         { cwd: tmpRepo }
       )
@@ -931,7 +926,7 @@ describe("scaffold ledger audit", () => {
 
     await expect(
       execFileAsync(
-        "python3",
+        process.execPath,
         [path.join(tmpRepo, ".ai/tools/check-scaffold-ledger"), "--mode", "scaffold"],
         { cwd: tmpRepo }
       )
@@ -984,7 +979,7 @@ describe("durable documentation audit", () => {
       ]
     });
 
-    const result = await execFileAsync("python3", [path.join(tmpRepo, ".ai/tools/check-durable-docs")], {
+    const result = await execFileAsync(process.execPath, [path.join(tmpRepo, ".ai/tools/check-durable-docs")], {
       cwd: tmpRepo
     });
 
@@ -1046,7 +1041,7 @@ describe("durable documentation audit", () => {
 
     let output = "";
     try {
-      await execFileAsync("python3", [path.join(tmpRepo, ".ai/tools/check-durable-docs")], { cwd: tmpRepo });
+      await execFileAsync(process.execPath, [path.join(tmpRepo, ".ai/tools/check-durable-docs")], { cwd: tmpRepo });
     } catch (error) {
       output = (error as Error & { stdout?: string }).stdout ?? "";
     }

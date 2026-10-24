@@ -1,605 +1,839 @@
-#!/usr/bin/env python3
-"""VCM PreToolUse guard for supervised tools inside VCM workflow-role sessions.
+#!/usr/bin/env node
+"use strict";
+// VCM PreToolUse guard for supervised tools inside VCM workflow-role sessions.
+//
+// Reads the Claude Code PreToolUse hook payload on stdin. It enforces supervised
+// Bash execution and managed-artifact writes for VCM workflow roles. Tool roles
+// are outside the workflow and bypass this guard.
+//
+// Quoted payloads of `sh -c` / `bash -lc` style invocations are executable
+// shell code, so they are scanned recursively. `.ai/tools/run-long-check` is the
+// only sanctioned detached worker; the command it runs must still stay in the
+// supervised foreground process group.
 
-Reads the Claude Code PreToolUse hook payload on stdin. It enforces supervised
-Bash execution and managed-artifact writes for VCM workflow roles. Tool roles
-are outside the workflow and bypass this guard.
+const fs = require("node:fs");
 
-Quoted payloads of `sh -c` / `bash -lc` style invocations are executable
-shell code, so they are scanned recursively. `.ai/tools/run-long-check` is the
-only sanctioned detached worker; the command it runs must still stay in the
-supervised foreground process group.
-"""
-import ast
-import json
-import os
-import re
-import shlex
-import sys
+const WORKFLOW_ROLES = new Set(["project-manager", "architect", "coder", "tester", "reviewer"]);
 
-WORKFLOW_ROLES = {"project-manager", "architect", "coder", "tester", "reviewer"}
+const SKILL_HINT = "Use the vcm-long-running-validation skill instead: "
+  + "`.ai/tools/run-long-check --timeout <duration> -- <command>` then "
+  + "`.ai/tools/watch-job <job-id>` in the same turn, repeating watch-job "
+  + "until it reports a terminal result.";
+const ARTIFACT_HINT = "VCM-managed Markdown cannot be written directly. Write a candidate outside "
+  + ".ai/vcm, then run .ai/tools/vcm-artifact <kind> --file <candidate> "
+  + "--mode <draft|final>.";
+const MAX_NESTED_SHELL_DEPTH = 3;
+const QUOTED = /'([^']*)'|"([^"]*)"/g;
+const SHELL_DASH_C = /(?:^|[\s;&|(])(?:sh|bash|zsh|dash|ksh)\s+(?:-\w+\s+)*-\w*c\w*(?:\s|$)/;
+const PROTECTED_TOOL_INVOCATION = new RegExp(
+  "(?:^|[;&|()\\n`])\\s*"
+  + "(?:(?:[A-Za-z_][A-Za-z0-9_]*=[^\\s;&|()]+)\\s+)*"
+  + "(?:[^\\s;&|()]*/)?(?:run-long-check|watch-job)(?=\\s|$)"
+);
+const HEREDOC_START = /<<(?!<)(-?)\s*(?:(['"])([^'"]+)\2|([^\s;&|()<>]+))/g;
+const EXECUTABLE_HEREDOC_RECEIVER = new RegExp(
+  "(?:^|[;&|()])\\s*"
+  + "(?:(?:env\\s+)?(?:[A-Za-z_][A-Za-z0-9_]*=[^\\s;&|()]+\\s+)*)"
+  + "(?:[^\\s;&|()]*/)?(?<receiver>sh|bash|zsh|dash|ksh|python\\d*(?:\\.\\d+)?|node)(?=\\s|$)"
+);
+const SHELL_HEREDOC_RECEIVERS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
+const SHELL_CONTROL_OPERATOR = /(?:\|&?|&&|\|\||;|\n|\(|\)|`)/;
+const RUN_LONG_CHECK_SHELL_STRING = new RegExp(
+  "(?:^|[;&|()\\n])\\s*"
+  + "(?:[^\\s;&|()]*/)?run-long-check\\b.*?\\s--\\s+"
+  + "(?:env(?:\\s+[A-Za-z_][A-Za-z0-9_]*=[^\\s]+)*\\s+)?"
+  + "(?:[^\\s;&|()]*/)?(?:sh|bash|zsh|dash|ksh)\\s+"
+  + "(?:-\\w+\\s+)*-\\w*c\\w*(?:\\s|$)"
+);
+const COMMAND_SUBSTITUTION = /\$\(([^()]*)\)|`([^`]*)`/g;
+const MANAGED_ARTIFACT_PATH = new RegExp(
+  "(?:^|[\\s/\\\\])\\.ai[/\\\\]vcm[/\\\\](?:"
+  + "handoffs[/\\\\].*\\.md|"
+  + "gate-reviews[/\\\\]requests[/\\\\].*\\.report\\.md|"
+  + "memory-review[/\\\\].*\\.md|"
+  + "coder-workers[/\\\\]reports[/\\\\].*\\.md|"
+  + "harness-feedback[/\\\\]pending[/\\\\].*\\.md"
+  + ")"
+);
+const SHELL_SEPARATOR_TOKEN = /^[;&|()]+$/;
+const SHELL_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+const PYTHON_PATH_MUTATION = /\bPath\s*\(\s*(['"])(?<path>[^'"]+)\1\s*\)\s*\.\s*(?:write_text|write_bytes|unlink|rmdir|touch|rename|replace)\s*\(/g;
+const PYTHON_OPEN = /\bopen\s*\(\s*(['"])(?<path>[^'"]+)\1\s*,\s*(['"])(?<mode>[^'"]+)\3/g;
+const NODE_PATH_MUTATION = new RegExp(
+  "\\b(?:writeFile|writeFileSync|appendFile|appendFileSync|unlink|unlinkSync|"
+  + "rm|rmSync|rmdir|rmdirSync|createWriteStream)\\s*\\(\\s*"
+  + "(['\"])(?<path>[^'\"]+)\\1",
+  "g"
+);
 
-SKILL_HINT = (
-    "Use the vcm-long-running-validation skill instead: "
-    "`.ai/tools/run-long-check --timeout <duration> -- <command>` then "
-    "`.ai/tools/watch-job <job-id>` in the same turn, repeating watch-job "
-    "until it reports a terminal result."
-)
-ARTIFACT_HINT = (
-    "VCM-managed Markdown cannot be written directly. Write a candidate outside "
-    ".ai/vcm, then run .ai/tools/vcm-artifact <kind> --file <candidate> "
-    "--mode <draft|final>."
-)
-MAX_NESTED_SHELL_DEPTH = 3
-QUOTED = re.compile(r"'([^']*)'|\"([^\"]*)\"")
-SHELL_DASH_C = re.compile(r"(?:^|[\s;&|(])(?:sh|bash|zsh|dash|ksh)\s+(?:-\w+\s+)*-\w*c\w*(?:\s|$)")
-PROTECTED_TOOL_INVOCATION = re.compile(
-    r"(?:^|[;&|()\n`])\s*"
-    r"(?:(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|()]+)\s+)*"
-    r"(?:[^\s;&|()]*/)?(?:run-long-check|watch-job)(?=\s|$)"
-)
-HEREDOC_START = re.compile(
-    r"<<(?!<)(-?)\s*(?:(['\"])([^'\"]+)\2|([^\s;&|()<>]+))"
-)
-EXECUTABLE_HEREDOC_RECEIVER = re.compile(
-    r"(?:^|[;&|()])\s*"
-    r"(?:(?:env\s+)?(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|()]+\s+)*)"
-    r"(?:[^\s;&|()]*/)?(?P<receiver>sh|bash|zsh|dash|ksh|python\d*(?:\.\d+)?|node)(?=\s|$)"
-)
-SHELL_HEREDOC_RECEIVERS = {"sh", "bash", "zsh", "dash", "ksh"}
-SHELL_CONTROL_OPERATOR = re.compile(r"(?:\|&?|&&|\|\||;|\n|\(|\)|`)")
-RUN_LONG_CHECK_SHELL_STRING = re.compile(
-    r"(?:^|[;&|()\n])\s*"
-    r"(?:[^\s;&|()]*/)?run-long-check\b.*?\s--\s+"
-    r"(?:env(?:\s+[A-Za-z_][A-Za-z0-9_]*=[^\s]+)*\s+)?"
-    r"(?:[^\s;&|()]*/)?(?:sh|bash|zsh|dash|ksh)\s+"
-    r"(?:-\w+\s+)*-\w*c\w*(?:\s|$)"
-)
-COMMAND_SUBSTITUTION = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")
-MANAGED_ARTIFACT_PATH = re.compile(
-    r"(?:^|[\s/\\])\.ai[/\\]vcm[/\\](?:"
-    r"handoffs[/\\].*\.md|"
-    r"gate-reviews[/\\]requests[/\\].*\.report\.md|"
-    r"memory-review[/\\].*\.md|"
-    r"coder-workers[/\\]reports[/\\].*\.md|"
-    r"harness-feedback[/\\]pending[/\\].*\.md"
-    r")"
-)
-SHELL_SEPARATOR_TOKEN = re.compile(r"^[;&|()]+$")
-SHELL_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-PYTHON_PATH_MUTATION = re.compile(
-    r"\bPath\s*\(\s*(['\"])(?P<path>[^'\"]+)\1\s*\)\s*\.\s*"
-    r"(?:write_text|write_bytes|unlink|rmdir|touch|rename|replace)\s*\("
-)
-PYTHON_OPEN = re.compile(
-    r"\bopen\s*\(\s*(['\"])(?P<path>[^'\"]+)\1\s*,\s*"
-    r"(['\"])(?P<mode>[^'\"]+)\3"
-)
-NODE_PATH_MUTATION = re.compile(
-    r"\b(?:writeFile|writeFileSync|appendFile|appendFileSync|unlink|unlinkSync|"
-    r"rm|rmSync|rmdir|rmdirSync|createWriteStream)\s*\(\s*"
-    r"(['\"])(?P<path>[^'\"]+)\1"
-)
+function stripQuoted(command) {
+  return command.replace(QUOTED, " ");
+}
 
+function quotedSegments(command) {
+  return [...command.matchAll(QUOTED)].map((match) => match[1] ?? match[2] ?? "");
+}
 
-def strip_quoted(command: str) -> str:
-    return QUOTED.sub(" ", command)
-
-
-def quoted_segments(command: str) -> list[str]:
-    return [single or double for single, double in QUOTED.findall(command)]
-
-
-def double_quoted_command_substitutions(command: str) -> list[str]:
-    substitutions = []
-    for single, double in QUOTED.findall(command):
-        if single or not double:
-            continue
-        substitutions.extend(paren or backtick for paren, backtick in COMMAND_SUBSTITUTION.findall(double))
-    return substitutions
-
-
-def strip_escaped_characters(command: str) -> str:
-    cleaned = []
-    index = 0
-    while index < len(command):
-        if command[index] == "\\" and index + 1 < len(command):
-            cleaned.extend((" ", " "))
-            index += 2
-            continue
-        cleaned.append(command[index])
-        index += 1
-    return "".join(cleaned)
-
-
-def heredoc_receiver_language(line: str):
-    match = EXECUTABLE_HEREDOC_RECEIVER.search(line)
-    if not match:
-        return None
-    receiver = match.group("receiver")
-    if receiver in SHELL_HEREDOC_RECEIVERS:
-        return "shell"
-    if receiver.startswith("python"):
-        return "python"
-    return "node"
-
-
-def parse_heredoc_content(command: str) -> tuple[str, str, list[tuple[str, str]]]:
-    """Return shell-only text, all executable text, and typed interpreter bodies."""
-    pending = []
-    shell_executable = []
-    all_executable = []
-    interpreter_sections: list[tuple[str, list[str]]] = []
-    for line in command.splitlines(keepends=True):
-        if pending:
-            delimiter, strip_tabs, language, body = pending[0]
-            candidate = line.rstrip("\r\n")
-            if strip_tabs:
-                candidate = candidate.lstrip("\t")
-            if candidate == delimiter:
-                pending.pop(0)
-            elif language:
-                content_line = line.lstrip("\t") if strip_tabs else line
-                all_executable.append(content_line)
-                if language == "shell":
-                    shell_executable.append(content_line)
-                else:
-                    body.append(content_line)
-                    if content_line.endswith(("\n", "\r")):
-                        shell_executable.append("\n")
-            elif line.endswith(("\n", "\r")):
-                shell_executable.append("\n")
-                all_executable.append("\n")
-            continue
-
-        shell_executable.append(line)
-        all_executable.append(line)
-        language = heredoc_receiver_language(line)
-        for match in HEREDOC_START.finditer(line):
-            delimiter = match.group(3) or match.group(4)
-            body: list[str] = []
-            pending.append((delimiter, bool(match.group(1)), language, body))
-            if language in ("python", "node"):
-                interpreter_sections.append((language, body))
-    return (
-        "".join(shell_executable),
-        "".join(all_executable),
-        [(language, "".join(body)) for language, body in interpreter_sections],
-    )
-
-
-def strip_heredoc_bodies(command: str) -> str:
-    """Remove data heredocs while preserving all executable interpreter bodies."""
-    return parse_heredoc_content(command)[1]
-
-
-def shell_segments(command: str) -> list[list[str]]:
-    shell_command, _, _ = parse_heredoc_content(command)
-    normalized = shell_command.replace("\\\n", " ").replace("\n", " ; ")
-    try:
-        lexer = shlex.shlex(normalized, posix=True, punctuation_chars=";&|()<>")
-        lexer.whitespace_split = True
-        lexer.commenters = ""
-        tokens = list(lexer)
-    except ValueError:
-        return []
-
-    segments: list[list[str]] = []
-    current: list[str] = []
-    for token in tokens:
-        if SHELL_SEPARATOR_TOKEN.fullmatch(token):
-            if current:
-                segments.append(current)
-                current = []
-            continue
-        current.append(token)
-    if current:
-        segments.append(current)
-    return segments
-
-
-def is_managed_artifact_path(value: str) -> bool:
-    return bool(MANAGED_ARTIFACT_PATH.search(value))
-
-
-def command_index(segment: list[str]):
-    index = 0
-    while index < len(segment) and SHELL_ASSIGNMENT.match(segment[index]):
-        index += 1
-    if index < len(segment) and segment[index].rsplit("/", 1)[-1] == "env":
-        index += 1
-        while index < len(segment) and (
-            segment[index].startswith("-") or SHELL_ASSIGNMENT.match(segment[index])
-        ):
-            index += 1
-    return index if index < len(segment) else None
-
-
-def redirection_details(segment: list[str]) -> tuple[list[str], set[int]]:
-    targets: list[str] = []
-    consumed: set[int] = set()
-    for index, token in enumerate(segment):
-        if ">" not in token or not all(character in "<>&|" for character in token):
-            continue
-        consumed.add(index)
-        if index > 0 and segment[index - 1].isdigit():
-            consumed.add(index - 1)
-        if index + 1 >= len(segment):
-            continue
-        consumed.add(index + 1)
-        target = segment[index + 1]
-        if token in (">&", "<&") and (target.isdigit() or target == "-"):
-            continue
-        targets.append(target)
-    return targets, consumed
-
-
-def command_operands(segment: list[str], start: int, consumed: set[int]) -> list[str]:
-    operands = []
-    options_done = False
-    for index in range(start, len(segment)):
-        if index in consumed:
-            continue
-        token = segment[index]
-        if token == "--":
-            options_done = True
-            continue
-        if not options_done and token.startswith("-"):
-            continue
-        operands.append(token)
-    return operands
-
-
-def explicit_interpreter_mutation(command_names: set[str], source: str) -> bool:
-    if any(re.fullmatch(r"python\d*(?:\.\d+)?", name) for name in command_names):
-        for match in PYTHON_PATH_MUTATION.finditer(source):
-            if is_managed_artifact_path(match.group("path")):
-                return True
-        for match in PYTHON_OPEN.finditer(source):
-            if is_managed_artifact_path(match.group("path")) and any(
-                flag in match.group("mode") for flag in "wax+"
-            ):
-                return True
-    if "node" in command_names:
-        return any(
-            is_managed_artifact_path(match.group("path"))
-            for match in NODE_PATH_MUTATION.finditer(source)
-        )
-    return False
-
-
-def mutates_managed_artifact(command: str) -> bool:
-    executable_command = strip_heredoc_bodies(command)
-    segments = shell_segments(command)
-    command_names = {
-        segment[index].rsplit("/", 1)[-1]
-        for segment in segments
-        if (index := command_index(segment)) is not None
+function doubleQuotedCommandSubstitutions(command) {
+  const substitutions = [];
+  for (const match of command.matchAll(QUOTED)) {
+    const double = match[2];
+    if (match[1] !== undefined || !double) {
+      continue;
     }
-    if explicit_interpreter_mutation(command_names, executable_command):
-        return True
-
-    for segment in segments:
-        redirects, consumed = redirection_details(segment)
-        if any(is_managed_artifact_path(target) for target in redirects):
-            return True
-
-        executable_index = command_index(segment)
-        if executable_index is None:
-            continue
-        command_name = segment[executable_index].rsplit("/", 1)[-1]
-        argument_start = executable_index + 1
-        arguments = segment[argument_start:]
-        operands = command_operands(segment, argument_start, consumed)
-
-        target_directory = None
-        for index, argument in enumerate(arguments):
-            if argument in ("-t", "--target-directory") and index + 1 < len(arguments):
-                target_directory = arguments[index + 1]
-            elif argument.startswith("--target-directory="):
-                target_directory = argument.split("=", 1)[1]
-
-        if command_name == "cp":
-            destination = target_directory or (operands[-1] if len(operands) >= 2 else None)
-            if destination and is_managed_artifact_path(destination):
-                return True
-        elif command_name == "mv":
-            if target_directory and is_managed_artifact_path(target_directory):
-                return True
-            if any(is_managed_artifact_path(operand) for operand in operands):
-                return True
-        elif command_name in ("rm", "tee"):
-            if any(is_managed_artifact_path(operand) for operand in operands):
-                return True
-        elif command_name in ("sed", "perl"):
-            in_place = any(
-                argument.startswith("-") and "i" in argument[1:]
-                for argument in arguments
-            )
-            if in_place and any(is_managed_artifact_path(argument) for argument in arguments):
-                return True
-    return False
-
-
-def unquoted_ampersand(command_without_quotes: str) -> bool:
-    cleaned = re.sub(r"\d*>&\d*", " ", command_without_quotes)
-    cleaned = re.sub(r"<&\d*", " ", cleaned)
-    cleaned = cleaned.replace("&&", " ")
-    return bool(re.search(r"&\s*(?:$|[;\n)])", cleaned) or re.search(r"\s&\s", cleaned))
-
-
-def protected_tool_invoked(command_without_quotes: str) -> bool:
-    return bool(PROTECTED_TOOL_INVOCATION.search(command_without_quotes))
-
-
-def shell_background_reasons(command: str) -> list[str]:
-    stripped = strip_escaped_characters(strip_quoted(command))
-    reasons = []
-    if re.search(r"(?:^|[\s;&|(])(?:nohup|setsid)(?:\s|$)", stripped):
-        reasons.append("nohup/setsid detach is forbidden")
-    if re.search(r"(?:^|[\s;&|(])disown(?:\s|$)", stripped):
-        reasons.append("disown is forbidden")
-    if unquoted_ampersand(stripped):
-        reasons.append("'&' background execution is forbidden")
-    return reasons
-
-
-def python_dotted_name(node, aliases: dict[str, str]):
-    parts = []
-    current = node
-    while isinstance(current, ast.Attribute):
-        parts.append(current.attr)
-        current = current.value
-    if not isinstance(current, ast.Name):
-        return None
-    parts.append(current.id)
-    parts.reverse()
-    if parts[0] in aliases:
-        parts = aliases[parts[0]].split(".") + parts[1:]
-    return ".".join(parts)
-
-
-def python_import_aliases(tree) -> dict[str, str]:
-    aliases = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for imported in node.names:
-                aliases[imported.asname or imported.name.split(".")[0]] = imported.name
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            for imported in node.names:
-                aliases[imported.asname or imported.name] = f"{node.module}.{imported.name}"
-    return aliases
-
-
-def literal_string(node):
-    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
-
-
-def scan_python_backgrounding(source: str) -> list[str]:
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return []
-    aliases = python_import_aliases(tree)
-    reasons = []
-    asynchronous_calls = {
-        "subprocess.Popen",
-        "os.fork",
-        "os.popen",
-        "asyncio.create_subprocess_exec",
-        "asyncio.create_subprocess_shell",
+    for (const substitution of double.matchAll(COMMAND_SUBSTITUTION)) {
+      substitutions.push(substitution[1] ?? substitution[2] ?? "");
     }
-    shell_calls = {
-        "os.system",
-        "subprocess.getoutput",
-        "subprocess.getstatusoutput",
+  }
+  return substitutions;
+}
+
+function stripEscapedCharacters(command) {
+  let cleaned = "";
+  let index = 0;
+  while (index < command.length) {
+    if (command[index] === "\\" && index + 1 < command.length) {
+      cleaned += "  ";
+      index += 2;
+      continue;
     }
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        name = python_dotted_name(node.func, aliases)
-        if not name:
-            continue
-        if name in asynchronous_calls or name.startswith("os.spawn"):
-            reasons.append("Python asynchronous process creation is forbidden")
-            continue
-        command = literal_string(node.args[0]) if node.args else None
-        if name in shell_calls and command and shell_background_reasons(command):
-            reasons.append("Python shell background execution is forbidden")
-            continue
-        if name in {"subprocess.run", "subprocess.call", "subprocess.check_call", "subprocess.check_output"}:
-            uses_shell = any(
-                keyword.arg == "shell" and isinstance(keyword.value, ast.Constant) and keyword.value.value is True
-                for keyword in node.keywords
-            )
-            if uses_shell and command and shell_background_reasons(command):
-                reasons.append("Python shell background execution is forbidden")
-    return reasons
+    cleaned += command[index];
+    index += 1;
+  }
+  return cleaned;
+}
 
+function heredocReceiverLanguage(line) {
+  const match = EXECUTABLE_HEREDOC_RECEIVER.exec(line);
+  if (!match) {
+    return null;
+  }
+  const receiver = match.groups.receiver;
+  if (SHELL_HEREDOC_RECEIVERS.has(receiver)) {
+    return "shell";
+  }
+  return receiver.startsWith("python") ? "python" : "node";
+}
 
-def mask_javascript(source: str, mask_strings: bool) -> str:
-    output = []
-    state = "code"
-    quote = ""
-    index = 0
-    while index < len(source):
-        character = source[index]
-        following = source[index + 1] if index + 1 < len(source) else ""
-        if state == "code":
-            if character == "/" and following == "/":
-                output.extend((" ", " "))
-                state = "line-comment"
-                index += 2
-                continue
-            if character == "/" and following == "*":
-                output.extend((" ", " "))
-                state = "block-comment"
-                index += 2
-                continue
-            if character in ("'", '"', "`"):
-                quote = character
-                state = "string"
-                output.append(" " if mask_strings else character)
-                index += 1
-                continue
-            output.append(character)
-            index += 1
-            continue
-        if state == "line-comment":
-            output.append("\n" if character == "\n" else " ")
-            if character == "\n":
-                state = "code"
-            index += 1
-            continue
-        if state == "block-comment":
-            if character == "*" and following == "/":
-                output.extend((" ", " "))
-                state = "code"
-                index += 2
-            else:
-                output.append("\n" if character == "\n" else " ")
-                index += 1
-            continue
-        if character == "\\" and following:
-            output.extend((" ", " ") if mask_strings else (character, following))
-            index += 2
-            continue
-        output.append(" " if mask_strings and character != "\n" else character)
-        if character == quote:
-            state = "code"
-        index += 1
-    return "".join(output)
+function splitLinesKeepEnds(text) {
+  return text.match(/[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+$/g) ?? [];
+}
 
+function endsWithNewline(text) {
+  return text.endsWith("\n") || text.endsWith("\r");
+}
 
-def scan_node_backgrounding(source: str) -> list[str]:
-    without_comments = mask_javascript(source, False)
-    executable = mask_javascript(source, True)
-    module_aliases = {"child_process"}
-    function_aliases = set()
-    module_pattern = r"(?:node:)?child_process"
-    for match in re.finditer(
-        rf"\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*require\(\s*['\"]{module_pattern}['\"]\s*\)",
-        without_comments,
-    ):
-        module_aliases.add(match.group(1))
-    for match in re.finditer(
-        rf"\bimport\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+['\"]{module_pattern}['\"]",
-        without_comments,
-    ):
-        module_aliases.add(match.group(1))
-    destructured_patterns = [
-        rf"\b(?:const|let|var)\s*\{{([^}}]+)\}}\s*=\s*require\(\s*['\"]{module_pattern}['\"]\s*\)",
-        rf"\bimport\s*\{{([^}}]+)\}}\s*from\s*['\"]{module_pattern}['\"]",
-    ]
-    asynchronous = {"spawn", "exec", "execFile", "fork"}
-    for pattern in destructured_patterns:
-        for match in re.finditer(pattern, without_comments):
-            for item in match.group(1).split(","):
-                parts = re.split(r"\s+(?:as)\s+|\s*:\s*", item.strip())
-                if parts and parts[0] in asynchronous:
-                    function_aliases.add(parts[-1])
-    for alias in module_aliases:
-        if re.search(rf"\b{re.escape(alias)}\s*\.\s*(?:spawn|exec|execFile|fork)\s*\(", executable):
-            return ["Node asynchronous process creation is forbidden"]
-    for alias in function_aliases:
-        if re.search(rf"\b{re.escape(alias)}\s*\(", executable):
-            return ["Node asynchronous process creation is forbidden"]
-    if re.search(
-        rf"\brequire\(\s*['\"]{module_pattern}['\"]\s*\)\s*\.\s*(?:spawn|exec|execFile|fork)\s*\(",
-        without_comments,
-    ):
-        return ["Node asynchronous process creation is forbidden"]
-    return []
+// Returns shell-only text, all executable text, and typed interpreter bodies.
+function parseHeredocContent(command) {
+  const pending = [];
+  let shellExecutable = "";
+  let allExecutable = "";
+  const interpreterSections = [];
+  for (const line of splitLinesKeepEnds(command)) {
+    if (pending.length > 0) {
+      const { delimiter, stripTabs, language, body } = pending[0];
+      let candidate = line.replace(/[\r\n]+$/, "");
+      if (stripTabs) {
+        candidate = candidate.replace(/^\t+/, "");
+      }
+      if (candidate === delimiter) {
+        pending.shift();
+      } else if (language) {
+        const contentLine = stripTabs ? line.replace(/^\t+/, "") : line;
+        allExecutable += contentLine;
+        if (language === "shell") {
+          shellExecutable += contentLine;
+        } else {
+          body.push(contentLine);
+          if (endsWithNewline(contentLine)) {
+            shellExecutable += "\n";
+          }
+        }
+      } else if (endsWithNewline(line)) {
+        shellExecutable += "\n";
+        allExecutable += "\n";
+      }
+      continue;
+    }
 
+    shellExecutable += line;
+    allExecutable += line;
+    const language = heredocReceiverLanguage(line);
+    for (const match of line.matchAll(HEREDOC_START)) {
+      const body = [];
+      pending.push({ delimiter: match[3] ?? match[4], stripTabs: Boolean(match[1]), language, body });
+      if (language === "python" || language === "node") {
+        interpreterSections.push({ language, body });
+      }
+    }
+  }
+  return {
+    shellCommand: shellExecutable,
+    executable: allExecutable,
+    interpreterSections: interpreterSections.map(({ language, body }) => ({ language, source: body.join("") }))
+  };
+}
 
-def scan_shell_command(command: str, depth: int = 0) -> list[str]:
-    shell_command, _, interpreter_sections = parse_heredoc_content(command)
-    reasons = shell_background_reasons(shell_command)
-    stripped = strip_escaped_characters(strip_quoted(shell_command))
-    if protected_tool_invoked(stripped):
-        if SHELL_CONTROL_OPERATOR.search(stripped):
-            reasons.append("run-long-check and watch-job must be standalone Bash commands")
-        if RUN_LONG_CHECK_SHELL_STRING.search(stripped):
-            reasons.append("run-long-check must receive a direct executable or script, not a shell command string")
+// Removes data heredocs while preserving all executable interpreter bodies.
+function stripHeredocBodies(command) {
+  return parseHeredocContent(command).executable;
+}
 
-    # `sh -c '...'` quoted payloads are shell code, not plain strings.
-    if depth < MAX_NESTED_SHELL_DEPTH and SHELL_DASH_C.search(stripped):
-        for segment in quoted_segments(shell_command):
-            if protected_tool_invoked(strip_escaped_characters(strip_quoted(segment))):
-                reasons.append("run-long-check and watch-job must not be invoked through a shell command string")
-            reasons.extend(scan_shell_command(segment, depth + 1))
-    if depth < MAX_NESTED_SHELL_DEPTH:
-        for substitution in double_quoted_command_substitutions(shell_command):
-            nested_stripped = strip_escaped_characters(strip_quoted(substitution))
-            if protected_tool_invoked(nested_stripped):
-                reasons.append("run-long-check and watch-job must not be invoked through command substitution")
-            reasons.extend(scan_shell_command(substitution, depth + 1))
-    for language, source in interpreter_sections:
-        if language == "python":
-            reasons.extend(scan_python_backgrounding(source))
-        elif language == "node":
-            reasons.extend(scan_node_backgrounding(source))
-    return reasons
+// Mirrors Python shlex in posix mode with punctuation_chars=";&|()<>" and
+// whitespace_split: quotes are removed, runs of punctuation become tokens, and
+// an unclosed quote or trailing escape makes the command unparsable.
+function shellTokens(text) {
+  const whitespace = " \t\r\n";
+  const punctuation = ";&|()<>";
+  const tokens = [];
+  let current = "";
+  let inWord = false;
+  let index = 0;
+  const finishWord = () => {
+    if (inWord) {
+      tokens.push(current);
+      current = "";
+      inWord = false;
+    }
+  };
+  while (index < text.length) {
+    const character = text[index];
+    if (whitespace.includes(character)) {
+      finishWord();
+      index += 1;
+      continue;
+    }
+    if (punctuation.includes(character)) {
+      finishWord();
+      let run = "";
+      while (index < text.length && punctuation.includes(text[index])) {
+        run += text[index];
+        index += 1;
+      }
+      tokens.push(run);
+      continue;
+    }
+    if (character === "\\") {
+      if (index + 1 >= text.length) {
+        throw new Error("No escaped character");
+      }
+      current += text[index + 1];
+      inWord = true;
+      index += 2;
+      continue;
+    }
+    if (character === "'") {
+      const end = text.indexOf("'", index + 1);
+      if (end < 0) {
+        throw new Error("No closing quotation");
+      }
+      current += text.slice(index + 1, end);
+      inWord = true;
+      index = end + 1;
+      continue;
+    }
+    if (character === "\"") {
+      index += 1;
+      let closed = false;
+      while (index < text.length) {
+        const next = text[index];
+        if (next === "\"") {
+          closed = true;
+          index += 1;
+          break;
+        }
+        if (next === "\\" && index + 1 < text.length && (text[index + 1] === "\"" || text[index + 1] === "\\")) {
+          current += text[index + 1];
+          index += 2;
+          continue;
+        }
+        current += next;
+        index += 1;
+      }
+      if (!closed) {
+        throw new Error("No closing quotation");
+      }
+      inWord = true;
+      continue;
+    }
+    current += character;
+    inWord = true;
+    index += 1;
+  }
+  finishWord();
+  return tokens;
+}
 
+function shellSegments(command) {
+  const { shellCommand } = parseHeredocContent(command);
+  const normalized = shellCommand.replaceAll("\\\n", " ").replaceAll("\n", " ; ");
+  let tokens;
+  try {
+    tokens = shellTokens(normalized);
+  } catch {
+    return [];
+  }
 
-def guard_reasons(tool_input: dict) -> list[str]:
-    reasons = []
-    if tool_input.get("run_in_background"):
-        reasons.append("Bash run_in_background is forbidden")
+  const segments = [];
+  let current = [];
+  for (const token of tokens) {
+    if (SHELL_SEPARATOR_TOKEN.test(token)) {
+      if (current.length > 0) {
+        segments.push(current);
+        current = [];
+      }
+      continue;
+    }
+    current.push(token);
+  }
+  if (current.length > 0) {
+    segments.push(current);
+  }
+  return segments;
+}
 
-    command = tool_input.get("command")
-    command = command if isinstance(command, str) else ""
+function isManagedArtifactPath(value) {
+  return MANAGED_ARTIFACT_PATH.test(value);
+}
 
-    reasons.extend(scan_shell_command(command))
-    if mutates_managed_artifact(command):
-        reasons.append("direct Bash writes to VCM-managed Markdown are forbidden")
-    return list(dict.fromkeys(reasons))
+function baseName(token) {
+  return token.split("/").pop();
+}
 
+function commandIndex(segment) {
+  let index = 0;
+  while (index < segment.length && SHELL_ASSIGNMENT.test(segment[index])) {
+    index += 1;
+  }
+  if (index < segment.length && baseName(segment[index]) === "env") {
+    index += 1;
+    while (index < segment.length && (segment[index].startsWith("-") || SHELL_ASSIGNMENT.test(segment[index]))) {
+      index += 1;
+    }
+  }
+  return index < segment.length ? index : null;
+}
 
-def main() -> int:
-    raw = sys.stdin.read()
-    if os.environ.get("VCM_ROLE", "").strip() not in WORKFLOW_ROLES:
-        return 0
+function redirectionDetails(segment) {
+  const targets = [];
+  const consumed = new Set();
+  segment.forEach((token, index) => {
+    if (!token.includes(">") || ![...token].every((character) => "<>&|".includes(character))) {
+      return;
+    }
+    consumed.add(index);
+    if (index > 0 && /^\d+$/.test(segment[index - 1])) {
+      consumed.add(index - 1);
+    }
+    if (index + 1 >= segment.length) {
+      return;
+    }
+    consumed.add(index + 1);
+    const target = segment[index + 1];
+    if ((token === ">&" || token === "<&") && (/^\d+$/.test(target) || target === "-")) {
+      return;
+    }
+    targets.push(target);
+  });
+  return { targets, consumed };
+}
 
-    try:
-        payload = json.loads(raw) if raw.strip() else {}
-    except ValueError:
-        return 0
-    tool_name = payload.get("tool_name")
-    if tool_name == "Bash":
-        tool_input = payload.get("tool_input")
-        tool_input = tool_input if isinstance(tool_input, dict) else {}
-        reasons = guard_reasons(tool_input)
-    elif tool_name in ("Write", "Edit"):
-        tool_input = payload.get("tool_input")
-        tool_input = tool_input if isinstance(tool_input, dict) else {}
-        file_path = tool_input.get("file_path") or tool_input.get("path")
-        reasons = (
-            ["direct Write/Edit of VCM-managed Markdown is forbidden"]
-            if isinstance(file_path, str) and MANAGED_ARTIFACT_PATH.search(file_path)
-            else []
-        )
-    else:
-        return 0
-    if not reasons:
-        return 0
+function commandOperands(segment, start, consumed) {
+  const operands = [];
+  let optionsDone = false;
+  for (let index = start; index < segment.length; index += 1) {
+    if (consumed.has(index)) {
+      continue;
+    }
+    const token = segment[index];
+    if (token === "--") {
+      optionsDone = true;
+      continue;
+    }
+    if (!optionsDone && token.startsWith("-")) {
+      continue;
+    }
+    operands.push(token);
+  }
+  return operands;
+}
 
-    print(
-        json.dumps(
-            {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": (
-                        "VCM denied this tool call (" + "; ".join(reasons) + "). "
-                        + (ARTIFACT_HINT if any("Markdown" in reason for reason in reasons) else SKILL_HINT)
-                    ),
-                }
-            }
-        )
-    )
-    return 0
+function explicitInterpreterMutation(commandNames, source) {
+  if ([...commandNames].some((name) => /^python\d*(?:\.\d+)?$/.test(name))) {
+    for (const match of source.matchAll(PYTHON_PATH_MUTATION)) {
+      if (isManagedArtifactPath(match.groups.path)) {
+        return true;
+      }
+    }
+    for (const match of source.matchAll(PYTHON_OPEN)) {
+      if (isManagedArtifactPath(match.groups.path) && [..."wax+"].some((flag) => match.groups.mode.includes(flag))) {
+        return true;
+      }
+    }
+  }
+  if (commandNames.has("node")) {
+    return [...source.matchAll(NODE_PATH_MUTATION)].some((match) => isManagedArtifactPath(match.groups.path));
+  }
+  return false;
+}
 
+function mutatesManagedArtifact(command) {
+  const executableCommand = stripHeredocBodies(command);
+  const segments = shellSegments(command);
+  const commandNames = new Set();
+  for (const segment of segments) {
+    const index = commandIndex(segment);
+    if (index !== null) {
+      commandNames.add(baseName(segment[index]));
+    }
+  }
+  if (explicitInterpreterMutation(commandNames, executableCommand)) {
+    return true;
+  }
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+  for (const segment of segments) {
+    const { targets, consumed } = redirectionDetails(segment);
+    if (targets.some(isManagedArtifactPath)) {
+      return true;
+    }
+
+    const executableIndex = commandIndex(segment);
+    if (executableIndex === null) {
+      continue;
+    }
+    const commandName = baseName(segment[executableIndex]);
+    const argumentStart = executableIndex + 1;
+    const args = segment.slice(argumentStart);
+    const operands = commandOperands(segment, argumentStart, consumed);
+
+    let targetDirectory = null;
+    args.forEach((argument, index) => {
+      if ((argument === "-t" || argument === "--target-directory") && index + 1 < args.length) {
+        targetDirectory = args[index + 1];
+      } else if (argument.startsWith("--target-directory=")) {
+        targetDirectory = argument.split("=").slice(1).join("=");
+      }
+    });
+
+    if (commandName === "cp") {
+      const destination = targetDirectory || (operands.length >= 2 ? operands[operands.length - 1] : null);
+      if (destination && isManagedArtifactPath(destination)) {
+        return true;
+      }
+    } else if (commandName === "mv") {
+      if (targetDirectory && isManagedArtifactPath(targetDirectory)) {
+        return true;
+      }
+      if (operands.some(isManagedArtifactPath)) {
+        return true;
+      }
+    } else if (commandName === "rm" || commandName === "tee") {
+      if (operands.some(isManagedArtifactPath)) {
+        return true;
+      }
+    } else if (commandName === "sed" || commandName === "perl") {
+      const inPlace = args.some((argument) => argument.startsWith("-") && argument.slice(1).includes("i"));
+      if (inPlace && args.some(isManagedArtifactPath)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function unquotedAmpersand(commandWithoutQuotes) {
+  const cleaned = commandWithoutQuotes
+    .replace(/\d*>&\d*/g, " ")
+    .replace(/<&\d*/g, " ")
+    .replaceAll("&&", " ");
+  return /&\s*(?:$|[;\n)])/.test(cleaned) || /\s&\s/.test(cleaned);
+}
+
+function protectedToolInvoked(commandWithoutQuotes) {
+  return PROTECTED_TOOL_INVOCATION.test(commandWithoutQuotes);
+}
+
+function shellBackgroundReasons(command) {
+  const stripped = stripEscapedCharacters(stripQuoted(command));
+  const reasons = [];
+  if (/(?:^|[\s;&|(])(?:nohup|setsid)(?:\s|$)/.test(stripped)) {
+    reasons.push("nohup/setsid detach is forbidden");
+  }
+  if (/(?:^|[\s;&|(])disown(?:\s|$)/.test(stripped)) {
+    reasons.push("disown is forbidden");
+  }
+  if (unquotedAmpersand(stripped)) {
+    reasons.push("'&' background execution is forbidden");
+  }
+  return reasons;
+}
+
+// Masks Python comments (and optionally string contents) with spaces while
+// preserving offsets, so call and import scanning only sees executable code.
+function maskPython(source, maskStrings) {
+  let output = "";
+  let index = 0;
+  while (index < source.length) {
+    const character = source[index];
+    if (character === "#") {
+      while (index < source.length && source[index] !== "\n") {
+        output += " ";
+        index += 1;
+      }
+      continue;
+    }
+    if (character === "'" || character === "\"") {
+      const triple = source.startsWith(character.repeat(3), index);
+      const delimiter = triple ? character.repeat(3) : character;
+      output += maskStrings ? " ".repeat(delimiter.length) : delimiter;
+      index += delimiter.length;
+      while (index < source.length) {
+        if (source[index] === "\\" && index + 1 < source.length) {
+          output += maskStrings ? "  " : source.slice(index, index + 2);
+          index += 2;
+          continue;
+        }
+        if (source.startsWith(delimiter, index)) {
+          output += maskStrings ? " ".repeat(delimiter.length) : delimiter;
+          index += delimiter.length;
+          break;
+        }
+        if (!triple && source[index] === "\n") {
+          break;
+        }
+        output += maskStrings && source[index] !== "\n" ? " " : source[index];
+        index += 1;
+      }
+      continue;
+    }
+    output += character;
+    index += 1;
+  }
+  return output;
+}
+
+function pythonImportAliases(code) {
+  const aliases = new Map();
+  for (const statement of code.split(/[;\n]/)) {
+    const fromImport = /^\s*from\s+([A-Za-z_][\w.]*)\s+import\s+(.+)$/.exec(statement);
+    if (fromImport) {
+      for (const item of fromImport[2].replace(/[()]/g, " ").split(",")) {
+        const parts = item.trim().split(/\s+as\s+/);
+        if (parts[0]) {
+          aliases.set((parts[1] || parts[0]).trim(), `${fromImport[1]}.${parts[0].trim()}`);
+        }
+      }
+      continue;
+    }
+    const plainImport = /^\s*import\s+(.+)$/.exec(statement);
+    if (plainImport) {
+      for (const item of plainImport[1].split(",")) {
+        const parts = item.trim().split(/\s+as\s+/);
+        const name = parts[0].trim();
+        if (name) {
+          aliases.set(parts[1] ? parts[1].trim() : name.split(".")[0], name);
+        }
+      }
+    }
+  }
+  return aliases;
+}
+
+// Returns the value of a plain Python string literal starting at offset when it
+// is the whole argument, mirroring an ast.Constant first argument.
+function pythonLiteralArgument(source, offset) {
+  const match = /^\s*([rRuU]?)('''|"""|'|")/.exec(source.slice(offset));
+  if (!match) {
+    return null;
+  }
+  const delimiter = match[2];
+  let index = offset + match[0].length;
+  let value = "";
+  while (index < source.length) {
+    if (source[index] === "\\" && index + 1 < source.length) {
+      value += source.slice(index, index + 2);
+      index += 2;
+      continue;
+    }
+    if (source.startsWith(delimiter, index)) {
+      index += delimiter.length;
+      return /^\s*[,)]/.test(source.slice(index)) ? value : null;
+    }
+    value += source[index];
+    index += 1;
+  }
+  return null;
+}
+
+function callArgumentSpan(executable, openParen) {
+  let depth = 0;
+  for (let index = openParen; index < executable.length; index += 1) {
+    if (executable[index] === "(") {
+      depth += 1;
+    } else if (executable[index] === ")") {
+      depth -= 1;
+      if (depth === 0) {
+        return executable.slice(openParen + 1, index);
+      }
+    }
+  }
+  return executable.slice(openParen + 1);
+}
+
+function scanPythonBackgrounding(source) {
+  const withoutComments = maskPython(source, false);
+  const executable = maskPython(source, true);
+  const aliases = pythonImportAliases(withoutComments);
+  const reasons = [];
+  const asynchronousCalls = new Set([
+    "subprocess.Popen",
+    "os.fork",
+    "os.popen",
+    "asyncio.create_subprocess_exec",
+    "asyncio.create_subprocess_shell"
+  ]);
+  const shellCalls = new Set(["os.system", "subprocess.getoutput", "subprocess.getstatusoutput"]);
+  const foregroundCalls = new Set(["subprocess.run", "subprocess.call", "subprocess.check_call", "subprocess.check_output"]);
+  const callPattern = /(?<![\w.])([A-Za-z_]\w*(?:\s*\.\s*[A-Za-z_]\w*)*)\s*\(/g;
+  for (const match of executable.matchAll(callPattern)) {
+    if (/\b(?:def|class)\s+$/.test(executable.slice(0, match.index))) {
+      continue;
+    }
+    const parts = match[1].replace(/\s+/g, "").split(".");
+    const resolved = aliases.has(parts[0]) ? [...aliases.get(parts[0]).split("."), ...parts.slice(1)] : parts;
+    const name = resolved.join(".");
+    if (asynchronousCalls.has(name) || name.startsWith("os.spawn")) {
+      reasons.push("Python asynchronous process creation is forbidden");
+      continue;
+    }
+    const openParen = match.index + match[0].length - 1;
+    const command = pythonLiteralArgument(source, openParen + 1);
+    if (shellCalls.has(name) && command && shellBackgroundReasons(command).length > 0) {
+      reasons.push("Python shell background execution is forbidden");
+      continue;
+    }
+    if (foregroundCalls.has(name)) {
+      const usesShell = /(?:^|[,\s])shell\s*=\s*True\b/.test(callArgumentSpan(executable, openParen));
+      if (usesShell && command && shellBackgroundReasons(command).length > 0) {
+        reasons.push("Python shell background execution is forbidden");
+      }
+    }
+  }
+  return reasons;
+}
+
+function maskJavascript(source, maskStrings) {
+  let output = "";
+  let state = "code";
+  let quote = "";
+  let index = 0;
+  while (index < source.length) {
+    const character = source[index];
+    const following = index + 1 < source.length ? source[index + 1] : "";
+    if (state === "code") {
+      if (character === "/" && following === "/") {
+        output += "  ";
+        state = "line-comment";
+        index += 2;
+        continue;
+      }
+      if (character === "/" && following === "*") {
+        output += "  ";
+        state = "block-comment";
+        index += 2;
+        continue;
+      }
+      if (character === "'" || character === "\"" || character === "`") {
+        quote = character;
+        state = "string";
+        output += maskStrings ? " " : character;
+        index += 1;
+        continue;
+      }
+      output += character;
+      index += 1;
+      continue;
+    }
+    if (state === "line-comment") {
+      output += character === "\n" ? "\n" : " ";
+      if (character === "\n") {
+        state = "code";
+      }
+      index += 1;
+      continue;
+    }
+    if (state === "block-comment") {
+      if (character === "*" && following === "/") {
+        output += "  ";
+        state = "code";
+        index += 2;
+      } else {
+        output += character === "\n" ? "\n" : " ";
+        index += 1;
+      }
+      continue;
+    }
+    if (character === "\\" && following) {
+      output += maskStrings ? "  " : character + following;
+      index += 2;
+      continue;
+    }
+    output += maskStrings && character !== "\n" ? " " : character;
+    if (character === quote) {
+      state = "code";
+    }
+    index += 1;
+  }
+  return output;
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function scanNodeBackgrounding(source) {
+  const withoutComments = maskJavascript(source, false);
+  const executable = maskJavascript(source, true);
+  const moduleAliases = new Set(["child_process"]);
+  const functionAliases = new Set();
+  const modulePattern = "(?:node:)?child_process";
+  for (const match of withoutComments.matchAll(new RegExp(
+    `\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*require\\(\\s*['"]${modulePattern}['"]\\s*\\)`,
+    "g"
+  ))) {
+    moduleAliases.add(match[1]);
+  }
+  for (const match of withoutComments.matchAll(new RegExp(
+    `\\bimport\\s+\\*\\s+as\\s+([A-Za-z_$][\\w$]*)\\s+from\\s+['"]${modulePattern}['"]`,
+    "g"
+  ))) {
+    moduleAliases.add(match[1]);
+  }
+  const destructuredPatterns = [
+    `\\b(?:const|let|var)\\s*\\{([^}]+)\\}\\s*=\\s*require\\(\\s*['"]${modulePattern}['"]\\s*\\)`,
+    `\\bimport\\s*\\{([^}]+)\\}\\s*from\\s*['"]${modulePattern}['"]`
+  ];
+  const asynchronous = new Set(["spawn", "exec", "execFile", "fork"]);
+  for (const pattern of destructuredPatterns) {
+    for (const match of withoutComments.matchAll(new RegExp(pattern, "g"))) {
+      for (const item of match[1].split(",")) {
+        const parts = item.trim().split(/\s+(?:as)\s+|\s*:\s*/);
+        if (parts.length > 0 && asynchronous.has(parts[0])) {
+          functionAliases.add(parts[parts.length - 1]);
+        }
+      }
+    }
+  }
+  for (const alias of moduleAliases) {
+    if (new RegExp(`\\b${escapeRegExp(alias)}\\s*\\.\\s*(?:spawn|exec|execFile|fork)\\s*\\(`).test(executable)) {
+      return ["Node asynchronous process creation is forbidden"];
+    }
+  }
+  for (const alias of functionAliases) {
+    if (new RegExp(`\\b${escapeRegExp(alias)}\\s*\\(`).test(executable)) {
+      return ["Node asynchronous process creation is forbidden"];
+    }
+  }
+  if (new RegExp(`\\brequire\\(\\s*['"]${modulePattern}['"]\\s*\\)\\s*\\.\\s*(?:spawn|exec|execFile|fork)\\s*\\(`).test(withoutComments)) {
+    return ["Node asynchronous process creation is forbidden"];
+  }
+  return [];
+}
+
+function scanShellCommand(command, depth = 0) {
+  const { shellCommand, interpreterSections } = parseHeredocContent(command);
+  const reasons = shellBackgroundReasons(shellCommand);
+  const stripped = stripEscapedCharacters(stripQuoted(shellCommand));
+  if (protectedToolInvoked(stripped)) {
+    if (SHELL_CONTROL_OPERATOR.test(stripped)) {
+      reasons.push("run-long-check and watch-job must be standalone Bash commands");
+    }
+    if (RUN_LONG_CHECK_SHELL_STRING.test(stripped)) {
+      reasons.push("run-long-check must receive a direct executable or script, not a shell command string");
+    }
+  }
+
+  // `sh -c '...'` quoted payloads are shell code, not plain strings.
+  if (depth < MAX_NESTED_SHELL_DEPTH && SHELL_DASH_C.test(stripped)) {
+    for (const segment of quotedSegments(shellCommand)) {
+      if (protectedToolInvoked(stripEscapedCharacters(stripQuoted(segment)))) {
+        reasons.push("run-long-check and watch-job must not be invoked through a shell command string");
+      }
+      reasons.push(...scanShellCommand(segment, depth + 1));
+    }
+  }
+  if (depth < MAX_NESTED_SHELL_DEPTH) {
+    for (const substitution of doubleQuotedCommandSubstitutions(shellCommand)) {
+      if (protectedToolInvoked(stripEscapedCharacters(stripQuoted(substitution)))) {
+        reasons.push("run-long-check and watch-job must not be invoked through command substitution");
+      }
+      reasons.push(...scanShellCommand(substitution, depth + 1));
+    }
+  }
+  for (const { language, source } of interpreterSections) {
+    if (language === "python") {
+      reasons.push(...scanPythonBackgrounding(source));
+    } else if (language === "node") {
+      reasons.push(...scanNodeBackgrounding(source));
+    }
+  }
+  return reasons;
+}
+
+function guardReasons(toolInput) {
+  const reasons = [];
+  if (toolInput.run_in_background) {
+    reasons.push("Bash run_in_background is forbidden");
+  }
+  const command = typeof toolInput.command === "string" ? toolInput.command : "";
+  reasons.push(...scanShellCommand(command));
+  if (mutatesManagedArtifact(command)) {
+    reasons.push("direct Bash writes to VCM-managed Markdown are forbidden");
+  }
+  return [...new Set(reasons)];
+}
+
+function asObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function main() {
+  const raw = fs.readFileSync(0, "utf8");
+  if (!WORKFLOW_ROLES.has((process.env.VCM_ROLE || "").trim())) {
+    return;
+  }
+
+  let payload;
+  try {
+    payload = raw.trim() ? JSON.parse(raw) : {};
+  } catch {
+    return;
+  }
+  payload = asObject(payload);
+  let reasons;
+  if (payload.tool_name === "Bash") {
+    reasons = guardReasons(asObject(payload.tool_input));
+  } else if (payload.tool_name === "Write" || payload.tool_name === "Edit") {
+    const toolInput = asObject(payload.tool_input);
+    const filePath = toolInput.file_path || toolInput.path;
+    reasons = typeof filePath === "string" && MANAGED_ARTIFACT_PATH.test(filePath)
+      ? ["direct Write/Edit of VCM-managed Markdown is forbidden"]
+      : [];
+  } else {
+    return;
+  }
+  if (reasons.length === 0) {
+    return;
+  }
+
+  process.stdout.write(`${JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: `VCM denied this tool call (${reasons.join("; ")}). `
+        + (reasons.some((reason) => reason.includes("Markdown")) ? ARTIFACT_HINT : SKILL_HINT)
+    }
+  })}\n`);
+}
+
+main();

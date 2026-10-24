@@ -20,7 +20,7 @@ async function runGuard(role: string | undefined, payload: unknown): Promise<Gua
   }
 
   const stdout = await new Promise<string>((resolve, reject) => {
-    const child = execFile("python3", [guardPath], { env }, (error, output) => {
+    const child = execFile(process.execPath, [guardPath], { env }, (error, output) => {
       if (error) {
         reject(error);
         return;

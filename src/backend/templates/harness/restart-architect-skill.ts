@@ -1,3 +1,5 @@
+import { NODE_TOOL_ARGUMENT_PARSER, NODE_TOOL_HTTP, renderNodeToolHeader } from "./node-tool-runtime.js";
+
 export function renderRestartArchitectSkillRules(): string {
   return `## Purpose
 
@@ -24,67 +26,57 @@ Do not use this skill for incomplete planning, user clarification, Debug Mode, A
 }
 
 export function renderRequestArchitectRestartTool(): string {
-  return `#!/usr/bin/env python3
-import json
-import os
-import sys
-import urllib.error
-import urllib.parse
-import urllib.request
+  return String.raw`${renderNodeToolHeader("Schedule the Architect post-planning restart.")}${NODE_TOOL_HTTP}
+function emit(status, fields) {
+  process.stdout.write(JSON.stringify({ status, ...(fields || {}) }) + "\n");
+}
 
+async function main() {
+  if (process.env.VCM_ROLE !== "architect") {
+    emit("rejected", { message: "Only architect may schedule the post-planning restart." });
+    return 2;
+  }
 
-def emit(status, **fields):
-    payload = {"status": status, **fields}
-    print(json.dumps(payload, ensure_ascii=False))
+  const apiUrl = (process.env.VCM_API_URL || "").replace(/\/+$/, "");
+  const taskSlug = (process.env.VCM_TASK_SLUG || "").trim();
+  if (!apiUrl || !taskSlug) {
+    emit("rejected", { message: "VCM_API_URL or VCM_TASK_SLUG is unavailable." });
+    return 2;
+  }
 
+  const url = apiUrl + "/api/tasks/" + encodeURIComponent(taskSlug) + "/sessions/architect/restart-after-planning";
+  let response;
+  try {
+    response = await postJson(url, {}, 5000);
+  } catch (error) {
+    emit("failed", { message: networkErrorText(error) });
+    return 2;
+  }
+  if (!response.ok) {
+    let message = "HTTP Error " + response.status + ": " + response.statusText;
+    try {
+      const payload = JSON.parse(response.text);
+      message = (payload.error && payload.error.message) || message;
+    } catch {
+      // Keep the HTTP status message when the error body is not JSON.
+    }
+    emit("rejected", { message });
+    return 2;
+  }
+  try {
+    const payload = JSON.parse(response.text);
+    emit(payload.status || "scheduled", {
+      taskSlug,
+      sessionId: payload.sessionId ?? null,
+      memoryCandidatePath: payload.memoryCandidatePath ?? null
+    });
+    return 0;
+  } catch (error) {
+    emit("failed", { message: error.message });
+    return 2;
+  }
+}
 
-def main():
-    if os.environ.get("VCM_ROLE") != "architect":
-        emit("rejected", message="Only architect may schedule the post-planning restart.")
-        return 2
-
-    api_url = os.environ.get("VCM_API_URL", "").rstrip("/")
-    task_slug = os.environ.get("VCM_TASK_SLUG", "").strip()
-    if not api_url or not task_slug:
-        emit("rejected", message="VCM_API_URL or VCM_TASK_SLUG is unavailable.")
-        return 2
-
-    url = (
-        api_url
-        + "/api/tasks/"
-        + urllib.parse.quote(task_slug, safe="")
-        + "/sessions/architect/restart-after-planning"
-    )
-    request = urllib.request.Request(
-        url,
-        data=b"{}",
-        headers={"content-type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=5) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-        emit(
-            payload.get("status", "scheduled"),
-            taskSlug=task_slug,
-            sessionId=payload.get("sessionId"),
-            memoryCandidatePath=payload.get("memoryCandidatePath"),
-        )
-        return 0
-    except urllib.error.HTTPError as error:
-        try:
-            payload = json.loads(error.read().decode("utf-8"))
-            message = payload.get("error", {}).get("message", str(error))
-        except Exception:
-            message = str(error)
-        emit("rejected", message=message)
-        return 2
-    except (OSError, ValueError, urllib.error.URLError) as error:
-        emit("failed", message=str(error))
-        return 2
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+main().then((code) => process.exit(code));
 `;
 }

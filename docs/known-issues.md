@@ -48,17 +48,6 @@ security risk, not delivery priority.
 - **Resolution condition**: Distinguish spawn/launch errors from non-zero process exits in `command-runner` (e.g., a sentinel exit code or a typed `spawnFailed` flag) and have git-adapter treat spawn failure as an error rather than a `false` result. Requires a cross-file contract change → route through the full code-change flow.
 - **Related**: none.
 
-### KI-017 — Harness Python tools require Python 3.10+ without declaring or checking it
-
-- **Status**: Planned.
-- **Category**: Harness / dev-environment.
-- **Affected modules / surfaces**: `scripts/harness-tools/*` and installed `.ai/tools/{check-durable-docs,check-scaffold-ledger,generate-module-index,generate-public-surface,request-gate-review,run-long-check,watch-job}`; README Requirements.
-- **Current gap**: These tools use PEP 604 annotations (`X | None`) without `from __future__ import annotations`, so they raise `TypeError` at import time on Python 3.9 (the macOS system `python3`). The README lists only `python3`, and nothing checks the interpreter version at harness install or role launch. `vcm-bash-guard` and `vcm-subagent-guard` currently happen to run on 3.9.
-- **Impact**: On such hosts, Gate Review requests, long-running validation jobs, durable-doc checks, scaffold-ledger checks, and generated-context refresh fail with a Python traceback instead of a clear prerequisite error, blocking the VCM workflow.
-- **Mitigation / workaround**: Put Python 3.10+ first on `PATH` as `python3` for VCM and its role sessions.
-- **Resolution condition**: Decided direction: rewrite the harness tools in Node and remove the Python runtime dependency from the harness, since VCM and its hooks already require Node. Until then, the README must state the Python 3.10+ requirement.
-- **Related**: None.
-
 ---
 
 ## Performance & Scalability

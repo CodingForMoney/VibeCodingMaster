@@ -97,9 +97,9 @@ prompts (Gate, retrospective, restart). Their responsibilities overlap.
   are compared with the Scaffold Manifest and a high-risk path pattern list.
   Project Manager reports the computed result and routes unexplained files to
   the owning role.
-- When harness tools are rewritten in Node (KI-017), long-running validation
-  becomes one blocking start-and-wait command so the watcher protocol is owned
-  by the tool, not the prompt.
+- Now that the harness tools run on Node, long-running validation can become
+  one blocking start-and-wait command so the watcher protocol is owned by the
+  tool, not the prompt.
 
 ## Rollout
 
@@ -134,5 +134,4 @@ and after each rollout step.
 ## Related
 
 - `docs/plans/harness-evaluation-loop-plan.md`
-- `docs/known-issues.md` KI-016, KI-017
 - `docs/ARCHITECTURE.md` Managed Workflow Artifact Ownership

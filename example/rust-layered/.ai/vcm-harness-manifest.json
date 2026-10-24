@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "manager": "vcm",
-  "harnessVersion": "0.8.3",
+  "harnessVersion": "0.8.13",
   "installMode": "fixed",
   "installedAt": "2026-06-07T00:00:00Z",
-  "updatedAt": "2026-09-03T10:29:49.182Z",
+  "updatedAt": "2026-10-24T13:31:41.774Z",
   "runtimeRoots": [
     ".ai/vcm/",
     ".claude/worktrees/"
@@ -481,6 +481,18 @@
       "ownership": "project-owned",
       "source": "vcm-template",
       "lifecycle": "long-term"
+    },
+    {
+      "path": ".ai/tools/package.json",
+      "entryType": "file",
+      "category": "runtime-tool",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "conditional-long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
     },
     {
       "path": ".ai/tools/check-durable-docs",

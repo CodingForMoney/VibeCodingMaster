@@ -331,10 +331,10 @@ describe("createHarnessService", () => {
     expect(reviewerAgent).not.toContain("`asset`");
     expect(projectManagerAgent).not.toContain("only unverified remaining verification items");
     expect(await fs.readText("/repo/.ai/tools/check-scaffold-ledger")).toContain(
-      'ACTIONS = frozenset({"create", "change", "delete"})'
+      'const ACTIONS = new Set(["create", "change", "delete"]);'
     );
     expect(await fs.readText("/repo/.ai/tools/check-scaffold-ledger")).toContain(
-      'parser.add_argument("--mode", required=True, choices=("scaffold", "completion"))'
+      '"--mode": { dest: "mode", required: true, choices: ["scaffold", "completion"] }'
     );
     const translatorAgents = await fs.readText("/repo/.claude/agents/translator.md");
     expect(translatorAgents).toContain("name: translator");
@@ -732,7 +732,7 @@ describe("createHarnessService", () => {
     expect(JSON.stringify(settings.hooks.PermissionRequest)).toContain("/api/hooks/claude-code/permission-request");
     expect(JSON.stringify(settings.hooks.PreToolUse)).toContain("git rev-parse --show-toplevel");
     expect(JSON.stringify(settings.hooks.PreToolUse)).toContain("[ -n \\\"$guard\\\" ] || exit 0");
-    expect(JSON.stringify(settings.hooks.PreToolUse)).toContain("python3 \\\"$guard\\\" || exit 0");
+    expect(JSON.stringify(settings.hooks.PreToolUse)).toContain("node \\\"$guard\\\" || exit 0");
     expect(JSON.stringify(settings.hooks.PreToolUse)).not.toContain("${CLAUDE_PROJECT_DIR:-.}/.ai/tools/vcm-bash-guard");
     expect(JSON.stringify(settings.hooks.UserPromptSubmit)).not.toContain("vcmctl");
     expect(JSON.stringify(settings.hooks.Stop)).not.toContain("vcmctl");

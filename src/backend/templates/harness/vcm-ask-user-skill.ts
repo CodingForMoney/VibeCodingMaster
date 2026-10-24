@@ -1,3 +1,5 @@
+import { NODE_TOOL_ARGUMENT_PARSER, NODE_TOOL_HTTP, renderNodeToolHeader } from "./node-tool-runtime.js";
+
 export function renderVcmAskUserSkillRules(): string {
   return `## Purpose
 
@@ -18,66 +20,63 @@ Every question pauses the workflow. PM may defer a question by not asking it; on
 }
 
 export function renderAskUserTool(): string {
-  return `#!/usr/bin/env python3
-import argparse
-import json
-import os
-import sys
-import urllib.error
-import urllib.parse
-import urllib.request
+  return String.raw`${renderNodeToolHeader("Pause VCM workflow for an exact user question.")}${NODE_TOOL_ARGUMENT_PARSER}${NODE_TOOL_HTTP}
+function emit(status, message, state) {
+  const payload = { status };
+  if (message) {
+    payload.message = message;
+  }
+  if (state !== undefined) {
+    payload.state = state;
+  }
+  process.stdout.write(JSON.stringify(payload) + "\n");
+}
 
+async function main() {
+  const args = parseToolArguments(process.argv.slice(2), {
+    description: "Pause VCM workflow for an exact user question.",
+    options: { "--question": { dest: "question", required: true } }
+  });
 
-def emit(status, message=None, state=None):
-    payload = {"status": status}
-    if message:
-        payload["message"] = message
-    if state is not None:
-        payload["state"] = state
-    print(json.dumps(payload, ensure_ascii=False))
+  if (process.env.VCM_ROLE !== "project-manager") {
+    emit("failed", "Only project-manager may ask the user through VCM workflow control.");
+    return 2;
+  }
 
+  const question = args.question.trim();
+  if (!question) {
+    emit("failed", "A non-empty user question is required.");
+    return 2;
+  }
 
-def main():
-    parser = argparse.ArgumentParser(description="Pause VCM workflow for an exact user question.")
-    parser.add_argument("--question", required=True)
-    args = parser.parse_args()
+  const apiUrl = (process.env.VCM_API_URL || "").replace(/\/+$/, "");
+  const taskSlug = (process.env.VCM_TASK_SLUG || "").trim();
+  if (!apiUrl || !taskSlug) {
+    emit("failed", "VCM_API_URL or VCM_TASK_SLUG is unavailable; the workflow was not paused.");
+    return 2;
+  }
 
-    if os.environ.get("VCM_ROLE") != "project-manager":
-        emit("failed", "Only project-manager may ask the user through VCM workflow control.")
-        return 2
+  const url = apiUrl + "/api/tasks/" + encodeURIComponent(taskSlug) + "/ask-user";
+  let response;
+  try {
+    response = await postJson(url, { question }, 5000);
+  } catch (error) {
+    emit("failed", "VCM could not register the user question: " + networkErrorText(error));
+    return 1;
+  }
+  if (!response.ok) {
+    emit("failed", "VCM rejected the user question: HTTP " + response.status + " " + response.text);
+    return 1;
+  }
+  try {
+    emit("awaiting_user", undefined, JSON.parse(response.text));
+    return 0;
+  } catch (error) {
+    emit("failed", "VCM could not register the user question: " + error.message);
+    return 1;
+  }
+}
 
-    question = args.question.strip()
-    if not question:
-        emit("failed", "A non-empty user question is required.")
-        return 2
-
-    api_url = os.environ.get("VCM_API_URL", "").rstrip("/")
-    task_slug = os.environ.get("VCM_TASK_SLUG", "").strip()
-    if not api_url or not task_slug:
-        emit("failed", "VCM_API_URL or VCM_TASK_SLUG is unavailable; the workflow was not paused.")
-        return 2
-
-    url = f"{api_url}/api/tasks/{urllib.parse.quote(task_slug, safe='')}/ask-user"
-    request = urllib.request.Request(
-        url,
-        data=json.dumps({"question": question}).encode("utf-8"),
-        headers={"content-type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=5) as response:
-            state = json.loads(response.read().decode("utf-8"))
-        emit("awaiting_user", state=state)
-        return 0
-    except urllib.error.HTTPError as error:
-        detail = error.read().decode("utf-8", errors="replace")
-        emit("failed", f"VCM rejected the user question: HTTP {error.code} {detail}")
-    except (OSError, ValueError, urllib.error.URLError) as error:
-        emit("failed", f"VCM could not register the user question: {error}")
-    return 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+main().then((code) => process.exit(code));
 `;
 }

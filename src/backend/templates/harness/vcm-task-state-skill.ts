@@ -1,3 +1,5 @@
+import { NODE_TOOL_ARGUMENT_PARSER, NODE_TOOL_HTTP, renderNodeToolHeader } from "./node-tool-runtime.js";
+
 export function renderVcmTaskStateSkillRules(): string {
   return `## Purpose
 
@@ -22,79 +24,72 @@ If declaration fails, report the warning when relevant and continue the existing
 }
 
 export function renderUpdateTaskStateTool(): string {
-  return `#!/usr/bin/env python3
-import argparse
-import json
-import os
-import sys
-import urllib.error
-import urllib.parse
-import urllib.request
+  return String.raw`${renderNodeToolHeader("Declare advisory VCM task workflow state.")}${NODE_TOOL_ARGUMENT_PARSER}${NODE_TOOL_HTTP}
+function emit(status, message, state) {
+  const payload = { status };
+  if (message) {
+    payload.message = message;
+  }
+  if (state !== undefined) {
+    payload.state = state;
+  }
+  process.stdout.write(JSON.stringify(payload) + "\n");
+}
 
+async function main() {
+  const args = parseToolArguments(process.argv.slice(2), {
+    description: "Declare advisory VCM task workflow state.",
+    options: {
+      "--flow": { dest: "flow" },
+      "--step": { dest: "step" },
+      "--branch": { dest: "branch" },
+      "--resume-point": { dest: "resumePoint" },
+      "--status": { dest: "status" },
+      "--evidence": { dest: "evidence", append: true }
+    }
+  });
 
-def emit(status, message=None, state=None):
-    payload = {"status": status}
-    if message:
-        payload["message"] = message
-    if state is not None:
-        payload["state"] = state
-    print(json.dumps(payload, ensure_ascii=False))
+  if (process.env.VCM_ROLE !== "project-manager") {
+    emit("warning", "Only project-manager may declare VCM task workflow state.");
+    return 0;
+  }
 
+  const apiUrl = (process.env.VCM_API_URL || "").replace(/\/+$/, "");
+  const taskSlug = (process.env.VCM_TASK_SLUG || "").trim();
+  if (!apiUrl || !taskSlug) {
+    emit("warning", "VCM_API_URL or VCM_TASK_SLUG is unavailable; task state was not updated.");
+    return 0;
+  }
 
-def main():
-    parser = argparse.ArgumentParser(description="Declare advisory VCM task workflow state.")
-    parser.add_argument("--flow")
-    parser.add_argument("--step")
-    parser.add_argument("--branch")
-    parser.add_argument("--resume-point")
-    parser.add_argument("--status")
-    parser.add_argument("--evidence", action="append", default=[])
-    args = parser.parse_args()
+  const payload = {};
+  for (const key of ["flow", "step", "branch", "resumePoint", "status"]) {
+    if (args[key] !== undefined) {
+      payload[key] = args[key];
+    }
+  }
+  if (args.evidence.length > 0) {
+    payload.evidenceRefs = args.evidence;
+  }
 
-    if os.environ.get("VCM_ROLE") != "project-manager":
-        emit("warning", "Only project-manager may declare VCM task workflow state.")
-        return 0
+  if (Object.keys(payload).length === 0) {
+    emit("warning", "No task workflow fields were supplied.");
+    return 0;
+  }
 
-    api_url = os.environ.get("VCM_API_URL", "").rstrip("/")
-    task_slug = os.environ.get("VCM_TASK_SLUG", "").strip()
-    if not api_url or not task_slug:
-        emit("warning", "VCM_API_URL or VCM_TASK_SLUG is unavailable; task state was not updated.")
-        return 0
+  const url = apiUrl + "/api/tasks/" + encodeURIComponent(taskSlug) + "/workflow-state";
+  try {
+    const response = await postJson(url, payload, 3000);
+    if (!response.ok) {
+      emit("warning", "Task state was not updated: HTTP Error " + response.status + ": " + response.statusText);
+      return 0;
+    }
+    emit("updated", undefined, JSON.parse(response.text));
+  } catch (error) {
+    emit("warning", "Task state was not updated: " + networkErrorText(error));
+  }
+  return 0;
+}
 
-    payload = {}
-    for key, value in (
-        ("flow", args.flow),
-        ("step", args.step),
-        ("branch", args.branch),
-        ("resumePoint", args.resume_point),
-        ("status", args.status),
-    ):
-        if value is not None:
-            payload[key] = value
-    if args.evidence:
-        payload["evidenceRefs"] = args.evidence
-
-    if not payload:
-        emit("warning", "No task workflow fields were supplied.")
-        return 0
-
-    url = f"{api_url}/api/tasks/{urllib.parse.quote(task_slug, safe='')}/workflow-state"
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"content-type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=3) as response:
-            state = json.loads(response.read().decode("utf-8"))
-        emit("updated", state=state)
-    except (OSError, ValueError, urllib.error.URLError, urllib.error.HTTPError) as error:
-        emit("warning", f"Task state was not updated: {error}")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+main().then((code) => process.exit(code));
 `;
 }
