@@ -77,10 +77,6 @@ describe("harness templates stay in sync with the script installer", () => {
       const approved = await readFile(path.join(approvedExampleRoot, relativePath), "utf8");
       const installed = await readFile(path.join(tmpRepo, relativePath), "utf8");
       expect(installed, `${relativePath}: installer must follow the approved example`).toBe(approved);
-      if (relativePath !== "docs/GLOSSARY.md") {
-        const selfHarness = await readFile(path.join(appRoot, relativePath), "utf8");
-        expect(selfHarness, `${relativePath}: VCM self-harness must follow the approved example`).toBe(approved);
-      }
     }
 
     for (const [relativePath, style] of [
@@ -93,9 +89,7 @@ describe("harness templates stay in sync with the script installer", () => {
         style
       );
       const installed = extractManagedBlock(await readFile(path.join(tmpRepo, relativePath), "utf8"), style);
-      const selfHarness = extractManagedBlock(await readFile(path.join(appRoot, relativePath), "utf8"), style);
       expect(installed, `${relativePath}: installer managed block must follow the approved example`).toBe(approved);
-      expect(selfHarness, `${relativePath}: VCM managed block must follow the approved example`).toBe(approved);
     }
   }, 30_000);
 
@@ -142,7 +136,7 @@ describe("harness templates stay in sync with the script installer", () => {
     };
     for (const relativePath of PROJECT_OWNED_GENERATOR_PATHS) {
       expect(await readFile(path.join(tmpRepo, relativePath), "utf8")).toBe(
-        await readFile(path.join(appRoot, relativePath), "utf8")
+        await readFile(path.join(appRoot, "scripts/harness-tools", path.basename(relativePath)), "utf8")
       );
       expect((await stat(path.join(tmpRepo, relativePath))).mode & 0o111).not.toBe(0);
       expect(initialManifest.entries.find((entry) => entry.path === relativePath)).toMatchObject({

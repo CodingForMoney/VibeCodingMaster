@@ -1,6 +1,6 @@
 # Testing
 
-Tester-owned validation strategy for VibeCodingMaster (VCM). This document maps
+Validation strategy for VibeCodingMaster (VCM). This document maps
 the VCM validation levels to project-native commands, where tests live, how to
 select what to run, and the current testing gaps.
 
@@ -124,7 +124,8 @@ Notes:
   current Final Acceptance hashing, automatic and manual readiness enforcement,
   workflow-role proposal Round tracking, and Harness Engineer exclusion from the
   Round.
-- `.ai/tools/**` or `scripts/harness-tools/**` change: run
+- `scripts/harness-tools/**` or harness tool templates under
+  `src/backend/templates/harness/**` change: run
   `tests/unit/backend/harness-tools.test.ts`, `vcm-bash-guard.test.ts`, and
   `vcm-subagent-guard.test.ts`. Subagent guard coverage must prove all three
   Architect workers and the Coder worker are allowed, all other role/type
@@ -138,18 +139,14 @@ Notes:
   drift failures.
 - Pre-publish / release: L4 (`npm run build` + `npm run verify:package`).
 
-## Long-Running Validation
+## Long-Running Validation Tools
 
-Use the `vcm-long-running-validation` skill (`.ai/tools/run-long-check` +
-`.ai/tools/watch-job`) for any command that may exceed ~2 minutes (notably
-`npm run e2e` and full builds). Never run validation as a detached/background
-process; the job guard denies it. Pass the validation executable directly:
+`scripts/harness-tools/run-long-check` and `scripts/harness-tools/watch-job` are
+the long-running validation tools VCM installs into target repositories.
 `run-long-check` rejects shell command-string wrappers because pipelines or
-trailing commands can mask the validation exit code. Honor the 60-minute
-per-job ceiling. Invoke `run-long-check` and `watch-job` as standalone Bash
-calls so their exit codes remain authoritative; inspect logs in a later call.
-When a watch window returns 125, its bounded handoff keeps the job supervised
-while the next watcher call is generated; call `watch-job` again immediately.
+trailing commands can mask the validation exit code, and enforces a 60-minute
+per-job ceiling. A `watch-job` window that returns 125 records a bounded handoff
+that keeps the job supervised until the next watcher call.
 
 Submission resolves the executable using the task worktree root and its PATH
 before creating a job. Missing or non-executable commands are rejected directly.
@@ -162,9 +159,7 @@ the next job after a failed launch, alongside timeout and lease handling.
 
 ## Release Gate (L4)
 
-Run this gate for any version release before `npm publish`. The release is
-architect-owned (see root `CLAUDE.md` "Release Process"); the tester runs the
-gate and reports results.
+Run this gate for any version release before `npm publish`.
 
 1. `npm run typecheck`
 2. `npm run build` (must run before `npm test`: `harness-templates-sync` needs the compiled `dist/main.js`)
@@ -335,25 +330,12 @@ Run all backend journeys with `npm run test:e2e:backend`.
 | E2E-005 | Flow-pause alert (a Round stops with no next Turn → blocking modal + optional alarm sound) | GUI task workspace; backend `roundState.flowPause` (reason `stopped-no-next-turn`) via workspace-state | A normally stopped Round opens the standard blocking flow-pause modal; sound is independent and repeats while enabled; Gateway does not suppress the modal, and successfully submitted Gateway input dismisses it | `selectFlowPauseAlertMessage` uses the backend pause signal; sound mode is `strong` whenever the preference is enabled; the latest successful Gateway-to-PM input ID is deduplicated before requesting dismissal | L3, on Round / flow-pause-alert change | Not yet implemented as a browser spec; covered below L3 by `flow-pause-alert.test.ts` and Gateway backend E2E status assertions |
 | E2E-006 | Gateway runtime connection switch arms/disarms the channel | Project dashboard `GatewayPanel` Connection switch | The desktop toggle gates channel connection (default off each session) end to end | Connection switch is disabled until an account is configured; arming it sets `connectionEnabled`/`running` and the phone can drive the gateway; disarming stops polling; it stays visually distinct from the `Gateway` (command-scope) switch | L3, on gateway connection/dashboard change | Not yet implemented; needs a Playwright harness + a channel double. Until then PP1–PP6 (default-disarmed, arm/connect, disarm/stop, disarmed-outbound-gate-with-cache, self-heal-cannot-bypass, expose orthogonality) are covered at unit level in `gateway-service.test.ts` / `gateway-settings-service.test.ts`; the live UI arm/disarm is verified by static wiring review + manual desktop check |
 
-## Generated-Context Freshness Checks
-
-- Regenerate `.ai/generated/module-index.json` with `.ai/tools/generate-module-index`
-  after adding/removing/moving modules, source files, or test files.
-- Regenerate `.ai/generated/public-surface.json` with
-  `.ai/tools/generate-public-surface` (after module-index exists) after changing
-  exported APIs, HTTP routes, or shared types.
-- Treat stale generated indexes as a validation failure during review: if a
-  source/route/export change is not reflected in the indexes, regenerate before
-  acceptance.
-
 ## Final-Validation Cleanup
 
 - Remove temporary scripts, scratch files, and any test-only fixtures created
   during investigation before final acceptance.
 - Do not leave `.only`/`.skip` in committed Vitest or Playwright specs.
 - Ensure no detached/background validation jobs remain running.
-- Confirm generated indexes are regenerated and committed when source/surface
-  changed.
 - Before publish, `npm run build` and `npm run verify:package` must pass.
 
 ## Known Testing Gaps

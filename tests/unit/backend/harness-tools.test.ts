@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
+import { renderCheckScaffoldLedgerTool } from "../../../src/backend/templates/harness/check-scaffold-ledger.js";
 
 const execFileAsync = promisify(execFile);
 const appRoot = process.cwd();
@@ -28,7 +29,7 @@ async function installHarnessTools(repoRoot: string) {
   const toolsRoot = path.join(repoRoot, ".ai/tools");
   await mkdir(toolsRoot, { recursive: true });
   await cp(path.join(appRoot, "scripts/harness-tools/check-durable-docs"), path.join(toolsRoot, "check-durable-docs"));
-  await cp(path.join(appRoot, ".ai/tools/check-scaffold-ledger"), path.join(toolsRoot, "check-scaffold-ledger"));
+  await writeFile(path.join(toolsRoot, "check-scaffold-ledger"), renderCheckScaffoldLedgerTool(), { mode: 0o755 });
   await cp(path.join(appRoot, "scripts/harness-tools/generate-module-index"), path.join(toolsRoot, "generate-module-index"));
   await cp(path.join(appRoot, "scripts/harness-tools/generate-public-surface"), path.join(toolsRoot, "generate-public-surface"));
   await cp(path.join(appRoot, "scripts/harness-tools/run-long-check"), path.join(toolsRoot, "run-long-check"));
