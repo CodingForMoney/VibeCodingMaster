@@ -625,6 +625,23 @@ h2 {
   width: 100%;
 }
 
+.architect-worker-settings {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.architect-worker-setting {
+  display: grid;
+  grid-template-columns: minmax(64px, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+}
+
+.architect-worker-setting select {
+  min-width: 0;
+}
+
 .harness-file-list-title {
   margin: 0;
   font-size: 12px;

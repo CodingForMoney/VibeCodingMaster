@@ -260,6 +260,50 @@ describe("createMessageService", () => {
     await expect(harness.readRoute("project-manager-coder.md")).resolves.toBe("Still pending.");
   });
 
+  it("persists delivery before submitting Enter to the target terminal", async () => {
+    let logAtEnter: Promise<string> | undefined;
+    const harness = createHarness(["coder"], {
+      dispatchConfirmationEnabled: false,
+      onRuntimeWrite(data, readMessageLog) {
+        if (data === "\r" && !logAtEnter) {
+          logAtEnter = readMessageLog();
+        }
+      }
+    });
+    await harness.service.updateOrchestrationState({
+      ...harness.base,
+      mode: "auto"
+    });
+    await harness.writeRoute("project-manager-coder.md", "Deliver once.");
+
+    await harness.service.scanAndDispatchPendingRouteFiles(harness.base);
+
+    const snapshotsAtEnter = (await logAtEnter!).trim().split("\n").map((line) => JSON.parse(line));
+    expect(snapshotsAtEnter.at(-1)).toMatchObject({ body: "Deliver once.", deliveredAt: expect.any(String) });
+    const snapshots = await harness.readMessageSnapshots();
+    expect(snapshots.filter((snapshot) => snapshot.deliveredAt)).toHaveLength(1);
+  });
+
+  it("keeps reading and dispatching after a truncated message log line", async () => {
+    const harness = createHarness(["coder"], { dispatchConfirmationEnabled: false });
+    await harness.service.updateOrchestrationState({
+      ...harness.base,
+      mode: "auto"
+    });
+    await harness.writeRoute("project-manager-coder.md", "First task.");
+    await harness.service.scanAndDispatchPendingRouteFiles(harness.base);
+    await harness.appendMessageLog("{\"id\":\"msg_truncated\",\"taskSl");
+
+    const messages = await harness.service.listMessages(harness.base);
+    expect(messages.map((message) => message.body)).toEqual(["First task."]);
+    const accepted = await harness.service.confirmPromptSubmitted({
+      ...harness.base,
+      role: "coder",
+      prompt: `[VCM MESSAGE]\nid: ${messages[0].id}`
+    });
+    expect(accepted?.acceptedAt).toBeDefined();
+  });
+
   it("does not delete the confirmation record for an in-flight PM dispatch", async () => {
     const harness = createHarness(["coder"], {
       workflowControl: "allow",
@@ -417,6 +461,7 @@ function createHarness(runningRoles: RoleName[], options: {
   workflowRecordThrows?: boolean;
   workflowControl?: "allow" | "deny";
   workflowDispatching?: boolean;
+  onRuntimeWrite?: (data: string, readMessageLog: () => Promise<string>) => void;
 } = {}) {
   const fs = createMemoryFs();
   const writes: string[] = [];
@@ -430,7 +475,10 @@ function createHarness(runningRoles: RoleName[], options: {
   let nextId = 1;
   const service = createMessageService({
     fs,
-    runtime: createFakeRuntime(writes),
+    runtime: createFakeRuntime(writes, (data) => options.onRuntimeWrite?.(
+      data,
+      () => fs.readText(path.posix.join(options.taskRepoRoot ?? "/repo", ".ai/vcm/messages/demo-task.jsonl"))
+    )),
     sessionService: createFakeSessionService(runningRoles, runningMarks, activity),
     taskService: {
       async loadTask(_repoRoot: string, taskSlug: string): Promise<TaskRecord> {
@@ -517,6 +565,9 @@ function createHarness(runningRoles: RoleName[], options: {
       const content = await fs.readText(path.posix.join(taskRepoRoot, ".ai/vcm/handoffs/messages", fileName));
       return content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
     },
+    appendMessageLog(text: string) {
+      return fs.appendText(path.posix.join(options.taskRepoRoot ?? "/repo", ".ai/vcm/messages/demo-task.jsonl"), text);
+    },
     async readMessageSnapshots() {
       const raw = await fs.readText(path.posix.join(options.taskRepoRoot ?? "/repo", ".ai/vcm/messages/demo-task.jsonl"));
       return raw
@@ -536,7 +587,7 @@ function createHarness(runningRoles: RoleName[], options: {
   };
 }
 
-function createFakeRuntime(writes: string[]): TerminalRuntime {
+function createFakeRuntime(writes: string[], onWrite?: (data: string) => void): TerminalRuntime {
   return {
     async createSession() {
       throw new Error("not implemented");
@@ -552,6 +603,7 @@ function createFakeRuntime(writes: string[]): TerminalRuntime {
     },
     write(_sessionId, data) {
       writes.push(data);
+      onWrite?.(data);
     },
     resize() {},
     async stop() {},

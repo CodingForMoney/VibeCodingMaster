@@ -120,7 +120,7 @@ environment. Bridge children retain
 `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=90`. They also set
 `CLAUDE_CODE_SUBAGENT_MODEL` to the selected Bridge model so subagents inherit
 GPT, while native Architect evidence, scaffold, and validation workers retain
-their configured `opus` model with `xhigh` effort. Native Claude children receive
+the model and effort from the Architect worker settings. Native Claude children receive
 none of these overrides. Context-limit StopFailure
 diagnostics are terminal because retrying the unchanged context cannot recover
 them.
@@ -329,8 +329,10 @@ Executed to confirm that exact delivered message without sending it again.
 Manual confirmation is recorded in the history evidence and message record.
 Confirmation reuses the pre-delivery baseline, appends the history row, and
 clears the approval. Paired Workflow Progress and runtime approval updates use
-a task-local write-ahead transaction record; the next state read replays an
-interrupted commit before exposing either file. Project recovery also returns
+a task-local write-ahead transaction record. Public state reads never write:
+they expose a pending record's content without replaying it, and the next
+locked operation or project recovery replays the interrupted commit. Project
+recovery also returns
 an undelivered `dispatching` approval to `pending`. Delivered unconfirmed
 approvals retain their message ID, authorization, baseline, and warning for
 a late Hook or explicit user confirmation. Clearing such a route abandons its
@@ -539,8 +541,13 @@ Architect Interview produces two separate task artifacts: the user-confirmed
 and writes the executable `architecture-plan.md`; the architecture-plan Gate
 hashes all three so changed evidence invalidates an earlier approval.
 
-Architect uses three foreground support workers, each configured with
-`model: opus` and `effort: xhigh` for native Claude launches. Evidence workers
+Architect uses three foreground support workers. Their native Claude model and
+effort come from the global Architect worker settings (`architectWorkerSettings`
+in app preferences), which the fixed installer writes into each worker
+definition through `--architect-workers`; harness status reports drift when the
+installed definitions differ. Defaults keep workers cheaper than the Architect:
+evidence `opus`/`high`, scaffold `sonnet`/`medium`, validation `sonnet`/`low`.
+Evidence workers
 perform bounded supporting reads and write factual reports; Architect personally
 reads and LSP-verifies decision-bearing code before accepting those facts.
 Scaffold workers execute the complete plan's exact scaffold and mechanical

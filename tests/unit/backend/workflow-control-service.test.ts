@@ -116,12 +116,54 @@ describe("workflow control service", () => {
       .rejects.toThrow("injected workflow state write failure");
 
     const restored = createWorkflowControlService({ fs: baseFs, now: sequenceClock() });
+    const journalPath = path.join(context.taskRepoRoot, context.stateRoot, "workflow-control-transaction.json");
+    // A public read exposes the pending commit without replaying it.
     expect((await restored.getState(context)).pendingDispatch).toMatchObject({
       status: "pending",
       targetRole: "architect"
     });
-    await expect(baseFs.pathExists(path.join(context.taskRepoRoot, context.stateRoot, "workflow-control-transaction.json")))
-      .resolves.toBe(false);
+    await expect(restored.getProgress(context)).resolves.toMatchObject({
+      revision: 1,
+      proposal: { targetRole: "architect" }
+    });
+    await expect(baseFs.pathExists(journalPath)).resolves.toBe(true);
+
+    await restored.recoverTask(context);
+    await expect(baseFs.pathExists(journalPath)).resolves.toBe(false);
+    expect((await restored.getState(context)).pendingDispatch).toMatchObject({
+      status: "pending",
+      targetRole: "architect"
+    });
+  });
+
+  it("does not write files from public state reads", async () => {
+    const { context, fs: baseFs } = await createContext(roots);
+    const writes: string[] = [];
+    const fs = {
+      ...baseFs,
+      async writeText(target: string, content: string) {
+        writes.push(target);
+        return baseFs.writeText(target, content);
+      },
+      async writeTextAtomic(target: string, content: string) {
+        writes.push(target);
+        return baseFs.writeTextAtomic!(target, content);
+      },
+      async writeJsonAtomic<T>(target: string, value: T) {
+        writes.push(target);
+        return baseFs.writeJsonAtomic(target, value);
+      },
+      async removePath(target: string, options?: { force?: boolean; recursive?: boolean }) {
+        writes.push(target);
+        return baseFs.removePath?.(target, options);
+      }
+    };
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+
+    await service.getState(context);
+    await service.getProgress(context);
+
+    expect(writes).toEqual([]);
   });
 
   it("replays an interrupted dispatch confirmation without duplicating history", async () => {
@@ -475,6 +517,10 @@ describe("workflow control service", () => {
 
     expect((await service.getState(context)).warnings).toEqual([]);
     const progressPath = path.join(context.taskRepoRoot, context.handoffDir, "workflow-progress.md");
+    // Public reads never write; the locked recovery path creates the template.
+    await expect(fs.pathExists(progressPath)).resolves.toBe(false);
+    await expect(service.getProgress(context)).resolves.toMatchObject({ revision: 0, status: "not-started" });
+    await service.recoverTask(context);
     await expect(fs.readText(progressPath)).resolves.toContain("Revision: 0");
 
     await fs.writeText(progressPath, "# broken workflow record\n");

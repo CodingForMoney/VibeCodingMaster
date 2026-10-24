@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HarnessPlannedChange, HarnessStatusReport } from "../../../src/shared/types/harness.js";
+import { DEFAULT_ARCHITECT_WORKER_SETTINGS } from "../../../src/shared/types/app-settings.js";
 
 // HarnessPanel transitively imports the xterm-backed terminal view, which touches
 // browser globals (`self`) at module load and cannot evaluate in the node test
@@ -20,6 +21,8 @@ const baseProps = {
   hasActiveTask: true,
   autoTaskHarnessReviewEnabled: false,
   autoMemoryEnabled: false,
+  architectWorkerSettings: DEFAULT_ARCHITECT_WORKER_SETTINGS,
+  onArchitectWorkerSettingsChange: () => {},
   onRefresh: async () => {},
   onApply: async () => {},
   onOpenRepositoryDiff: () => {},
@@ -209,6 +212,21 @@ describe("HarnessPanel fixed-install three-state UI", () => {
 
     expect(html).not.toContain("Bootstrap");
     expect(html).not.toContain("Open Bootstrap");
+  });
+
+  it("shows Architect worker model and effort controls with the configured values", () => {
+    const html = renderToStaticMarkup(createElement(HarnessPanel, {
+      ...baseProps,
+      status: makeStatus({ initialized: true })
+    } as never));
+
+    expect(html).toContain("Architect workers");
+    for (const type of ["Evidence", "Scaffold", "Validation"]) {
+      expect(html).toContain(`aria-label="${type} worker model"`);
+      expect(html).toContain(`aria-label="${type} worker effort"`);
+    }
+    expect(html).toContain('<option value="opus" selected="">opus</option>');
+    expect(html).toContain('<option value="low" selected="">low</option>');
   });
 
   it("shows a repository diff review entry point", () => {

@@ -28,6 +28,13 @@ import type {
   UpdateHarnessFileContentResult
 } from "../../shared/types/harness.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
+import {
+  DEFAULT_ARCHITECT_WORKER_SETTINGS,
+  normalizeArchitectWorkerSettings,
+  type ArchitectWorkerSettings,
+  type ArchitectWorkerType
+} from "../../shared/types/app-settings.js";
+import { applyArchitectWorkerSetting } from "../templates/harness/architect-worker-frontmatter.js";
 import type { CommandRunner } from "../adapters/command-runner.js";
 import type { GitAdapter } from "../adapters/git-adapter.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
@@ -126,8 +133,13 @@ export interface HarnessServiceDeps {
     | "stopRoleSession"
   >;
   now?: () => string;
-  runFixedInstaller?: (repoRoot: string) => Promise<HarnessApplyResult>;
+  runFixedInstaller?: (repoRoot: string, options?: FixedHarnessInstallOptions) => Promise<HarnessApplyResult>;
+  getArchitectWorkerSettings?: () => Promise<ArchitectWorkerSettings>;
   vcmVersion?: string;
+}
+
+export interface FixedHarnessInstallOptions {
+  architectWorkers?: ArchitectWorkerSettings;
 }
 
 interface HarnessBootstrapRunState {
@@ -170,6 +182,7 @@ interface HarnessFileDefinition {
   requiredDisallowedTools?: string[];
   requiredSkills?: string[];
   removedSkills?: string[];
+  architectWorkerType?: ArchitectWorkerType;
   defaultContentAfterBlock?: string;
   legacyWholeFile?: string;
   renderRules(): string;
@@ -455,8 +468,9 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     frontmatter: renderAgentFrontmatter(
       "vcm-architect-evidence-worker",
       "Foreground Architect worker for bounded project evidence collection.",
-      { tools: "Read, Grep, Glob, Write", model: "opus", effort: "xhigh" }
+      { tools: "Read, Grep, Glob, Write" }
     ),
+    architectWorkerType: "evidence",
     renderRules: renderArchitectEvidenceWorkerHarnessRules
   },
   {
@@ -465,9 +479,9 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "VCM Architect Scaffold Worker Agent",
     frontmatter: renderAgentFrontmatter(
       "vcm-architect-scaffold-worker",
-      "Foreground Architect worker for exact scaffold execution and scaffold validation.",
-      { model: "opus", effort: "xhigh" }
+      "Foreground Architect worker for exact scaffold execution and scaffold validation."
     ),
+    architectWorkerType: "scaffold",
     renderRules: renderArchitectScaffoldWorkerHarnessRules
   },
   {
@@ -477,8 +491,9 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     frontmatter: renderAgentFrontmatter(
       "vcm-architect-validation-worker",
       "Foreground Architect worker for exact assigned command execution and evidence capture.",
-      { tools: "Read, Grep, Glob, Bash, Write", model: "opus", effort: "xhigh" }
+      { tools: "Read, Grep, Glob, Bash, Write" }
     ),
+    architectWorkerType: "validation",
     renderRules: renderArchitectValidationWorkerHarnessRules
   },
   {
@@ -583,6 +598,12 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
 export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
   const now = deps.now ?? (() => new Date().toISOString());
   const vcmVersion = deps.vcmVersion ?? "unknown";
+
+  async function resolveArchitectWorkerSettings(): Promise<ArchitectWorkerSettings> {
+    return deps.getArchitectWorkerSettings
+      ? normalizeArchitectWorkerSettings(await deps.getArchitectWorkerSettings())
+      : DEFAULT_ARCHITECT_WORKER_SETTINGS;
+  }
   const codeIntelligenceDetector = createHarnessCodeIntelligenceDetector(deps.fs, {
     runner: deps.commandRunner
   });
@@ -590,7 +611,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
   return {
     async getHarnessStatus(repoRoot) {
       const [analyses, codeIntelligence] = await Promise.all([
-        analyzeHarnessFiles(deps.fs, repoRoot),
+        analyzeHarnessFiles(deps.fs, repoRoot, await resolveArchitectWorkerSettings()),
         codeIntelligenceDetector.detect(repoRoot)
       ]);
       const legacyChanges = await analyzeLegacyCodexHarnessPaths(deps.fs, repoRoot);
@@ -633,7 +654,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
 
       const file = await readHarnessFileContent(deps.fs, repoRoot, definition.path);
       const [analyses, codeIntelligence] = await Promise.all([
-        analyzeHarnessFiles(deps.fs, repoRoot),
+        analyzeHarnessFiles(deps.fs, repoRoot, await resolveArchitectWorkerSettings()),
         codeIntelligenceDetector.detect(repoRoot)
       ]);
       const legacyChanges = await analyzeLegacyCodexHarnessPaths(deps.fs, repoRoot);
@@ -649,7 +670,9 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
     async applyHarness(repoRoot) {
       await assertHarnessWorktreeClean(deps.git, repoRoot);
       if (deps.runFixedInstaller) {
-        const result = await deps.runFixedInstaller(repoRoot);
+        const result = await deps.runFixedInstaller(repoRoot, {
+          architectWorkers: await resolveArchitectWorkerSettings()
+        });
         if (result.changedFiles.length > 0) {
           await bumpHarnessRevision(deps.fs, repoRoot, now());
         }
@@ -666,7 +689,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
         };
       }
 
-      const analyses = await analyzeHarnessFiles(deps.fs, repoRoot);
+      const analyses = await analyzeHarnessFiles(deps.fs, repoRoot, await resolveArchitectWorkerSettings());
       const changedFiles: HarnessPlannedChange[] = [];
 
       for (const analysis of analyses) {
@@ -1572,11 +1595,15 @@ function extractManagedBlock(definition: HarnessFileDefinition, content: string)
   return content.match(getManagedBlockPattern(definition))?.[0];
 }
 
-async function analyzeHarnessFiles(fs: FileSystemAdapter, repoRoot: string): Promise<HarnessFileAnalysis[]> {
+async function analyzeHarnessFiles(
+  fs: FileSystemAdapter,
+  repoRoot: string,
+  workerSettings: ArchitectWorkerSettings = DEFAULT_ARCHITECT_WORKER_SETTINGS
+): Promise<HarnessFileAnalysis[]> {
   const analyses: HarnessFileAnalysis[] = [];
 
   for (const definition of HARNESS_FILES) {
-    analyses.push(await analyzeHarnessFile(fs, repoRoot, definition));
+    analyses.push(await analyzeHarnessFile(fs, repoRoot, definition, workerSettings));
   }
   analyses.push(await analyzeClaudeSettingsFile(fs, repoRoot));
 
@@ -1586,7 +1613,8 @@ async function analyzeHarnessFiles(fs: FileSystemAdapter, repoRoot: string): Pro
 async function analyzeHarnessFile(
   fs: FileSystemAdapter,
   repoRoot: string,
-  definition: HarnessFileDefinition
+  definition: HarnessFileDefinition,
+  workerSettings: ArchitectWorkerSettings
 ): Promise<HarnessFileAnalysis> {
   const absolutePath = resolveHarnessPath(repoRoot, definition.path);
   if (definition.ownership === "project-file") {
@@ -1623,7 +1651,11 @@ async function analyzeHarnessFile(
   const exists = await fs.pathExists(absolutePath);
 
   if (!exists) {
-    const newContent = expectedContent ?? renderNewHarnessFile(definition, expectedBlock ?? "");
+    const newContent = expectedContent ?? applyWorkerSetting(
+      renderNewHarnessFile(definition, expectedBlock ?? ""),
+      definition,
+      workerSettings
+    );
     return {
       definition,
       status: {
@@ -1674,7 +1706,7 @@ async function analyzeHarnessFile(
     const migratedContent = migrateLegacyHarnessFile(definition, currentContent, expectedBlock);
     if (migratedContent) {
       const memoryUpdatedContent = definition.memoryBlock ? ensureVcmMemoryBlock(migratedContent) : migratedContent;
-      const nextContent = normalizeAgentFrontmatter(memoryUpdatedContent, definition);
+      const nextContent = normalizeAgentFrontmatter(memoryUpdatedContent, definition, workerSettings);
       return {
         definition,
         status: {
@@ -1693,7 +1725,7 @@ async function analyzeHarnessFile(
       };
     }
     const insertedContent = `${currentContent.trimEnd()}\n\n${expectedBlock}\n`;
-    const nextContent = normalizeAgentFrontmatter(insertedContent, definition);
+    const nextContent = normalizeAgentFrontmatter(insertedContent, definition, workerSettings);
     return {
       definition,
       status: {
@@ -1716,7 +1748,7 @@ async function analyzeHarnessFile(
   const currentBlock = match[0];
   const blockUpdatedContent = currentContent.replace(managedBlockPattern, expectedBlock);
   const memoryUpdatedContent = definition.memoryBlock ? ensureVcmMemoryBlock(blockUpdatedContent) : blockUpdatedContent;
-  const nextContent = normalizeAgentFrontmatter(memoryUpdatedContent, definition);
+  const nextContent = normalizeAgentFrontmatter(memoryUpdatedContent, definition, workerSettings);
   const action: HarnessFileAction = currentContent === nextContent ? "ok" : "update";
 
   return {
@@ -1913,14 +1945,29 @@ function ensureAgentAllowedTool(content: string, requiredTool: string): string {
   return content.replace(frontmatter, nextFrontmatter);
 }
 
-function normalizeAgentFrontmatter(content: string, definition: HarnessFileDefinition): string {
+function normalizeAgentFrontmatter(
+  content: string,
+  definition: HarnessFileDefinition,
+  workerSettings: ArchitectWorkerSettings
+): string {
   const allowedToolsUpdated = (definition.requiredTools ?? []).reduce(ensureAgentAllowedTool, content);
   const disallowedToolsUpdated = ensureAgentDisallowedTools(
     allowedToolsUpdated,
     definition.requiredDisallowedTools
   );
   const skillsUpdated = (definition.requiredSkills ?? []).reduce(ensureAgentSkill, disallowedToolsUpdated);
-  return (definition.removedSkills ?? []).reduce(removeAgentSkill, skillsUpdated);
+  const removedSkillsUpdated = (definition.removedSkills ?? []).reduce(removeAgentSkill, skillsUpdated);
+  return applyWorkerSetting(removedSkillsUpdated, definition, workerSettings);
+}
+
+function applyWorkerSetting(
+  content: string,
+  definition: HarnessFileDefinition,
+  workerSettings: ArchitectWorkerSettings
+): string {
+  return definition.architectWorkerType
+    ? applyArchitectWorkerSetting(content, workerSettings[definition.architectWorkerType])
+    : content;
 }
 
 function ensureAgentSkill(content: string, requiredSkill: string): string {
@@ -2651,10 +2698,13 @@ Summarize files reviewed, files updated, generated artifacts, durable-doc audit 
 
 export function createScriptFixedHarnessInstaller(
   scriptPath = path.resolve(process.cwd(), "scripts/install-vcm-harness.mjs")
-): (repoRoot: string) => Promise<HarnessApplyResult> {
-  return async (repoRoot) => {
+): (repoRoot: string, options?: FixedHarnessInstallOptions) => Promise<HarnessApplyResult> {
+  return async (repoRoot, options = {}) => {
     try {
-      const { stdout, stderr } = await execFileAsync(process.execPath, [scriptPath, repoRoot], {
+      const args = options.architectWorkers
+        ? [scriptPath, repoRoot, "--architect-workers", JSON.stringify(options.architectWorkers)]
+        : [scriptPath, repoRoot];
+      const { stdout, stderr } = await execFileAsync(process.execPath, args, {
         cwd: process.cwd(),
         maxBuffer: 10 * 1024 * 1024
       });

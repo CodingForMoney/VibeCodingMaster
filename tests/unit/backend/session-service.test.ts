@@ -15,7 +15,6 @@ import {
   matchesRoleHookSession,
   type SessionService
 } from "../../../src/backend/services/session-service.js";
-import { claudeTranscriptPath } from "../../../src/backend/services/claude-transcript-service.js";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import type { HarnessCodeIntelligenceStatus } from "../../../src/shared/types/harness.js";
 import { VCM_LSP_PLUGIN_DIR, VCM_LSP_PLUGIN_MANIFEST } from "../../../src/backend/services/lsp-plugin.js";
@@ -690,13 +689,9 @@ describe("createSessionService", () => {
     expect(writes[0]).toContain('/cd /repo/.claude/worktrees/other-task');
     expect(writes[1]).toBe("\r");
     expect(resumed.cwd).toBe("/repo/.claude/worktrees/other-task");
-    // #16 second root cause: the transcript is anchored at the first-launch cwd
-    // (repoRoot) and must NOT follow the `/cd` target. Resume re-anchors the
-    // persisted (stale, task-worktree-derived) transcriptPath back to repoRoot,
-    // self-healing it, so the translation panel reads the real transcript.
-    expect(resumed.transcriptPath).toBe(
-      claudeTranscriptPath("/repo", "translator-resume-session")
-    );
+    // Resume keeps the transcript path Claude Code reported through its hook; it
+    // does not follow the `/cd` target or re-derive Claude's directory encoding.
+    expect(resumed.transcriptPath).toBe(`${TASK_WORKTREE}/.claude/projects/translator-resume-session.jsonl`);
     expect(resumed.transcriptPath).not.toContain("worktrees/other-task");
   });
 
@@ -747,7 +742,7 @@ describe("createSessionService", () => {
     const hooked = await recordCurrentTranslatorHook(service, {
       eventName: "UserPromptSubmit",
       sessionId: "translator-cd-prompt-session",
-      transcriptPath: claudeTranscriptPath("/repo", "translator-cd-prompt-session"),
+      transcriptPath: "/home/test/.claude/projects/-repo/translator-cd-prompt-session.jsonl",
       cwd: "/repo"
     });
     expect(hooked?.cwd).toBe(TASK_WORKTREE);
@@ -988,7 +983,7 @@ describe("createSessionService", () => {
     const hooked = await recordCurrentHarnessEngineerHook(service, {
       eventName: "UserPromptSubmit",
       sessionId: "harness-cd-prompt-session",
-      transcriptPath: claudeTranscriptPath("/repo", "harness-cd-prompt-session"),
+      transcriptPath: "/home/test/.claude/projects/-repo/harness-cd-prompt-session.jsonl",
       cwd: "/repo"
     });
     expect(hooked?.cwd).toBe(TASK_WORKTREE);
@@ -1512,7 +1507,7 @@ describe("createSessionService", () => {
     })).toBe(true);
   });
 
-  it("accepts an exact reconciled runtime session id without a Claude hook token", () => {
+  it("requires the runtime token alongside an exact runtime session id", () => {
     const current = {
       id: "runtime-current",
       runtimeSessionToken: "runtime-token-current",
@@ -1522,11 +1517,22 @@ describe("createSessionService", () => {
 
     expect(matchesRoleHookSession(current, {
       eventName: "Stop",
-      runtimeSessionId: "runtime-current"
+      runtimeSessionId: "runtime-current",
+      runtimeSessionToken: "runtime-token-current"
     })).toBe(true);
     expect(matchesRoleHookSession(current, {
       eventName: "Stop",
-      runtimeSessionId: "runtime-stale"
+      runtimeSessionId: "runtime-current"
+    })).toBe(false);
+    expect(matchesRoleHookSession(current, {
+      eventName: "Stop",
+      runtimeSessionId: "runtime-current",
+      runtimeSessionToken: "runtime-token-other"
+    })).toBe(false);
+    expect(matchesRoleHookSession(current, {
+      eventName: "Stop",
+      runtimeSessionId: "runtime-stale",
+      runtimeSessionToken: "runtime-token-current"
     })).toBe(false);
   });
 });

@@ -20,8 +20,10 @@ orchestration, translation, harness setup, and mobile gateway control.
 - Node.js 20 LTS or 22+
 - npm
 - Git
-- Claude Code installed and available as `claude`
+- Claude Code installed and available as `claude` (verified with 2.1.310 or
+  newer; VCM shows a Repository warning when an older release is detected)
 - Claude Code authenticated in the same environment where VCM runs
+- Python 3.10 or newer as `python3`, used by the installed harness tools
 
 For Linux containers, make sure common native build/runtime tools are available:
 
@@ -306,7 +308,10 @@ Codex Bridge child processes use a hard context limit and auto-compaction window
 (about `232560` tokens), leaving headroom before the Codex API limit. Native
 Claude sessions receive no VCM-owned context override. Bridge-backed subagents
 inherit the selected GPT model. Native Architect evidence, scaffold, and
-validation workers use `opus` with `xhigh` effort.
+validation worker model and effort are set under `Architect workers` in the
+Harness panel (defaults: evidence `opus`/`high`, scaffold `sonnet`/`medium`,
+validation `sonnet`/`low`); apply the harness to write a change into the worker
+definitions.
 
 Resume keeps the provider recorded by the existing Session. Use Restart when
 switching between native Claude and Codex Bridge. If the Bridge is disabled,
@@ -464,7 +469,7 @@ Common commands:
 /role
 /role <pm|architect|coder|tester|reviewer>
 /projects
-/use-project <index-or-path>
+/use-project <index-or-listed-path>
 /pull-current
 /tasks
 /use-task <index-or-task-slug>

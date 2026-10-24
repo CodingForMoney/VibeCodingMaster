@@ -62,6 +62,50 @@ export interface LaunchTemplate {
 
 export type ToolSessionDefaults = Record<ToolRoleName, RoleLaunchTemplateEntry>;
 
+export const ARCHITECT_WORKER_TYPES = ["evidence", "scaffold", "validation"] as const;
+export type ArchitectWorkerType = typeof ARCHITECT_WORKER_TYPES[number];
+// "inherit" runs the worker on the parent Architect Session's model.
+export const ARCHITECT_WORKER_MODELS = ["inherit", "fable", "opus", "sonnet"] as const;
+export type ArchitectWorkerModel = typeof ARCHITECT_WORKER_MODELS[number];
+// "default" omits effort from the worker definition.
+export const ARCHITECT_WORKER_EFFORTS = ["default", "low", "medium", "high", "xhigh", "max"] as const;
+export type ArchitectWorkerEffort = typeof ARCHITECT_WORKER_EFFORTS[number];
+
+export interface ArchitectWorkerSetting {
+  model: ArchitectWorkerModel;
+  effort: ArchitectWorkerEffort;
+}
+
+export type ArchitectWorkerSettings = Record<ArchitectWorkerType, ArchitectWorkerSetting>;
+
+// Workers run cheaper than the Architect that delegates to them: evidence reading
+// still needs judgment, while scaffold and validation execution are mechanical.
+export const DEFAULT_ARCHITECT_WORKER_SETTINGS: ArchitectWorkerSettings = {
+  evidence: { model: "opus", effort: "high" },
+  scaffold: { model: "sonnet", effort: "medium" },
+  validation: { model: "sonnet", effort: "low" }
+};
+
+export function normalizeArchitectWorkerSettings(input: unknown): ArchitectWorkerSettings {
+  const candidate = input && typeof input === "object" ? input as Partial<Record<ArchitectWorkerType, unknown>> : {};
+  const normalized = {} as ArchitectWorkerSettings;
+  for (const type of ARCHITECT_WORKER_TYPES) {
+    const entry = candidate[type] && typeof candidate[type] === "object"
+      ? candidate[type] as Partial<Record<keyof ArchitectWorkerSetting, unknown>>
+      : {};
+    const fallback = DEFAULT_ARCHITECT_WORKER_SETTINGS[type];
+    normalized[type] = {
+      model: ARCHITECT_WORKER_MODELS.includes(entry.model as ArchitectWorkerModel)
+        ? entry.model as ArchitectWorkerModel
+        : fallback.model,
+      effort: ARCHITECT_WORKER_EFFORTS.includes(entry.effort as ArchitectWorkerEffort)
+        ? entry.effort as ArchitectWorkerEffort
+        : fallback.effort
+    };
+  }
+  return normalized;
+}
+
 export interface AppPreferences {
   themeMode: ThemeMode;
   flowPauseAlerts: boolean;
@@ -75,6 +119,7 @@ export interface AppPreferences {
   translationOutputMode: TranslationOutputMode;
   launchTemplate: LaunchTemplate;
   toolSessionDefaults: ToolSessionDefaults;
+  architectWorkerSettings: ArchitectWorkerSettings;
 }
 
 export interface UpdateAppPreferencesRequest {
@@ -90,6 +135,7 @@ export interface UpdateAppPreferencesRequest {
   translationTargetLanguage?: TranslationTargetLanguage;
   translationOutputMode?: TranslationOutputMode;
   launchTemplate?: LaunchTemplate;
+  architectWorkerSettings?: ArchitectWorkerSettings;
 }
 
 export const THEME_MODES: readonly ThemeMode[] = ["system", "light", "dark"] as const;

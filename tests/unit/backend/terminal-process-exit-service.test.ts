@@ -68,6 +68,38 @@ describe("terminal-process-exit-service", () => {
     }]);
   });
 
+  it("reports a Reviewer process exit to Gate Review", async () => {
+    const gateEvents: string[] = [];
+    const service = createTerminalProcessExitService({
+      runtime: {
+        subscribeProcessExits() {
+          return () => {};
+        }
+      },
+      projectService: { async loadConfig() { return { stateRoot: ".ai/vcm" } as never; } },
+      taskService: { async loadTask() { return { worktreePath: "/repo/.claude/worktrees/demo-task" } as never; } },
+      sessionService: {
+        async recordTerminalProcessExit() {
+          return { record: createRoleSession("reviewer", "idle"), turnWasRunning: false };
+        }
+      },
+      roundService: {
+        async recordTerminalExit() {
+          return {} as never;
+        }
+      },
+      gateReviewService: {
+        recordReviewerTurnEnded(taskSlug, reason) {
+          gateEvents.push(`${taskSlug}:${reason}`);
+        }
+      }
+    });
+
+    await service.handleProcessExit(createExitEvent("reviewer"));
+
+    expect(gateEvents).toEqual(["demo-task:process-exit"]);
+  });
+
   it("does not mutate Round state for an idle turn or a tool role", async () => {
     const roundInputs: unknown[] = [];
     const records = [

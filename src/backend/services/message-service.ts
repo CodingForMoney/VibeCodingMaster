@@ -140,11 +140,9 @@ export function createMessageService(deps: MessageServiceDeps): MessageService {
     const results: VcmRouteFileDispatchResult[] = [];
 
     for (const routeFile of candidates) {
+      // dispatchRouteFile persists its own message snapshots.
       const result = await dispatchRouteFile(input, routeFile, state, timestamp);
       results.push(result);
-      if (result.message) {
-        await appendMessageSnapshot(deps.fs, input, result.message);
-      }
       if (result.delivered) {
         break;
       }
@@ -241,11 +239,24 @@ export function createMessageService(deps: MessageServiceDeps): MessageService {
       ...message,
       deliveredAt: timestamp
     };
+    let deliveryRecorded = false;
     try {
       await submitTerminalInput(deps.runtime, session.id, renderMessageEnvelope(delivered), {
-        enterDelayMs: autoDispatchEnterDelayMs
+        enterDelayMs: autoDispatchEnterDelayMs,
+        // Record delivery before Enter: a restart after this point must treat the
+        // dispatch as possibly executed instead of delivering it again.
+        beforeSubmit: async () => {
+          await appendMessageSnapshot(deps.fs, input, delivered);
+          deliveryRecorded = true;
+        }
       });
     } catch (error) {
+      if (deliveryRecorded) {
+        await appendMessageSnapshot(deps.fs, input, {
+          ...message,
+          failureReason: `Terminal submission failed: ${errorMessage(error)}`
+        });
+      }
       if (routeFile.fromRole === PM_ROLE) {
         await deps.workflowControlService?.releaseDispatch(toWorkflowContext(input), messageId);
       }
@@ -696,11 +707,24 @@ async function readLatestMessages(fs: FileSystemAdapter, messagesPath: string): 
   const latest = new Map<string, VcmRoleMessage>();
   const lines = (await fs.readText(messagesPath)).split(/\r?\n/).filter(Boolean);
   for (const line of lines) {
-    const message = JSON.parse(line) as VcmRoleMessage;
-    latest.set(message.id, message);
+    const message = parseMessageLine(line);
+    // A line truncated by a crash or full disk must not block every later read;
+    // runtime recovery removes it and reports a warning.
+    if (message) {
+      latest.set(message.id, message);
+    }
   }
 
   return [...latest.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+}
+
+export function parseMessageLine(line: string): VcmRoleMessage | undefined {
+  try {
+    const message = JSON.parse(line) as VcmRoleMessage;
+    return message && typeof message.id === "string" ? message : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function appendMessageSnapshot(

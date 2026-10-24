@@ -655,14 +655,16 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
   async function useProject(selector: string): Promise<string> {
     const options = await listProjectOptions();
     const index = Number.parseInt(selector, 10);
+    // Gateway senders may select only projects already connected on the desktop.
     const repoPath = Number.isFinite(index) && String(index) === selector.trim()
       ? options[index - 1]
-      : selector.trim();
+      : options.find((option) => option === selector.trim());
     if (!repoPath) {
       throw new VcmError({
         code: "PROJECT_SELECTION_INVALID",
         message: `Project not found: ${selector}`,
-        statusCode: 404
+        statusCode: 404,
+        hint: "Use /projects and select a listed project. Connect new repositories from the desktop app."
       });
     }
     const project = await deps.projectService.connectProject({ repoPath });
@@ -1866,7 +1868,7 @@ function helpText(enabled: boolean): string {
     "/role",
     "/role <pm|architect|coder|tester|reviewer>",
     "/projects",
-    "/use-project <index-or-path>",
+    "/use-project <index-or-listed-path>",
     "/pull-current",
     "/tasks",
     "/use-task <index-or-task-slug>",

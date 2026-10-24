@@ -122,6 +122,39 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
       .filter((value) => value.includes("[VCM GATE REVIEW CALLBACK]"))).toHaveLength(1);
   });
 
+  it("fails the gate and calls back PM when Reviewer stops without a report", async () => {
+    const env = await createMockClaudeE2eApp();
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "reviewer-stops-early");
+    await startRole(env.app, task.taskSlug, "project-manager");
+    await writeConfirmedArchitectureBrief(task.worktreePath, task.taskSlug);
+    await writeCompleteArchitecturePlan(task.worktreePath, task.taskSlug, "Initial plan.");
+    await updateGateSettings(env.app, task.taskSlug, {
+      "architecture-plan": true,
+      "validation-adequacy": false,
+      "code-diff": false
+    });
+    env.mockRuntime.onPrompt("reviewer", "[VCM GATE REVIEW]", async (ctx) => {
+      await ctx.userPromptSubmit();
+      await ctx.stop();
+    });
+
+    const started = await requestGateReview(env.app, task.taskSlug, "architecture-plan");
+    expect(started.status).toBe("started");
+    await waitFor(async () => {
+      const record = (await getGateState(env.app, task.taskSlug)).gates["architecture-plan"];
+      expect(record).toMatchObject({ status: "failed", callbackStatus: "sent" });
+    }, 5_000);
+
+    const record = (await getGateState(env.app, task.taskSlug)).gates["architecture-plan"];
+    expect(record.error).toContain("Reviewer ended its turn without submitting the report.");
+    const pmSession = env.mockRuntime.getSessionByRole(task.taskSlug, "project-manager");
+    expect(env.mockRuntime.getWrites(pmSession!.id)
+      .some((value) => value.includes("[VCM GATE REVIEW CALLBACK]"))).toBe(true);
+  });
+
   it("reviews only ready gate inputs and skips unchanged approved inputs", async () => {
     const env = await createMockClaudeE2eApp();
     cleanups.push(() => env.close());
@@ -269,7 +302,7 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
       codeDiffSource: "coder"
     });
     expect(codeDiffApproved.gates["code-diff"].changedFiles).toContain("feature.txt");
-  }, 10_000);
+  });
 
   it("blocks unresolved Tester-owned infrastructure repair and accepts repaired evidence", async () => {
     const env = await createMockClaudeE2eApp();

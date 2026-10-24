@@ -108,6 +108,38 @@ describe("harness templates stay in sync with the script installer", () => {
     expect(status.needsApply).toBe(false);
   }, 30_000);
 
+  it("applies configured Architect worker model and effort to installed and existing worker files", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-architect-workers-"));
+    await execFileAsync(process.execPath, [installerPath, tmpRepo]);
+    const workerSettings = {
+      evidence: { model: "fable", effort: "xhigh" },
+      scaffold: { model: "inherit", effort: "default" },
+      validation: { model: "sonnet", effort: "low" }
+    } as const;
+
+    await execFileAsync(process.execPath, [installerPath, tmpRepo, "--architect-workers", JSON.stringify(workerSettings)]);
+
+    const evidence = await readFile(path.join(tmpRepo, ".claude/agents/vcm-architect-evidence-worker.md"), "utf8");
+    const scaffold = await readFile(path.join(tmpRepo, ".claude/agents/vcm-architect-scaffold-worker.md"), "utf8");
+    expect(evidence).toContain("tools: Read, Grep, Glob, Write\nmodel: fable\neffort: xhigh\n---");
+    expect(scaffold).toContain("model: inherit\n---");
+    expect(scaffold).not.toContain("effort:");
+
+    // The backend status analysis must agree with the installer for the same settings.
+    const service = createHarnessService({
+      fs: createNodeFileSystemAdapter(),
+      getArchitectWorkerSettings: async () => workerSettings
+    });
+    const drifted = (await service.getHarnessStatus(tmpRepo)).files.filter((file) => file.action !== "ok");
+    expect(drifted.map((file) => file.path)).toEqual([]);
+    const defaultService = createHarnessService({ fs: createNodeFileSystemAdapter() });
+    const defaultDrift = (await defaultService.getHarnessStatus(tmpRepo)).files.filter((file) => file.action !== "ok");
+    expect(defaultDrift.map((file) => file.path).sort()).toEqual([
+      ".claude/agents/vcm-architect-evidence-worker.md",
+      ".claude/agents/vcm-architect-scaffold-worker.md"
+    ]);
+  }, 30_000);
+
   it("restores Skill access in existing role frontmatter during script install", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-agent-skill-migration-"));
     await execFileAsync(process.execPath, [installerPath, tmpRepo]);

@@ -189,6 +189,42 @@ describe("createRuntimeRecoveryService", () => {
     expect(statusUpdates).toEqual(["demo-task:stopped"]);
   });
 
+  it("drops an unparsable message log line and still runs the remaining task recovery", async () => {
+    const repoRoot = await makeTempRepo(tempDirs);
+    const taskRepoRoot = path.join(repoRoot, ".claude/worktrees/demo-task");
+    await mkdir(path.join(taskRepoRoot, ".ai/vcm/messages"), { recursive: true });
+    await mkdir(path.join(taskRepoRoot, ".ai/vcm/gate-reviews"), { recursive: true });
+    const validMessage = {
+      id: "msg_1",
+      taskSlug: "demo-task",
+      fromRole: "architect",
+      toRole: "project-manager",
+      type: "result",
+      body: "Done",
+      artifactRefs: [],
+      createdAt: "2026-06-26T23:59:00.000Z",
+      deliveredAt: "2026-06-26T23:59:02.000Z",
+      acceptedAt: "2026-06-26T23:59:03.000Z"
+    };
+    await writeFile(
+      path.join(taskRepoRoot, ".ai/vcm/messages/demo-task.jsonl"),
+      `${JSON.stringify(validMessage)}\n{"id":"msg_2","taskSl`,
+      "utf8"
+    );
+    await writeJson(path.join(taskRepoRoot, ".ai/vcm/gate-reviews/index.json"), gateIndex("architecture-plan", "running"));
+
+    const service = createService(repoRoot, taskRepoRoot, [], []);
+    const report = await service.recoverProject(repoRoot);
+
+    expect(report.warnings).toEqual([
+      ".ai/vcm/messages/demo-task.jsonl: removed unparsable message log line 2."
+    ]);
+    await expect(readFile(path.join(taskRepoRoot, ".ai/vcm/messages/demo-task.jsonl"), "utf8"))
+      .resolves.toBe(`${JSON.stringify(validMessage)}\n`);
+    const gate = await readJson(path.join(taskRepoRoot, ".ai/vcm/gate-reviews/index.json"));
+    expect(gate.gates["architecture-plan"].status).toBe("pending");
+  });
+
   it("does not rewrite running state when the runtime session is still live", async () => {
     const repoRoot = await makeTempRepo(tempDirs);
     const taskRepoRoot = path.join(repoRoot, ".claude/worktrees/demo-task");

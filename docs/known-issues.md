@@ -33,28 +33,6 @@ security risk, not delivery priority.
 - **Resolution condition**: Encrypt secrets at rest or delegate to an OS keychain; or formally accept and document the plaintext-at-rest model.
 - **Related**: KI-001.
 
-### KI-019 — Gateway `/use-project` connects any local repository path
-
-- **Status**: Open.
-- **Category**: Product / security.
-- **Affected modules / surfaces**: `src/backend/gateway/gateway-service.ts` (`useProject`, `listProjectOptions`), gateway `/use-project` command.
-- **Current gap**: `/use-project <index-or-path>` passes any non-index argument straight to `projectService.connectProject` instead of restricting selection to the current and recent project list.
-- **Impact**: When the gateway is enabled, a chat sender can point VCM at any Git repository on the host and then create tasks, install harness commits, and run role sessions with relaxed permissions there. With Lark, any sender in the app's tenant can drive the gateway (accepted design), which widens who can do this.
-- **Mitigation / workaround**: Keep the gateway disabled when not in use; restrict Lark app availability to trusted users.
-- **Resolution condition**: Accept only an index into the current and recent project list (or an exact match of one of those paths) from the gateway, and reject arbitrary paths.
-- **Related**: KI-001, KI-002.
-
-### KI-020 — Hook session matching skips the runtime token when `vcm_runtime_session_id` is present
-
-- **Status**: Open.
-- **Category**: Product / security.
-- **Affected modules / surfaces**: `src/backend/services/session-service.ts` (`matchesRoleHookSession`), `src/backend/services/claude-hook-service.ts` (hook identity checks).
-- **Current gap**: When a hook payload carries `vcm_runtime_session_id`, matching compares only the session record ID and never checks `runtimeSessionToken`. Installed hooks never send this field, and no test uses it.
-- **Impact**: A caller that knows a session record ID (exposed in API responses and session files) can post Stop or UserPromptSubmit hooks as another role, ending turns or triggering route dispatch.
-- **Mitigation / workaround**: Keep the default loopback bind (KI-001).
-- **Resolution condition**: Remove the `vcm_runtime_session_id` branch, or require the matching runtime token on that branch as well.
-- **Related**: KI-001.
-
 ---
 
 ## Correctness & Robustness
@@ -70,17 +48,6 @@ security risk, not delivery priority.
 - **Resolution condition**: Distinguish spawn/launch errors from non-zero process exits in `command-runner` (e.g., a sentinel exit code or a typed `spawnFailed` flag) and have git-adapter treat spawn failure as an error rather than a `false` result. Requires a cross-file contract change → route through the full code-change flow.
 - **Related**: none.
 
-### KI-004 — Claude transcript project-directory hashing does not match Claude Code's encoding
-
-- **Status**: Open.
-- **Category**: Product / correctness (external coupling to Claude Code's on-disk format).
-- **Affected modules / surfaces**: `src/backend/services/claude-transcript-service.ts` (`projectHash`, `projectsTranscriptDir`, `claudeTranscriptPath`, `resolveExistingClaudeTranscriptPath`), translation panel and question/todo extraction that depend on it.
-- **Current gap**: `projectHash` only replaces `[/\s]+` with `-`, which does not reproduce Claude Code's actual project-directory encoding (which also encodes `.` and other path characters). The primary path lookup can therefore miss; correctness currently leans on the fallback full scan `findClaudeTranscriptPathBySessionId`, which picks the most-recently-modified `<sessionId>.jsonl` across all project dirs.
-- **Impact**: If Claude changes its encoding, or two project directories produce a colliding hash / share a session-id filename, transcript resolution can attach to the wrong file or fail to find one, breaking translation feed and question/todo surfacing. The fallback masks the brittleness rather than fixing it.
-- **Mitigation / workaround**: Rely on the `session.transcriptPath` / `claudeSessionId` resolution path; the mtime-sorted fallback usually recovers the right file.
-- **Resolution condition**: Mirror Claude Code's real directory-encoding scheme (or resolve transcript paths via a documented Claude API/contract) instead of an approximate replace. Treat the encoding as an external-contract assumption to re-verify on Claude Code upgrades.
-- **Related**: KI-005.
-
 ### KI-017 — Harness Python tools require Python 3.10+ without declaring or checking it
 
 - **Status**: Planned.
@@ -90,61 +57,6 @@ security risk, not delivery priority.
 - **Impact**: On such hosts, Gate Review requests, long-running validation jobs, durable-doc checks, scaffold-ledger checks, and generated-context refresh fail with a Python traceback instead of a clear prerequisite error, blocking the VCM workflow.
 - **Mitigation / workaround**: Put Python 3.10+ first on `PATH` as `python3` for VCM and its role sessions.
 - **Resolution condition**: Decided direction: rewrite the harness tools in Node and remove the Python runtime dependency from the harness, since VCM and its hooks already require Node. Until then, the README must state the Python 3.10+ requirement.
-- **Related**: KI-018.
-
-### KI-018 — Claude Code platform contract is undeclared and partly relies on implementation details
-
-- **Status**: Planned.
-- **Category**: Product / external coupling.
-- **Affected modules / surfaces**: `src/backend/adapters/claude-adapter.ts` (CLI flags, `--version` availability probe only), `src/backend/services/claude-transcript-service.ts` (transcript directory encoding, JSONL record shape), `src/backend/runtime/terminal-submit.ts` (bracketed paste plus Enter submission), `src/backend/services/session-service.ts` (Claude Code and OTEL environment variables), `src/backend/services/claude-hook-service.ts` (hook event names and payload fields).
-- **Current gap**: VCM depends on about ten CLI flags, six hook events, hook payload fields, roughly twenty environment variables, agent frontmatter fields, and undocumented behavior (transcript path encoding and record format, TUI paste submission). These assumptions are spread across services, and VCM enforces no minimum Claude Code version.
-- **Impact**: A Claude Code release that changes one of these behaviors can break session tracking, dispatch confirmation, or translation without a clear error. No breakage has been observed so far when tracking the latest Claude Code release.
-- **Mitigation / workaround**: Track the latest Claude Code release; KI-004 fallback scan recovers most transcript lookups.
-- **Resolution condition**: Decided direction: (1) replace reliance on undocumented behavior with documented inputs where available, such as using the hook payload `transcript_path` instead of recomputing the project-directory encoding; (2) enforce a minimum supported Claude Code version at launch with an explicit error.
-- **Related**: KI-004, KI-017.
-
-### KI-021 — A backend restart after terminal submission can redeliver the same PM dispatch
-
-- **Status**: Open.
-- **Category**: Product / correctness.
-- **Affected modules / surfaces**: `src/backend/services/message-service.ts` (`dispatchRouteFile`, `scanLocked`), `src/backend/services/runtime-recovery-service.ts` (`recoverMessages`), `src/backend/services/workflow-control-service.ts` (`recoverTask`, `wasDispatchDelivered`).
-- **Current gap**: The message snapshot with `deliveredAt` is appended only after `dispatchRouteFile` returns, while the route envelope has already been pasted and submitted to the target terminal. Recovery treats a message without `deliveredAt` as undelivered, clears `dispatchingAt`, and returns the workflow approval to `pending`; the PM route file is still non-empty.
-- **Impact**: If VCM restarts in that window (at least the Enter delay plus follow-up writes), the next route scan delivers the same task to the target role again, so the role executes it twice.
-- **Mitigation / workaround**: Avoid restarting VCM while a PM dispatch is in flight; inspect the target session before allowing redelivery.
-- **Resolution condition**: Persist delivery immediately after terminal submission succeeds, or treat a dispatch whose delivery state is ambiguous as possibly delivered and require explicit user confirmation instead of automatic redelivery.
-- **Related**: KI-023.
-
-### KI-022 — Gate Review waits indefinitely for a report that the Reviewer never writes
-
-- **Status**: Open.
-- **Category**: Product / correctness.
-- **Affected modules / surfaces**: `src/backend/services/gate-review-service.ts` (`waitForGateReport`, `runGateReview`, `activeRuns`), `src/backend/services/claude-hook-service.ts` (Reviewer Stop and StopFailure handling), `src/backend/services/task-close-service.ts`.
-- **Current gap**: `waitForGateReport` polls the request report path until a report exists or the run is cancelled. A Reviewer Stop, non-retryable StopFailure, or terminal exit without a report does not fail the gate. Task close does not abort active gate runs.
-- **Impact**: The gate stays `running`, Project Manager waits for a callback that never arrives, and the workflow stalls until the user cancels the request or restarts VCM. A gate run active at task close keeps polling a removed worktree path for the life of the process.
-- **Mitigation / workaround**: Cancel the running gate request in the UI and request it again.
-- **Resolution condition**: Fail the current gate request when the Reviewer turn ends or its process exits without a valid report, and abort all active gate runs for a task during task close.
-- **Related**: None.
-
-### KI-023 — One malformed line in the task message log breaks dispatch and task recovery
-
-- **Status**: Open.
-- **Category**: Product / robustness.
-- **Affected modules / surfaces**: `src/backend/services/message-service.ts` (`readLatestMessages`, `appendMessageSnapshot`), `src/backend/services/runtime-recovery-service.ts` (`recoverMessages`, per-task recovery step).
-- **Current gap**: Every line of `<stateRoot>/messages/<task>.jsonl` is parsed with `JSON.parse` without error handling. Recovery parses the log the same way and rewrites it with a non-atomic `writeText`. Message recovery runs inside the same per-task recovery step as workflow, Gate Review, and restart recovery.
-- **Impact**: A partial line left by a crash or full disk makes every route scan, prompt confirmation, and message listing for the task throw. On the next startup, that task's recovery step fails at message recovery, so workflow, Gate Review, Architect restart, and Restart With Context recovery are skipped for the task. A crash during the recovery rewrite can itself truncate the log.
-- **Mitigation / workaround**: Manually remove the malformed trailing line from the message log.
-- **Resolution condition**: Tolerate and report an unparsable trailing line instead of failing, write recovery output atomically, and isolate message recovery from the other per-task recovery steps.
-- **Related**: KI-021.
-
-### KI-024 — Workflow state reads write files without the workflow lock
-
-- **Status**: Open.
-- **Category**: Product / correctness.
-- **Affected modules / surfaces**: `src/backend/services/workflow-control-service.ts` (`getState`, `recoverCommitJournal`, `reconstructStateFromProgress`), unlocked callers such as `src/backend/api/runtime-state-routes.ts` and `src/backend/services/claude-hook-service.ts`.
-- **Current gap**: `getState` may write the Workflow Progress template, save a reconstructed runtime state, or replay and delete the paired-write commit journal. It runs both inside and outside the workflow lock, including from frequently polled runtime-state requests.
-- **Impact**: An unlocked read can replay a journal concurrently with a locked commit. Current interleavings appear idempotent, but correctness relies on timing rather than on the lock; a stale replay overwriting a newer committed state has not been reproduced but is not excluded by design.
-- **Mitigation / workaround**: None.
-- **Resolution condition**: Make unlocked reads side-effect free and perform journal replay, template creation, and state reconstruction only under the workflow lock.
 - **Related**: None.
 
 ---
@@ -160,7 +72,7 @@ security risk, not delivery priority.
 - **Impact**: Long-lived sessions accumulate large transcripts; with multiple concurrent role sessions each tailing + replaying, synchronous reads can stall the event loop and spike memory, degrading API/WS responsiveness.
 - **Mitigation / workaround**: Practical session/transcript sizes are usually small; impact is bounded by transcript length and session count.
 - **Resolution condition**: Move to async/streamed reads, bound replay (cap bytes/lines read), and/or offload tailing; treat as a scalability hardening item.
-- **Related**: KI-004, KI-006.
+- **Related**: KI-006.
 
 ### KI-006 — O(n)-per-chunk terminal replay buffer recomputation
 
@@ -172,32 +84,6 @@ security risk, not delivery priority.
 - **Mitigation / workaround**: Output bursts are typically short; the 2 MB cap bounds memory.
 - **Resolution condition**: Use a chunked/ring buffer or amortized trimming so per-chunk cost is proportional to the new data, not the whole buffer.
 - **Related**: KI-005.
-
----
-
-## Cost & Model Allocation
-
-### KI-016 — Architect worker model and effort are fixed and not configurable
-
-- **Status**: Open.
-- **Category**: Product / cost.
-- **Affected modules / surfaces**: `src/backend/services/harness-service.ts` (Architect worker frontmatter `model: "opus"`, `effort: "xhigh"`), `src/backend/cli/install-vcm-harness.ts` (duplicate worker frontmatter definitions), installed `.claude/agents/vcm-architect-{evidence,scaffold,validation}-worker.md`, `src/backend/services/session-service.ts` launch options.
-- **Current gap**: Role model and effort are selected per Session at launch, but the three Architect workers are hardcoded to `opus` with `xhigh` effort in harness templates. Workers were intended to be cheaper than an Architect running Fable; that relation is relative, while the configuration is absolute. The same values are also defined in two installer code paths.
-- **Impact**: When Architect runs Opus or a cheaper model, workers cost the same as or more than their parent. Mechanical workers (validation command execution, exact scaffold execution) pay for the highest effort level without needing judgment. Users cannot tune worker cost without editing installed harness files, which later harness refreshes overwrite.
-- **Mitigation / workaround**: Run Architect on Fable so the fixed Opus workers stay cheaper than the parent.
-- **Resolution condition**: Make worker model and effort configurable (per worker type, or derived from the parent Architect Session's launch model at launch time), keep a single source of truth for the defaults, and document the model-tier policy in `docs/ARCHITECTURE.md`.
-- **Related**: KI-025.
-
-### KI-025 — Gate Review starts and resumes Reviewer with the default model
-
-- **Status**: Open.
-- **Category**: Product / cost.
-- **Affected modules / surfaces**: `src/backend/services/gate-review-service.ts` (`ensureReviewerSession`), `src/backend/services/session-service.ts` (launch model resolution `input.model ?? persisted.model`).
-- **Current gap**: When the Reviewer Session is not running, Gate Review starts or resumes it with an explicit `model: "default"`, which overrides the model saved for that Session.
-- **Impact**: Reviewer silently loses the user's model tier choice. When the saved model is a Codex Bridge model, the resume fails because Resume cannot cross providers, and Gate Review falls back to a fresh Session without the previous Reviewer context.
-- **Mitigation / workaround**: Start or resume Reviewer manually with the intended model before requesting a gate.
-- **Resolution condition**: Omit the model on automatic Reviewer start and resume so the saved Session or tool default applies.
-- **Related**: KI-016.
 
 ---
 
@@ -245,7 +131,7 @@ security risk, not delivery priority.
 - **Impact**: None functional in the default task-scoped path.
 - **Mitigation / workaround**: None needed.
 - **Resolution condition**: If pursued, drop `cwd`/`previousCwd` from `RoleSessionRecord` and migrate the remaining consumers to derive cwd (repoRoot anchor plus active task root). This is a `src/shared` public-contract change and must go through the full `architect plan -> coder -> tester` flow (out of Debug Mode scope).
-- **Related**: KI-004.
+- **Related**: None.
 
 ### KI-015 — Legacy project-level `/cd` correctness depends on unverified Claude Code behaviors
 
@@ -258,19 +144,19 @@ security risk, not delivery priority.
 - **Impact**: None in the default task-scoped path. A future project-scoped mode could operate in the wrong directory if either premise is false.
 - **Mitigation / workaround**: Keep tool sessions task-scoped unless the legacy path is restored and verified against a live Claude Code session.
 - **Resolution condition**: Remove the legacy project-level helpers, or verify their fresh launch, resume, and task-switch behavior before exposing project-scoped tool sessions again.
-- **Related**: KI-004 (Claude transcript directory-encoding external coupling).
+- **Related**: KI-013.
 
 ---
 
 ## Test Infrastructure
 
-### KI-026 — Backend E2E timeouts are too tight for a clean `npm test` run
+### KI-027 — Backend E2E helper duplicates the server composition root
 
 - **Status**: Open.
 - **Category**: Test-infra.
-- **Affected modules / surfaces**: `tests/e2e/backend/harness-retrospective.e2e.test.ts` ("keeps the retrospective open until moved memory is committed to durable documentation"), `vitest.config.ts` default test timeout, other backend E2E files under parallel load.
-- **Current gap**: The listed test needs about 5.5 seconds even when run alone and exceeds the 5-second default timeout on every run. Under the default parallel run, about nine more backend E2E tests time out; they pass when run serially.
-- **Impact**: `npm test` fails on an unmodified checkout, which hides real regressions and weakens the release gate signal.
-- **Mitigation / workaround**: Rerun failing backend E2E files with `--no-file-parallelism` or a larger `--testTimeout`.
-- **Resolution condition**: Give long backend E2E tests explicit timeouts sized for their workload, or reduce their fixed delays, so a clean `npm test` passes under the default parallel run.
-- **Related**: KI-017.
+- **Affected modules / surfaces**: `tests/e2e/backend/helpers/e2e-app.ts` (builds every backend service itself), `src/backend/server.ts` (production service wiring).
+- **Current gap**: The backend E2E helper constructs and wires every service by hand instead of reusing the production composition in `src/backend/server.ts`. A dependency added to one wiring is not present in the other.
+- **Impact**: Backend E2E journeys do not prove production wiring. A service dependency wired only in `server.ts` is absent from E2E runs, and one wired only in the helper passes E2E while missing in production.
+- **Mitigation / workaround**: Update both wiring sites together when adding or changing a service dependency.
+- **Resolution condition**: Expose the production composition from `server.ts` with injectable runtime, adapters, and timers, and build the E2E app from it so both share one wiring.
+- **Related**: None.

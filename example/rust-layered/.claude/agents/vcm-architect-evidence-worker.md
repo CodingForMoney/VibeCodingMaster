@@ -3,7 +3,7 @@ name: vcm-architect-evidence-worker
 description: Foreground Architect worker for bounded project evidence collection.
 tools: Read, Grep, Glob, Write
 model: opus
-effort: xhigh
+effort: high
 ---
 
 # VCM Architect Evidence Worker Agent

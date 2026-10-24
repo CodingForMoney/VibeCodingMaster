@@ -51,6 +51,28 @@ describe("createProjectService", () => {
     ]);
   });
 
+  it("surfaces the Claude Code version warning and re-probes it on connect", async () => {
+    const refreshes: Array<boolean | undefined> = [];
+    const service = createProjectService({
+      fs: createMemoryFs(new Set(["/workspace"])),
+      git: createGitAdapterStub([]),
+      appSettings: createAppSettingsStub(),
+      claudeVersionCheck: {
+        async getWarning(_command, options) {
+          refreshes.push(options?.refresh);
+          return "Claude Code 2.0.0 is older than the minimum verified version.";
+        }
+      }
+    });
+
+    const connected = await service.connectProject({ repoPath: "/workspace" });
+    const current = await service.getCurrentProject();
+
+    expect(connected.warnings).toEqual(["Claude Code 2.0.0 is older than the minimum verified version."]);
+    expect(current?.warnings).toEqual(["Claude Code 2.0.0 is older than the minimum verified version."]);
+    expect(refreshes).toEqual([true, undefined]);
+  });
+
   it("records successful repository connections in recent paths", async () => {
     const appSettings = createAppSettingsStub();
     const service = createProjectService({

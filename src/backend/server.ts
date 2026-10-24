@@ -9,6 +9,7 @@ import { createCodexBridgeAdapter } from "./adapters/codex-bridge-adapter.js";
 import { createCommandRunner } from "./adapters/command-runner.js";
 import { createCommandDispatcher, type CommandDispatcher } from "./services/command-dispatcher.js";
 import { createClaudeHookService, type ClaudeHookService } from "./services/claude-hook-service.js";
+import { createClaudeVersionCheck } from "./services/claude-version-check.js";
 import { createGitAdapter } from "./adapters/git-adapter.js";
 import { createAppSettingsService, type AppSettingsService } from "./services/app-settings-service.js";
 import {
@@ -314,7 +315,12 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     workflowControlService,
     getDurableDocAssignment: (taskRepoRoot, role) => autoMemoryService.getDurableDocAssignment(taskRepoRoot, role)
   });
-  const projectService = createProjectService({ fs, git, appSettings });
+  const projectService = createProjectService({
+    fs,
+    git,
+    appSettings,
+    claudeVersionCheck: createClaudeVersionCheck(claude)
+  });
   const taskService = createTaskService({ fs, git, artifactService, projectService });
   const taskWorkflowService = createTaskWorkflowService({ fs });
   const codeIntelligenceDetector = createHarnessCodeIntelligenceDetector(fs, { runner });
@@ -338,6 +344,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     runtime,
     harnessEngineerSessions: sessionService,
     runFixedInstaller: createScriptFixedHarnessInstaller(path.join(appRoot, "scripts/install-vcm-harness.mjs")),
+    getArchitectWorkerSettings: async () => (await appSettings.getPreferences()).architectWorkerSettings,
     vcmVersion
   });
   const autoMemoryService = createAutoMemoryService({
@@ -456,7 +463,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     projectService,
     taskWorkflowService,
     architectRestartService,
-    roleContextRestartService
+    roleContextRestartService,
+    gateReviewService
   });
   const gatewayService = createGatewayService({
     fs,
@@ -500,7 +508,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     translationWorkerService,
     architectRestartService,
     roleContextRestartService,
-    workflowControlService
+    workflowControlService,
+    gateReviewService
   });
   const runtimeCoordinator = createRuntimeCoordinatorService({
     appSettings,
@@ -529,7 +538,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     projectService,
     taskService,
     sessionService,
-    roundService
+    roundService,
+    gateReviewService
   });
   const diagnosticsService = createDiagnosticsService({
     appRoot,

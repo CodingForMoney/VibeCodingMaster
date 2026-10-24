@@ -280,7 +280,8 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     projectService,
     taskWorkflowService,
     architectRestartService,
-    roleContextRestartService
+    roleContextRestartService,
+    gateReviewService
   });
   const gatewayService = createGatewayService({
     fs: fsAdapter,
@@ -325,6 +326,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     architectRestartService,
     roleContextRestartService,
     workflowControlService,
+    gateReviewService,
     retrySetTimeout(callback) {
       return globalThis.setTimeout(callback, 0);
     },
@@ -363,7 +365,8 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     projectService,
     taskService,
     sessionService,
-    roundService
+    roundService,
+    gateReviewService
   });
   const diagnosticsService = createDiagnosticsService({
     appRoot,

@@ -370,15 +370,8 @@ export function resolveExistingClaudeTranscriptPath(session: RoleSessionRecord):
     return sessionPath;
   }
 
-  const cwdPath = existingFile(claudeTranscriptPath(
-    session.cwd,
-    session.claudeSessionId,
-    session.claudeConfigDir
-  ));
-  if (cwdPath) {
-    return cwdPath;
-  }
-
+  // Without a hook-reported path, locate the transcript by session id instead of
+  // reproducing Claude Code's undocumented project-directory encoding.
   return findClaudeTranscriptPathBySessionId(session.claudeSessionId, session.claudeConfigDir);
 }
 
@@ -443,22 +436,6 @@ function existingFile(candidate: string | undefined): string | undefined {
 
 export function claudeProjectsRoot(configDir?: string): string {
   return join(configDir ?? join(homedir(), ".claude"), "projects");
-}
-
-export function projectHash(projectDir: string): string {
-  return projectDir.replace(/[\/\s]+/g, "-");
-}
-
-export function projectsTranscriptDir(projectDir: string, configDir?: string): string {
-  return join(claudeProjectsRoot(configDir), projectHash(projectDir));
-}
-
-export function claudeTranscriptPath(
-  projectDir: string,
-  claudeSessionId: string,
-  configDir?: string
-): string {
-  return join(projectsTranscriptDir(projectDir, configDir), `${claudeSessionId}.jsonl`);
 }
 
 export function parseAssistantContent(line: string): ClaudeTranscriptEvent[] {

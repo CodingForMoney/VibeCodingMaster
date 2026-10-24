@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import qrcode from "qrcode-generator";
 import {
   createDefaultLaunchTemplate,
+  DEFAULT_ARCHITECT_WORKER_SETTINGS,
   DEFAULT_TRANSLATION_OUTPUT_MODE,
   DEFAULT_TRANSLATION_TARGET_LANGUAGE,
   type AppPreferences,
+  type ArchitectWorkerSettings,
   type CodexBridgeIntegrationStatus,
   type LaunchTemplate,
   type PermissionRequestMode,
@@ -105,6 +107,7 @@ export function App() {
   const [permissionRequestMode, setPermissionRequestMode] = useState<PermissionRequestMode>("off");
   const [autoTaskHarnessReviewEnabled, setAutoTaskHarnessReviewEnabled] = useState(false);
   const [autoMemoryEnabled, setAutoMemoryEnabled] = useState(false);
+  const [architectWorkerSettings, setArchitectWorkerSettings] = useState<ArchitectWorkerSettings>(DEFAULT_ARCHITECT_WORKER_SETTINGS);
   const [translationEnabled, setTranslationEnabled] = useState(false);
   const [translationAutoSendEnabled, setTranslationAutoSendEnabled] = useState(false);
   const [translationTargetLanguage, setTranslationTargetLanguage] = useState<TranslationTargetLanguage>(DEFAULT_TRANSLATION_TARGET_LANGUAGE);
@@ -170,6 +173,7 @@ export function App() {
     setPermissionRequestMode(preferences.permissionRequestMode);
     setAutoTaskHarnessReviewEnabled(preferences.autoTaskHarnessReviewEnabled);
     setAutoMemoryEnabled(preferences.autoMemoryEnabled);
+    setArchitectWorkerSettings(preferences.architectWorkerSettings);
     setTranslationEnabled(preferences.translationEnabled);
     setTranslationAutoSendEnabled(preferences.translationAutoSendEnabled);
     setTranslationTargetLanguage(preferences.translationTargetLanguage);
@@ -794,6 +798,7 @@ export function App() {
           }}
           autoTaskHarnessReviewEnabled={autoTaskHarnessReviewEnabled}
           autoMemoryEnabled={autoMemoryEnabled}
+          architectWorkerSettings={architectWorkerSettings}
           gatewayStatus={gatewayStatus}
           gatewayQrLogin={gatewayQrLogin}
           gatewayQrCheck={gatewayQrCheck}
@@ -902,6 +907,14 @@ export function App() {
               applyPreferences(preferences);
               await refreshProjectRuntimeState();
             }, "Update auto memory setting");
+          }}
+          onArchitectWorkerSettingsChange={(settings) => {
+            setArchitectWorkerSettings(settings);
+            void withBusy(async () => {
+              const preferences = await apiClient.updateAppPreferences({ architectWorkerSettings: settings });
+              applyPreferences(preferences);
+              await loadHarnessStatus(activeTask?.taskSlug);
+            }, "Update Architect worker settings");
           }}
           onHarnessEngineerLaunchOptionsChange={(input) => {
             setHarnessEngineerPermissionMode(input.permissionMode);

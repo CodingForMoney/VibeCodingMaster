@@ -1,5 +1,6 @@
-import { isVcmRoleName } from "../../shared/constants.js";
+import { isReviewerRoleName, isVcmRoleName } from "../../shared/constants.js";
 import type { TerminalProcessExitEvent, TerminalRuntime, Unsubscribe } from "../runtime/terminal-runtime.js";
+import type { GateReviewService } from "./gate-review-service.js";
 import type { ProjectService } from "./project-service.js";
 import type { RoundService } from "./round-service.js";
 import type { SessionService } from "./session-service.js";
@@ -17,6 +18,7 @@ export interface TerminalProcessExitServiceDeps {
   taskService: Pick<TaskService, "loadTask">;
   sessionService: Pick<SessionService, "recordTerminalProcessExit">;
   roundService: Pick<RoundService, "recordTerminalExit">;
+  gateReviewService?: Pick<GateReviewService, "recordReviewerTurnEnded">;
 }
 
 export function createTerminalProcessExitService(
@@ -35,6 +37,9 @@ export function createTerminalProcessExitService(
       status: event.session.status === "crashed" ? "crashed" : "exited",
       exitCode: event.exitCode
     });
+    if (recorded && isReviewerRoleName(recorded.record.role)) {
+      deps.gateReviewService?.recordReviewerTurnEnded(recorded.record.taskSlug, "process-exit");
+    }
     if (!recorded?.turnWasRunning || !isVcmRoleName(recorded.record.role)) {
       return;
     }

@@ -6,6 +6,7 @@ import {
   createDefaultLaunchTemplate,
   createDefaultToolSessionDefaults,
   DEFAULT_TRANSLATION_OUTPUT_MODE,
+  normalizeArchitectWorkerSettings,
   DEFAULT_TRANSLATION_TARGET_LANGUAGE,
   TRANSLATION_OUTPUT_MODE_OPTIONS,
   TRANSLATION_TARGET_LANGUAGE_OPTIONS,
@@ -402,7 +403,8 @@ function normalizePreferences(input: unknown): AppPreferences {
     translationTargetLanguage: normalizeTranslationTargetLanguage(candidate.translationTargetLanguage),
     translationOutputMode: normalizeTranslationOutputMode(candidate.translationOutputMode),
     launchTemplate: normalizeLaunchTemplate(candidate.launchTemplate),
-    toolSessionDefaults: normalizeToolSessionDefaults(candidate.toolSessionDefaults)
+    toolSessionDefaults: normalizeToolSessionDefaults(candidate.toolSessionDefaults),
+    architectWorkerSettings: normalizeArchitectWorkerSettings(candidate.architectWorkerSettings)
   };
 }
 

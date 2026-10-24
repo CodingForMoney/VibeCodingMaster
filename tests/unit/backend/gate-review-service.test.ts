@@ -7,7 +7,7 @@ import { createCommandRunner, type CommandResult, type CommandRunner, type Comma
 import type { TerminalRuntime } from "../../../src/backend/runtime/terminal-runtime.js";
 import { createGateReviewService } from "../../../src/backend/services/gate-review-service.js";
 import type { CodeDiffSource, GateReviewGate } from "../../../src/shared/types/gate-review.js";
-import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
+import type { RoleSessionRecord, StartRoleSessionRequest } from "../../../src/shared/types/session.js";
 import type { TaskRecord } from "../../../src/shared/types/task.js";
 
 let tmpRepo: string | undefined;
@@ -136,6 +136,130 @@ describe("gate-review-service", () => {
     expect(writes.join("")).toContain("decision: request_changes");
     expect(writes.join("")).toContain(`request_id: ${requestId}`);
     expect(writes.join("")).toContain(`input_hash: ${record.inputHash}`);
+  });
+
+  it("launches Reviewer from the launch template and resumes it with its saved options", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-"));
+    await writeHarnessFiles(tmpRepo);
+    const reviewerTemplate = { permissionMode: "plan" as const, model: "opus" as const, effort: "high" as const };
+    const appSettings = {
+      ...createAppSettings(["architecture-plan"]),
+      async getPreferences() {
+        return { launchTemplate: { roles: { reviewer: reviewerTemplate } } } as never;
+      }
+    };
+    const createService = (sessionService: ReturnType<typeof createSessionService>) => createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo!, []),
+      runtime: createRuntime(tmpRepo!, []),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo!),
+      appSettings,
+      sessionService,
+      roundService: createRoundService([]),
+      reportPollIntervalMs: 5
+    });
+
+    const freshInputs: Array<{ action: "start" | "resume"; input?: StartRoleSessionRequest }> = [];
+    const fresh = createService(createSessionService([], [], freshInputs));
+    await fresh.requestReviewGate(tmpRepo, "demo-task", "architecture-plan");
+    await waitFor(async () => (await fresh.getState(tmpRepo!, "demo-task")).gates["architecture-plan"].status === "completed");
+    expect(freshInputs).toEqual([{ action: "start", input: { cols: 100, rows: 28, ...reviewerTemplate } }]);
+
+    const resumedInputs: Array<{ action: "start" | "resume"; input?: StartRoleSessionRequest }> = [];
+    const savedReviewer = {
+      id: "saved-reviewer",
+      claudeSessionId: "saved-reviewer-claude",
+      taskSlug: "demo-task",
+      role: "reviewer",
+      status: "exited",
+      model: "codex-bridge:gpt-5"
+    } as RoleSessionRecord;
+    const resumed = createService(createSessionService([], [], resumedInputs, savedReviewer));
+    await resumed.requestReviewGate(tmpRepo, "demo-task", "architecture-plan");
+    await waitFor(async () => resumedInputs.length > 0);
+    expect(resumedInputs).toEqual([{ action: "resume", input: { cols: 100, rows: 28 } }]);
+  });
+
+  it("fails a running gate when the Reviewer stops or exits without writing the report", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-"));
+    await writeHarnessFiles(tmpRepo);
+    const createSilentService = (writes: string[]) => createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo!, []),
+      runtime: {
+        ...createRuntime(tmpRepo!, []),
+        write(_sessionId, data) {
+          writes.push(data);
+        }
+      },
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo!),
+      appSettings: createAppSettings(["architecture-plan"]),
+      sessionService: createSessionService(),
+      roundService: createRoundService([]),
+      reportPollIntervalMs: 5
+    });
+
+    const writes: string[] = [];
+    const service = createSilentService(writes);
+    await service.requestReviewGate(tmpRepo, "demo-task", "architecture-plan");
+    const requestId = (await service.getState(tmpRepo, "demo-task")).gates["architecture-plan"].requestId!;
+    await waitFor(async () => writes.some((data) => data.includes(requestId)));
+
+    // A Stop before this request's prompt was accepted belongs to an earlier turn.
+    service.recordReviewerTurnEnded("demo-task", "turn-end");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect((await service.getState(tmpRepo, "demo-task")).gates["architecture-plan"].status).toBe("running");
+
+    service.recordReviewerPromptSubmitted("demo-task", writes.find((data) => data.includes(requestId)));
+    service.recordReviewerTurnEnded("demo-task", "turn-end");
+    await waitFor(async () => {
+      const record = (await service.getState(tmpRepo!, "demo-task")).gates["architecture-plan"];
+      return record.status === "failed" && record.callbackStatus === "sent";
+    });
+    const failed = (await service.getState(tmpRepo, "demo-task")).gates["architecture-plan"];
+    expect(failed.error).toContain("Reviewer ended its turn without submitting the report.");
+    expect(failed.callbackStatus).toBe("sent");
+    expect(writes.some((data) => data.includes("[VCM GATE REVIEW CALLBACK]"))).toBe(true);
+
+    await service.retryReviewGate(tmpRepo, "demo-task", "architecture-plan");
+    await waitFor(async () => (await service.getState(tmpRepo!, "demo-task")).gates["architecture-plan"].status === "running");
+    service.recordReviewerTurnEnded("demo-task", "process-exit");
+    await waitFor(async () => (await service.getState(tmpRepo!, "demo-task")).gates["architecture-plan"].status === "failed");
+    expect((await service.getState(tmpRepo, "demo-task")).gates["architecture-plan"].error)
+      .toContain("Reviewer process exited before completing the review.");
+  });
+
+  it("stops polling a running gate when its task closes", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-"));
+    await writeHarnessFiles(tmpRepo);
+    const writes: string[] = [];
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo, []),
+      runtime: {
+        ...createRuntime(tmpRepo, []),
+        write(_sessionId, data) {
+          writes.push(data);
+        }
+      },
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["architecture-plan"]),
+      sessionService: createSessionService(),
+      roundService: createRoundService([]),
+      reportPollIntervalMs: 5
+    });
+    await service.requestReviewGate(tmpRepo, "demo-task", "architecture-plan");
+    const requestId = (await service.getState(tmpRepo, "demo-task")).gates["architecture-plan"].requestId!;
+    await waitFor(async () => writes.some((data) => data.includes(requestId)));
+
+    service.stopTask("demo-task");
+    createRuntime(tmpRepo, [], "approve").write("gate-session", writes.find((data) => data.includes(requestId))!);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect((await service.getState(tmpRepo, "demo-task")).gates["architecture-plan"].status).toBe("running");
   });
 
   it("keeps a newer request authoritative when a cancelled request completes late", async () => {
@@ -1862,7 +1986,12 @@ function createTaskService(repoRoot: string) {
   };
 }
 
-function createSessionService(starts: string[] = [], activityCalls: string[] = []) {
+function createSessionService(
+  starts: string[] = [],
+  activityCalls: string[] = [],
+  launchInputs: Array<{ action: "start" | "resume"; input?: StartRoleSessionRequest }> = [],
+  savedReviewer?: RoleSessionRecord
+) {
   const pmSession: RoleSessionRecord = {
     id: "pm-session",
     claudeSessionId: "claude-session",
@@ -1891,19 +2020,22 @@ function createSessionService(starts: string[] = [], activityCalls: string[] = [
     updatedAt: "2026-06-13T00:00:00.000Z"
   };
   const sessions = new Map<string, RoleSessionRecord>([
-    ["project-manager", pmSession]
+    ["project-manager", pmSession],
+    ...(savedReviewer ? [["reviewer", savedReviewer] as const] : [])
   ]);
   return {
     async getRoleSession(_repoRoot: string, _taskSlug: string, role: string) {
       return sessions.get(role);
     },
-    async resumeRoleSession(_repoRoot: string, _taskSlug: string, role: string) {
+    async resumeRoleSession(_repoRoot: string, _taskSlug: string, role: string, input?: StartRoleSessionRequest) {
       starts.push(`resume:${role}`);
+      launchInputs.push({ action: "resume", input });
       sessions.set(role, reviewerSession);
       return reviewerSession;
     },
-    async startRoleSession(_repoRoot: string, _taskSlug: string, role: string) {
+    async startRoleSession(_repoRoot: string, _taskSlug: string, role: string, input?: StartRoleSessionRequest) {
       starts.push(role);
+      launchInputs.push({ action: "start", input });
       sessions.set(role, reviewerSession);
       return reviewerSession;
     },

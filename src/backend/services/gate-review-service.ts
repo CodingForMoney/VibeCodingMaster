@@ -46,6 +46,9 @@ export interface GateReviewService {
   skipReviewGate(repoRoot: string, taskSlug: string, gate: GateReviewGate, input: GateReviewExceptionRequest): Promise<GateReviewIndex>;
   overrideReviewGate(repoRoot: string, taskSlug: string, gate: GateReviewGate, input: GateReviewExceptionRequest): Promise<GateReviewIndex>;
   readReport(repoRoot: string, taskSlug: string, gate: GateReviewGate): Promise<GateReviewReport>;
+  recordReviewerPromptSubmitted(taskSlug: string, prompt: string | undefined): void;
+  recordReviewerTurnEnded(taskSlug: string, reason: "turn-end" | "process-exit"): void;
+  stopTask(taskSlug: string): void;
 }
 
 export interface GateReviewServiceDeps {
@@ -54,7 +57,8 @@ export interface GateReviewServiceDeps {
   runtime: TerminalRuntime;
   projectService: Pick<ProjectService, "loadConfig">;
   taskService: Pick<TaskService, "loadTask">;
-  appSettings: Pick<AppSettingsService, "getGateReviewSettings" | "updateGateReviewSettings">;
+  appSettings: Pick<AppSettingsService, "getGateReviewSettings" | "updateGateReviewSettings">
+    & Partial<Pick<AppSettingsService, "getPreferences">>;
   sessionService: Pick<
     SessionService,
     "getRoleSession" | "markRoleActivityRunning" | "restartRoleSession" | "resumeRoleSession" | "startRoleSession"
@@ -112,7 +116,17 @@ const GATE_REVIEW_VERSION = 1;
 const HARNESS_COMMIT_PREFIX = "[VCM Harness] ";
 const REVIEWER_ROLE = "reviewer";
 const DEFAULT_REPORT_POLL_INTERVAL_MS = 1000;
-const activeRuns = new Map<string, AbortController>();
+interface ActiveGateRun {
+  controller: AbortController;
+  taskSlug: string;
+  requestId: string;
+  // Set once the Reviewer's UserPromptSubmit carries this request's prompt.
+  promptAccepted: boolean;
+  // Set when the Reviewer can no longer write the report for this request.
+  reviewerEnded?: string;
+}
+
+const activeRuns = new Map<string, ActiveGateRun>();
 const gateStateLocks = new Map<string, Promise<unknown>>();
 const SOURCE_ARTIFACTS: Record<GateReviewGate, string[]> = {
   "architecture-plan": [
@@ -648,7 +662,8 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       return;
     }
     const controller = new AbortController();
-    activeRuns.set(runKey, controller);
+    const run: ActiveGateRun = { controller, taskSlug: context.taskSlug, requestId, promptAccepted: false };
+    activeRuns.set(runKey, run);
     try {
       const timestamp = now();
       if (!(await markGateRunStarted(context, gate, requestId, timestamp))) {
@@ -698,7 +713,8 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         requestId,
         now(),
         reportPollIntervalMs,
-        controller.signal
+        controller.signal,
+        () => run.reviewerEnded
       );
       const completedRecord = await completeGateRun(context, gate, requestId, parsed);
       if (!completedRecord) {
@@ -740,7 +756,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         failedRecord.inputHash
       );
     } finally {
-      if (activeRuns.get(runKey) === controller) {
+      if (activeRuns.get(runKey) === run) {
         activeRuns.delete(runKey);
       }
     }
@@ -855,20 +871,21 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
 
     if (existing?.claudeSessionId) {
       try {
+        // Resume keeps the launch options recorded by the saved Reviewer Session.
         return await deps.sessionService.resumeRoleSession(context.repoRoot, context.taskSlug, REVIEWER_ROLE, {
           cols: 100,
-          rows: 28,
-          model: "default"
+          rows: 28
         });
       } catch {
         // Fall through to a fresh Reviewer terminal if the saved session cannot be resumed.
       }
     }
 
+    const template = (await deps.appSettings.getPreferences?.())?.launchTemplate.roles[REVIEWER_ROLE];
     return deps.sessionService.startRoleSession(context.repoRoot, context.taskSlug, REVIEWER_ROLE, {
       cols: 100,
       rows: 28,
-      model: "default"
+      ...template
     });
   }
 
@@ -1063,7 +1080,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
           });
         }
 
-        activeRuns.get(gateRunKey(context, gate, input.requestId))?.abort();
+        activeRuns.get(gateRunKey(context, gate, input.requestId))?.controller.abort();
         await deps.sessionService.restartRoleSession(context.repoRoot, context.taskSlug, REVIEWER_ROLE);
         await updateRequestStatus(deps.fs, context, input.requestId, "cancelled", {
           completedAt: timestamp,
@@ -1177,8 +1194,35 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         now(),
         reportPathForGate(gate)
       );
+    },
+    recordReviewerPromptSubmitted(taskSlug, prompt) {
+      for (const run of activeRunsForTask(taskSlug)) {
+        if (prompt?.includes(run.requestId)) {
+          run.promptAccepted = true;
+        }
+      }
+    },
+    recordReviewerTurnEnded(taskSlug, reason) {
+      for (const run of activeRunsForTask(taskSlug)) {
+        // A turn end only counts once the Reviewer accepted this request's prompt,
+        // so a late Stop from an earlier turn cannot fail a newer request.
+        if (reason === "process-exit") {
+          run.reviewerEnded = "Reviewer process exited before completing the review.";
+        } else if (run.promptAccepted) {
+          run.reviewerEnded = "Reviewer ended its turn without submitting the report.";
+        }
+      }
+    },
+    stopTask(taskSlug) {
+      for (const run of activeRunsForTask(taskSlug)) {
+        run.controller.abort();
+      }
     }
   };
+}
+
+function activeRunsForTask(taskSlug: string): ActiveGateRun[] {
+  return [...activeRuns.values()].filter((run) => run.taskSlug === taskSlug);
 }
 
 export function isGateReviewGate(value: string): value is GateReviewGate {
@@ -1955,16 +1999,27 @@ async function waitForGateReport(
   requestId: string,
   timestamp: string,
   intervalMs: number,
-  signal: AbortSignal
+  signal: AbortSignal,
+  reviewerEnded: () => string | undefined
 ): Promise<ParsedReport> {
   const reportPath = reportPathForRequest(requestId);
   while (true) {
     throwIfGateRunCancelled(signal);
+    // Read the end signal before the report so a report written just before the
+    // Reviewer stopped is still accepted.
+    const ended = reviewerEnded();
     try {
       return await parseGateReport(fs, taskRepoRoot, gate, requestId, timestamp, reportPath);
     } catch (error) {
       if (!isPendingReportError(error)) {
         throw error;
+      }
+      if (ended) {
+        throw new VcmError({
+          code: "GATE_REVIEW_REPORT_NOT_WRITTEN",
+          message: `${ended} Gate review report was not written: ${reportPath}`,
+          statusCode: 500
+        });
       }
     }
     await delay(intervalMs);

@@ -2,8 +2,8 @@
 name: vcm-architect-validation-worker
 description: Foreground Architect worker for exact assigned command execution and evidence capture.
 tools: Read, Grep, Glob, Bash, Write
-model: opus
-effort: xhigh
+model: sonnet
+effort: low
 ---
 
 # VCM Architect Validation Worker Agent

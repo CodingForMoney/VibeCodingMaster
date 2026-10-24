@@ -9,6 +9,7 @@ import { VcmError } from "../errors.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import type { GitAdapter } from "../adapters/git-adapter.js";
 import type { AppSettingsService } from "./app-settings-service.js";
+import type { ClaudeVersionCheck } from "./claude-version-check.js";
 
 const DEFAULT_HANDOFF_ROOT = ".ai/vcm/handoffs";
 const DEFAULT_STATE_ROOT = ".ai/vcm";
@@ -35,6 +36,7 @@ export interface ProjectServiceDeps {
     | "saveProjectConfig"
     | "getProjectConfigPath"
   >;
+  claudeVersionCheck?: ClaudeVersionCheck;
 }
 
 export function createProjectService(deps: ProjectServiceDeps): ProjectService {
@@ -72,7 +74,7 @@ export function createProjectService(deps: ProjectServiceDeps): ProjectService {
       await deps.fs.ensureDir(path.join(repoRoot, ".claude", "worktrees"));
       await this.saveConfig(config, true);
 
-      currentProject = await readConnectedProjectSummary(repoRoot, config);
+      currentProject = await readConnectedProjectSummary(repoRoot, config, { refreshClaudeVersion: true });
 
       await deps.appSettings.recordRecentRepositoryPath(repoRoot);
       return currentProject;
@@ -141,8 +143,18 @@ export function createProjectService(deps: ProjectServiceDeps): ProjectService {
     }
   };
 
-  async function readConnectedProjectSummary(repoRoot: string, config: ProjectConfig): Promise<ProjectSummary> {
+  async function readConnectedProjectSummary(
+    repoRoot: string,
+    config: ProjectConfig,
+    options: { refreshClaudeVersion?: boolean } = {}
+  ): Promise<ProjectSummary> {
     const warnings: string[] = [];
+    const claudeVersionWarning = await deps.claudeVersionCheck?.getWarning(config.claudeCommand, {
+      refresh: options.refreshClaudeVersion
+    });
+    if (claudeVersionWarning) {
+      warnings.push(claudeVersionWarning);
+    }
     let branch = "unknown";
     let isDirty = false;
     let headCommit = "unknown";

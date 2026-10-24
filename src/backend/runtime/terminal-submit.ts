@@ -6,6 +6,9 @@ const DEFAULT_ENTER_DELAY_MS = 75;
 
 export interface SubmitTerminalInputOptions {
   enterDelayMs?: number;
+  // Runs after the paste and before Enter, so callers can persist delivery
+  // before the prompt can start executing.
+  beforeSubmit?: () => Promise<void>;
 }
 
 export async function submitTerminalInput(
@@ -16,6 +19,7 @@ export async function submitTerminalInput(
 ): Promise<void> {
   runtime.write(sessionId, formatTerminalPaste(text));
   await delay(options.enterDelayMs ?? DEFAULT_ENTER_DELAY_MS);
+  await options.beforeSubmit?.();
   runtime.write(sessionId, "\r");
 }
 

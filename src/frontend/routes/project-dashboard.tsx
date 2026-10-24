@@ -2,6 +2,7 @@ import { FormEvent, type ReactNode, useEffect, useState } from "react";
 import {
   TRANSLATION_OUTPUT_MODE_OPTIONS,
   TRANSLATION_TARGET_LANGUAGE_OPTIONS,
+  type ArchitectWorkerSettings,
   type CodexBridgeIntegrationStatus,
   type LaunchTemplate,
   type PermissionRequestMode,
@@ -69,6 +70,7 @@ export interface ProjectDashboardProps {
   harnessEngineerLaunchOptions: BootstrapLaunchOptions;
   autoTaskHarnessReviewEnabled: boolean;
   autoMemoryEnabled: boolean;
+  architectWorkerSettings: ArchitectWorkerSettings;
   gatewayStatus: GatewayStatus | null;
   gatewayQrLogin: StartGatewayQrLoginResult | null;
   gatewayQrCheck: CheckGatewayQrLoginResult | null;
@@ -90,6 +92,7 @@ export interface ProjectDashboardProps {
   onOpenRepositoryDiff(): void;
   onAutoTaskHarnessReviewChange(enabled: boolean): void;
   onAutoMemoryChange(enabled: boolean): void;
+  onArchitectWorkerSettingsChange(settings: ArchitectWorkerSettings): void;
   onHarnessEngineerLaunchOptionsChange(input: BootstrapLaunchOptions): void;
   onRefreshGateway(): Promise<void>;
   onGatewayEnabledChange(enabled: boolean): void;
@@ -157,6 +160,7 @@ export function ProjectDashboard({
   harnessEngineerLaunchOptions,
   autoTaskHarnessReviewEnabled,
   autoMemoryEnabled,
+  architectWorkerSettings,
   gatewayStatus,
   gatewayQrLogin,
   gatewayQrCheck,
@@ -178,6 +182,7 @@ export function ProjectDashboard({
   onOpenRepositoryDiff,
   onAutoTaskHarnessReviewChange,
   onAutoMemoryChange,
+  onArchitectWorkerSettingsChange,
   onHarnessEngineerLaunchOptionsChange,
   onRefreshGateway,
   onGatewayEnabledChange,
@@ -466,6 +471,7 @@ export function ProjectDashboard({
             hasActiveTask={Boolean(activeTask)}
             autoTaskHarnessReviewEnabled={autoTaskHarnessReviewEnabled}
             autoMemoryEnabled={autoMemoryEnabled}
+            architectWorkerSettings={architectWorkerSettings}
             launchOptions={harnessEngineerLaunchOptions}
             modelOptions={modelOptions}
             busy={busy}
@@ -475,6 +481,7 @@ export function ProjectDashboard({
             onOpenRepositoryDiff={onOpenRepositoryDiff}
             onAutoTaskHarnessReviewChange={onAutoTaskHarnessReviewChange}
             onAutoMemoryChange={onAutoMemoryChange}
+            onArchitectWorkerSettingsChange={onArchitectWorkerSettingsChange}
             onLaunchOptionsChange={onHarnessEngineerLaunchOptionsChange}
             onStartBootstrap={onStartHarnessBootstrap}
             onRestartBootstrap={onRestartHarnessBootstrap}

@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  claudeTranscriptPath,
   createClaudeTranscriptService,
   parseAssistantContent,
-  projectHash,
+  resolveExistingClaudeTranscriptPath,
   TranscriptTail
 } from "../../../src/backend/services/claude-transcript-service.js";
 import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
@@ -84,20 +83,30 @@ describe("claude-transcript-service", () => {
     expect(events).toEqual([]);
   });
 
-  it("resolves Claude Code transcript paths from the project cwd and session id", () => {
-    expect(projectHash("/workspace")).toBe("-workspace");
-    expect(projectHash("/Users/sheldon/Documents/New project 3/VibeCodingMaster"))
-      .toBe("-Users-sheldon-Documents-New-project-3-VibeCodingMaster");
-    expect(claudeTranscriptPath("/workspace", "session-1")).toMatch(/\.claude\/projects\/-workspace\/session-1\.jsonl$/);
-    expect(claudeTranscriptPath(
-      "/Users/sheldon/Documents/New project 3/VibeCodingMaster",
-      "session-1"
-    )).toMatch(/\.claude\/projects\/-Users-sheldon-Documents-New-project-3-VibeCodingMaster\/session-1\.jsonl$/);
-    expect(claudeTranscriptPath(
-      "/workspace",
-      "session-1",
-      "/tmp/vcm-claude/codex-bridge"
-    )).toBe("/tmp/vcm-claude/codex-bridge/projects/-workspace/session-1.jsonl");
+  it("resolves transcripts from the hook path or by session id, never from the project directory encoding", () => {
+    const configDir = mkdtempSync(join(tmpdir(), "vcm-transcript-config-"));
+    try {
+      // Claude Code's real directory name for a cwd with dots differs from a simple
+      // slash-to-dash replacement, so resolution must not depend on it.
+      const projectDir = join(configDir, "projects", "-Users-dev-my-project-v1-2");
+      const transcript = join(projectDir, "session-1.jsonl");
+      mkdirSync(projectDir, { recursive: true });
+      writeFileSync(transcript, "", "utf8");
+      const session = {
+        cwd: "/Users/dev/my.project/v1.2",
+        claudeSessionId: "session-1",
+        claudeConfigDir: configDir
+      } as RoleSessionRecord;
+
+      expect(resolveExistingClaudeTranscriptPath({ ...session, transcriptPath: transcript })).toBe(transcript);
+      expect(resolveExistingClaudeTranscriptPath(session)).toBe(transcript);
+      expect(resolveExistingClaudeTranscriptPath({
+        ...session,
+        transcriptPath: join(configDir, "projects", "stale", "session-1.jsonl")
+      })).toBe(transcript);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
   });
 
   it("replays current-run transcript events by timestamp before tailing new output", () => {

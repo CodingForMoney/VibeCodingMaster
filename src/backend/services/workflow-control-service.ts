@@ -100,13 +100,47 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
   const id = deps.id ?? (() => `wfauth_${randomUUID()}`);
   const locks = new Map<string, Promise<unknown>>();
 
-  async function getState(input: WorkflowControlContext): Promise<WorkflowControlState> {
+  // Locked callers only: replays the commit journal and persists the template or
+  // reconstructed runtime state.
+  function getState(input: WorkflowControlContext): Promise<WorkflowControlState> {
+    return loadState(input, true);
+  }
+
+  // Unlocked public reads: computes the same view without writing any file.
+  function readStateView(input: WorkflowControlContext): Promise<WorkflowControlState> {
+    return loadState(input, false);
+  }
+
+  async function readProgressView(input: WorkflowControlContext): Promise<WorkflowProgressDocument> {
+    const pending = await readPendingCommitJournal(input);
+    if (pending) return parseWorkflowProgress(pending.progressContent, input.taskSlug);
+    if (!(await deps.fs.pathExists(progressPath(input)))) {
+      return parseWorkflowProgress(renderWorkflowProgressTemplate(input.taskSlug), input.taskSlug);
+    }
+    return readProgress(deps.fs, input);
+  }
+
+  async function loadState(input: WorkflowControlContext, persist: boolean): Promise<WorkflowControlState> {
     try {
-      await recoverCommitJournal(input);
+      if (persist) {
+        await recoverCommitJournal(input);
+      } else {
+        const pending = await readPendingCommitJournal(input);
+        if (pending) {
+          const state = normalizeState(pending.state, input.taskSlug, now());
+          const progress = parseWorkflowProgress(pending.progressContent, input.taskSlug);
+          return {
+            ...state,
+            warnings: [...state.warnings, ...stateProgressConsistencyWarnings(state, progress)]
+          };
+        }
+      }
       const hasProgress = await deps.fs.pathExists(progressPath(input));
       const hasState = await deps.fs.pathExists(statePath(input));
       if (!hasProgress && !hasState) {
-        await writeAtomic(deps.fs, progressPath(input), renderWorkflowProgressTemplate(input.taskSlug));
+        if (persist) {
+          await writeAtomic(deps.fs, progressPath(input), renderWorkflowProgressTemplate(input.taskSlug));
+        }
         return emptyState(input.taskSlug, now());
       }
       if (!hasProgress) {
@@ -125,7 +159,9 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
         }
         if (!progress.proposal && progress.history.length > 0) {
           const recovered = await reconstructStateFromProgress(input, progress);
-          await saveState(input, recovered);
+          if (persist) {
+            await saveState(input, recovered);
+          }
           return recovered;
         }
         return {
@@ -539,18 +575,18 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
     });
   }
 
+  // Public reads never write; journal replay and state persistence happen only
+  // inside locked operations.
   return {
-    getState,
-    getProgress: async (input) => {
-      await getState(input);
-      return readProgress(deps.fs, input);
-    },
+    getState: readStateView,
+    getProgress: readProgressView,
     requestUserInput,
     resolveUserInput,
     runWhileNotAwaitingUser,
     submitProgress,
-    assertDocsArtifactAllowed,
-    assertRouteAuthorized,
+    assertDocsArtifactAllowed: (input, kind, role) =>
+      withLock(statePath(input), () => assertDocsArtifactAllowed(input, kind, role)),
+    assertRouteAuthorized: (input) => withLock(statePath(input), () => assertRouteAuthorized(input)),
     claimDispatch,
     releaseDispatch,
     markDispatchUnconfirmed,
@@ -690,6 +726,16 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
     await saveState(input, state);
     await deps.fs.writeJsonAtomic(transactionPath(input), { ...journal, status: "committed" });
     await removeTransactionJournal(transactionPath(input));
+  }
+
+  async function readPendingCommitJournal(input: WorkflowControlContext): Promise<WorkflowCommitJournal | undefined> {
+    const target = transactionPath(input);
+    if (!(await deps.fs.pathExists(target))) return undefined;
+    const journal = await deps.fs.readJson<WorkflowCommitJournal>(target);
+    if (journal.version !== 1 || journal.taskSlug !== input.taskSlug) {
+      throw new Error("Workflow commit journal does not match the active task.");
+    }
+    return journal.status === "pending" ? journal : undefined;
   }
 
   async function recoverCommitJournal(input: WorkflowControlContext): Promise<void> {

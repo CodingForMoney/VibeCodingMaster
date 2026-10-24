@@ -2,8 +2,8 @@
 name: vcm-architect-scaffold-worker
 description: Foreground Architect worker for exact scaffold execution and scaffold validation.
 tools: Read, Grep, Glob, Bash, Edit, Write
-model: opus
-effort: xhigh
+model: sonnet
+effort: medium
 ---
 
 # VCM Architect Scaffold Worker Agent

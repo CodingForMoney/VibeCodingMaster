@@ -2,7 +2,6 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { claudeTranscriptPath } from "../../../src/backend/services/claude-transcript-service.js";
 import {
   MAX_TURN_REPLY_CHARS,
   limitTranscriptReply,
@@ -135,7 +134,7 @@ describe("readLatestRoleTurnReply", () => {
       "2026-06-11T00:00:01.000Z",
       "Wrong session reply."
     ), "utf8");
-    const currentPath = claudeTranscriptPath("/repo", "claude-pm-session", configDir);
+    const currentPath = join(configDir, "projects", "-repo", "claude-pm-session.jsonl");
     await mkdir(dirname(currentPath), { recursive: true });
     await writeFile(currentPath, assistantLine(
       "current",

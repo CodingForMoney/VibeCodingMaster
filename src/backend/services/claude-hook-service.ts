@@ -14,6 +14,7 @@ import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import type { AppSettingsService } from "./app-settings-service.js";
 import type { AutoMemoryService } from "./auto-memory-service.js";
+import type { GateReviewService } from "./gate-review-service.js";
 import type { HarnessFeedbackService } from "./harness-feedback-service.js";
 import type { HarnessService } from "./harness-service.js";
 import type { JobGuardService } from "./job-guard-service.js";
@@ -75,6 +76,7 @@ export interface ClaudeHookServiceDeps {
   translationService: Pick<TranslationService, "recordConversationBoundary">;
   translationWorkerService?: Pick<TranslationWorkerService, "handleTranslatorHook">;
   appSettings: Pick<AppSettingsService, "getPreferences">;
+  gateReviewService?: Pick<GateReviewService, "recordReviewerPromptSubmitted" | "recordReviewerTurnEnded">;
   runtime?: Pick<TerminalRuntime, "write">;
   now?: () => string;
   retrySetTimeout?: (callback: () => void, delayMs: number) => StopFailureRetryTimer;
@@ -327,6 +329,9 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       if (workflowState.awaitingUser) {
         await deps.workflowControlService.resolveUserInput(createWorkflowControlContext(context));
       }
+    }
+    if (isReviewerRoleName(input.role)) {
+      deps.gateReviewService?.recordReviewerPromptSubmitted(context.taskSlug, prompt);
     }
     const session = await deps.sessionService.recordClaudeHookEvent(context.project.repoRoot, {
       taskSlug: context.taskSlug,
@@ -657,6 +662,9 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     });
     if (!session) {
       return completedHookResult(input, eventName);
+    }
+    if (isReviewerRoleName(input.role)) {
+      deps.gateReviewService?.recordReviewerTurnEnded(context.taskSlug, "turn-end");
     }
     const boundToTask = await isHookSessionBoundToTask(context, input.role);
     if (boundToTask) {

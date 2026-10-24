@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createDefaultLaunchTemplate,
   createDefaultToolSessionDefaults,
+  DEFAULT_ARCHITECT_WORKER_SETTINGS,
   type AppPreferences
 } from "../../../src/shared/types/app-settings.js";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
@@ -370,6 +371,7 @@ function createDefaultPreferences(overrides: Partial<AppPreferences> = {}): AppP
     translationOutputMode: "pm-final-only",
     launchTemplate: createDefaultLaunchTemplate(),
     toolSessionDefaults: createDefaultToolSessionDefaults(),
+    architectWorkerSettings: DEFAULT_ARCHITECT_WORKER_SETTINGS,
     ...overrides
   };
 }

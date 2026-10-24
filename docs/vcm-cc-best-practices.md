@@ -495,7 +495,8 @@ foreground scaffold worker for the exact scaffold and plan-fixed mechanical
 text or configuration changes. Exact non-interactive validation commands may be
 delegated to the validation worker. Architect selects the commands, interprets
 their raw results, reviews every worker output, and owns any correction. Native
-Architect evidence, scaffold, and validation workers use Opus with xhigh effort;
+Architect evidence, scaffold, and validation workers use the model and effort
+from the Architect worker settings;
 Bridge sessions make them inherit the selected GPT model. Every worker returns
 before the Architect turn continues and cannot invoke another subagent.
 Architect assigns reports named `worker-<worker-id>.md` under the worker's

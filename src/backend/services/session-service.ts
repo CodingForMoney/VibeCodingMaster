@@ -20,7 +20,6 @@ import type { SessionRegistry } from "../runtime/session-registry.js";
 import type { TerminalRuntime, TerminalSession } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import type { ArtifactService } from "./artifact-service.js";
-import { claudeTranscriptPath } from "./claude-transcript-service.js";
 import { readHarnessRevisionState } from "./harness-revision.js";
 import type { ProjectService } from "./project-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
@@ -226,11 +225,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       });
     }
     const claudeSessionId = resumeClaudeSessionId ?? "";
-    const transcriptPath = launchMode === "resume" && persisted?.transcriptPath
-      ? persisted.transcriptPath
-      : resumeClaudeSessionId
-        ? claudeTranscriptPath(taskRepoRoot, resumeClaudeSessionId, persisted?.claudeConfigDir)
-        : undefined;
+    // Transcript paths come from Claude Code hook payloads; VCM does not derive
+    // them from Claude Code's project-directory encoding.
+    const transcriptPath = launchMode === "resume" ? persisted?.transcriptPath : undefined;
 
     const lspStatus = roleUsesLsp(role) && deps.codeIntelligenceDetector
       ? await deps.codeIntelligenceDetector.detect(taskRepoRoot, { refresh: true })
@@ -402,9 +399,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     // session genuinely starts at repoRoot.
     const sessionCwd = launchMode === "resume" ? persisted?.cwd ?? launchCwd : launchCwd;
     const claudeSessionId = resumeClaudeSessionId ?? "";
-    const transcriptPath = resumeClaudeSessionId
-      ? claudeTranscriptPath(repoRoot, resumeClaudeSessionId, persisted?.claudeConfigDir)
-      : undefined;
+    const transcriptPath = launchMode === "resume" ? persisted?.transcriptPath : undefined;
     const startCommand = {
       ...deps.claude.buildRoleStartCommand(
         TRANSLATOR_ROLE,
@@ -550,9 +545,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     // restored cwd so the `/cd` migrate below fires only on an actual switch.
     const sessionCwd = launchMode === "resume" ? persisted?.cwd ?? launchCwd : launchCwd;
     const claudeSessionId = resumeClaudeSessionId ?? "";
-    const transcriptPath = resumeClaudeSessionId
-      ? claudeTranscriptPath(repoRoot, resumeClaudeSessionId, persisted?.claudeConfigDir)
-      : undefined;
+    const transcriptPath = launchMode === "resume" ? persisted?.transcriptPath : undefined;
     const startCommand = {
       ...deps.claude.buildRoleStartCommand(
         HARNESS_ENGINEER_ROLE,
@@ -863,9 +856,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       updatedAt: timestamp,
       lastOutputAt: runtimeSession.lastOutputAt,
       exitCode: runtimeSession.exitCode,
-      transcriptPath: session.claudeSessionId
-        ? claudeTranscriptPath(repoRoot, session.claudeSessionId, session.claudeConfigDir)
-        : session.transcriptPath
+      transcriptPath: session.transcriptPath
     };
     deps.registry.upsert(normalizeProjectScopedRecordForPersistence(resumed));
     await persistProjectScopedToolSession(repoRoot, resumed);
@@ -1655,6 +1646,12 @@ export function matchesRoleHookSession(
     "eventName" | "sessionId" | "transcriptPath" | "runtimeSessionId" | "runtimeSessionToken"
   >
 ): boolean {
+  if (
+    record.runtimeSessionToken
+    && record.runtimeSessionToken !== input.runtimeSessionToken
+  ) {
+    return false;
+  }
   if (input.runtimeSessionId) {
     return record.id === input.runtimeSessionId;
   }
@@ -1662,12 +1659,6 @@ export function matchesRoleHookSession(
     !record.claudeSessionId
     && !record.transcriptPath
     && input.eventName !== "UserPromptSubmit"
-  ) {
-    return false;
-  }
-  if (
-    record.runtimeSessionToken
-    && record.runtimeSessionToken !== input.runtimeSessionToken
   ) {
     return false;
   }

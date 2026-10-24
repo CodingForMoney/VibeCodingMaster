@@ -12,6 +12,15 @@ import {
   type SessionModel,
   type SessionModelOption
 } from "../../shared/types/session.js";
+import {
+  ARCHITECT_WORKER_EFFORTS,
+  ARCHITECT_WORKER_MODELS,
+  ARCHITECT_WORKER_TYPES,
+  type ArchitectWorkerEffort,
+  type ArchitectWorkerModel,
+  type ArchitectWorkerSettings,
+  type ArchitectWorkerType
+} from "../../shared/types/app-settings.js";
 import { XtermView } from "../terminal/xterm-view.js";
 import { SwitchControl } from "./switch-control.js";
 import { StatusBadge } from "./status-badge.js";
@@ -29,6 +38,7 @@ export interface HarnessPanelProps {
   hasActiveTask?: boolean;
   autoTaskHarnessReviewEnabled: boolean;
   autoMemoryEnabled: boolean;
+  architectWorkerSettings: ArchitectWorkerSettings;
   launchOptions: BootstrapLaunchOptions;
   modelOptions: SessionModelOption[];
   busy?: boolean;
@@ -38,12 +48,19 @@ export interface HarnessPanelProps {
   onOpenRepositoryDiff(): void;
   onAutoTaskHarnessReviewChange(enabled: boolean): void;
   onAutoMemoryChange(enabled: boolean): void;
+  onArchitectWorkerSettingsChange(settings: ArchitectWorkerSettings): void;
   onLaunchOptionsChange(input: BootstrapLaunchOptions): void;
   onStartBootstrap(input: BootstrapLaunchOptions): Promise<void>;
   onRestartBootstrap(input: BootstrapLaunchOptions): Promise<void>;
   onStopBootstrap(): Promise<void>;
   onRunBootstrap(): Promise<void>;
 }
+
+const ARCHITECT_WORKER_LABELS: Record<ArchitectWorkerType, string> = {
+  evidence: "Evidence",
+  scaffold: "Scaffold",
+  validation: "Validation"
+};
 
 export function HarnessPanel({
   status,
@@ -52,6 +69,7 @@ export function HarnessPanel({
   hasActiveTask = false,
   autoTaskHarnessReviewEnabled,
   autoMemoryEnabled,
+  architectWorkerSettings,
   launchOptions,
   modelOptions,
   busy = false,
@@ -61,6 +79,7 @@ export function HarnessPanel({
   onOpenRepositoryDiff,
   onAutoTaskHarnessReviewChange,
   onAutoMemoryChange,
+  onArchitectWorkerSettingsChange,
   onLaunchOptionsChange,
   onStartBootstrap,
   onRestartBootstrap,
@@ -191,6 +210,40 @@ export function HarnessPanel({
           title="Collect role memory drafts after Final Acceptance and let Harness Engineer apply reviewed memory"
           onChange={onAutoMemoryChange}
         />
+        <div className="architect-worker-settings" title="Model and effort for Architect workers. Apply the harness to write changes into worker definitions.">
+          <strong>Architect workers</strong>
+          {ARCHITECT_WORKER_TYPES.map((type) => (
+            <div className="architect-worker-setting" key={type}>
+              <span>{ARCHITECT_WORKER_LABELS[type]}</span>
+              <select
+                aria-label={`${ARCHITECT_WORKER_LABELS[type]} worker model`}
+                disabled={busy}
+                value={architectWorkerSettings[type].model}
+                onChange={(event) => onArchitectWorkerSettingsChange({
+                  ...architectWorkerSettings,
+                  [type]: { ...architectWorkerSettings[type], model: event.target.value as ArchitectWorkerModel }
+                })}
+              >
+                {ARCHITECT_WORKER_MODELS.map((model) => (
+                  <option key={model} value={model}>{model}</option>
+                ))}
+              </select>
+              <select
+                aria-label={`${ARCHITECT_WORKER_LABELS[type]} worker effort`}
+                disabled={busy}
+                value={architectWorkerSettings[type].effort}
+                onChange={(event) => onArchitectWorkerSettingsChange({
+                  ...architectWorkerSettings,
+                  [type]: { ...architectWorkerSettings[type], effort: event.target.value as ArchitectWorkerEffort }
+                })}
+              >
+                {ARCHITECT_WORKER_EFFORTS.map((effort) => (
+                  <option key={effort} value={effort}>{effort}</option>
+                ))}
+              </select>
+            </div>
+          ))}
+        </div>
       </div>
 
       {showBootstrapStage ? (

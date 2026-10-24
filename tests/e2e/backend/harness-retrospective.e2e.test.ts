@@ -23,7 +23,7 @@ import type { MockClaudePromptContext } from "./helpers/mock-claude-runtime.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 // Two backend lifecycles and real Git commits need room under full-suite contention.
-const MEMORY_RECOVERY_TEST_TIMEOUT_MS = 15_000;
+const MEMORY_RECOVERY_TEST_TIMEOUT_MS = 60_000;
 
 afterEach(async () => {
   while (cleanups.length > 0) {

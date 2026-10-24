@@ -7,6 +7,7 @@ import type { TranslationService } from "./translation-service.js";
 import type { ProjectService } from "./project-service.js";
 import type { TaskWorkflowService } from "./task-workflow-service.js";
 import type { ArchitectRestartService } from "./architect-restart-service.js";
+import type { GateReviewService } from "./gate-review-service.js";
 import type { RoleContextRestartService } from "./role-context-restart-service.js";
 
 export interface TaskCloseService {
@@ -26,6 +27,7 @@ export interface TaskCloseServiceDeps {
   taskWorkflowService?: Pick<TaskWorkflowService, "clearState">;
   architectRestartService?: Pick<ArchitectRestartService, "clear">;
   roleContextRestartService?: Pick<RoleContextRestartService, "clear">;
+  gateReviewService?: Pick<GateReviewService, "stopTask">;
 }
 
 export function createTaskCloseService(deps: TaskCloseServiceDeps): TaskCloseService {
@@ -33,6 +35,7 @@ export function createTaskCloseService(deps: TaskCloseServiceDeps): TaskCloseSer
     async closeTask(repoRoot, taskSlug) {
       const task = await deps.taskService.markTaskCleaned(repoRoot, taskSlug);
       const warnings: string[] = [];
+      deps.gateReviewService?.stopTask(taskSlug);
       if (deps.architectRestartService) {
         await bestEffort(
           "Unable to clear Architect restart state",

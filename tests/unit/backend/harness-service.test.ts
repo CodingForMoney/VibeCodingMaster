@@ -123,14 +123,14 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.ai/tools/request-architect-restart")).toContain("/sessions/architect/restart-after-planning");
     const evidenceWorker = await fs.readText("/repo/.claude/agents/vcm-architect-evidence-worker.md");
     expect(evidenceWorker).toContain("tools: Read, Grep, Glob, Write");
-    expect(evidenceWorker).toContain("model: opus\neffort: xhigh");
+    expect(evidenceWorker).toContain("model: opus\neffort: high");
     expect(evidenceWorker).toContain("Do not design architecture");
     expect(evidenceWorker).toContain("You have no shell access");
     expect(evidenceWorker).toContain("Do not reconstruct command output");
-    expect(await fs.readText("/repo/.claude/agents/vcm-architect-scaffold-worker.md")).toContain("model: opus\neffort: xhigh");
+    expect(await fs.readText("/repo/.claude/agents/vcm-architect-scaffold-worker.md")).toContain("model: sonnet\neffort: medium");
     const validationWorker = await fs.readText("/repo/.claude/agents/vcm-architect-validation-worker.md");
     expect(validationWorker).toContain("tools: Read, Grep, Glob, Bash, Write");
-    expect(validationWorker).toContain("model: opus\neffort: xhigh");
+    expect(validationWorker).toContain("model: sonnet\neffort: low");
     expect(validationWorker).toContain("Run only the exact commands");
     expect(validationWorker).toContain("including read-only repository inspection commands");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("<VCM-memory>\nNo accumulated project memory yet.\n</VCM-memory>");

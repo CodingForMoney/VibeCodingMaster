@@ -5,6 +5,7 @@ import type { RoleName, RoleStatus } from "../../shared/types/role.js";
 import type { RoleSessionPointer, RoleSessionRecord, TaskSessionRecord } from "../../shared/types/session.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
+import { parseMessageLine } from "./message-service.js";
 import type { ProjectService } from "./project-service.js";
 import type { TaskService } from "./task-service.js";
 import { getTaskRuntimeRepoRoot } from "./task-service.js";
@@ -117,10 +118,20 @@ export function createRuntimeRecoveryService(deps: RuntimeRecoveryServiceDeps): 
       }
       for (const task of tasks.filter((candidate) => candidate.cleanupStatus !== "cleaned")) {
         const taskRepoRoot = getTaskRuntimeRepoRoot(task);
-        await runStep(context, `recover task ${task.taskSlug}`, async () => {
-          await recoverTaskSessions(taskRepoRoot, config.stateRoot, task.taskSlug, recoveredAt, context);
-          const roundRecovered = await recoverRound(taskRepoRoot, config.stateRoot, task.taskSlug, recoveredAt, context);
-          await recoverMessages(taskRepoRoot, config.stateRoot, task.taskSlug, recoveredAt, context);
+        const label = `recover task ${task.taskSlug}`;
+        // Each step runs independently so one failing record cannot skip the
+        // remaining recovery for the task.
+        await runStep(context, `${label} sessions`, () =>
+          recoverTaskSessions(taskRepoRoot, config.stateRoot, task.taskSlug, recoveredAt, context)
+        );
+        let roundRecovered = false;
+        await runStep(context, `${label} round`, async () => {
+          roundRecovered = await recoverRound(taskRepoRoot, config.stateRoot, task.taskSlug, recoveredAt, context);
+        });
+        await runStep(context, `${label} messages`, () =>
+          recoverMessages(taskRepoRoot, config.stateRoot, task.taskSlug, recoveredAt, context)
+        );
+        await runStep(context, `${label} workflow`, async () => {
           const workflowRecovered = await deps.workflowControlService?.recoverTask({
             taskRepoRoot,
             stateRoot: config.stateRoot,
@@ -130,10 +141,16 @@ export function createRuntimeRecoveryService(deps: RuntimeRecoveryServiceDeps): 
           if (workflowRecovered) {
             context.changedPaths.add(path.join(config.stateRoot, "workflow-control.json"));
           }
-          await recoverGateReview(taskRepoRoot, recoveredAt, context);
-          await recoverCoderWorkers(taskRepoRoot, task.taskSlug, context);
+        });
+        await runStep(context, `${label} gate review`, () => recoverGateReview(taskRepoRoot, recoveredAt, context));
+        await runStep(context, `${label} coder workers`, () => recoverCoderWorkers(taskRepoRoot, task.taskSlug, context));
+        await runStep(context, `${label} architect restart`, async () => {
           await deps.architectRestartService?.recoverTask(repoRoot, task.taskSlug);
+        });
+        await runStep(context, `${label} restart with context`, async () => {
           await deps.roleContextRestartService?.recoverTask(repoRoot, task.taskSlug);
+        });
+        await runStep(context, `${label} status`, async () => {
           if ((roundRecovered || task.status === "running") && !hasLiveTaskSession(task.taskSlug)) {
             await deps.taskService.updateTaskStatus(repoRoot, task.taskSlug, "stopped");
           }
@@ -320,8 +337,17 @@ export function createRuntimeRecoveryService(deps: RuntimeRecoveryServiceDeps): 
     }
     const lines = (await deps.fs.readText(absolutePath)).split(/\r?\n/).filter((line) => line.trim());
     let changed = false;
-    const messages = lines.map((line) => {
-      const message = JSON.parse(line) as VcmRoleMessage;
+    const parsed: VcmRoleMessage[] = [];
+    for (const [index, line] of lines.entries()) {
+      const message = parseMessageLine(line);
+      if (message) {
+        parsed.push(message);
+        continue;
+      }
+      changed = true;
+      context.warnings.push(`${relativePath}: removed unparsable message log line ${index + 1}.`);
+    }
+    const messages = parsed.map((message) => {
       if (message.dispatchingAt && !message.acceptedAt) {
         const next = {
           ...message,
@@ -340,7 +366,11 @@ export function createRuntimeRecoveryService(deps: RuntimeRecoveryServiceDeps): 
       return;
     }
     const content = messages.length ? `${messages.map((message) => JSON.stringify(message)).join("\n")}\n` : "";
-    await deps.fs.writeText(absolutePath, content);
+    if (deps.fs.writeTextAtomic) {
+      await deps.fs.writeTextAtomic(absolutePath, content);
+    } else {
+      await deps.fs.writeText(absolutePath, content);
+    }
     context.changedPaths.add(relativePath);
     void timestamp;
   }

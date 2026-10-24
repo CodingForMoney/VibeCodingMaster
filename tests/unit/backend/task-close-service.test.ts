@@ -100,6 +100,36 @@ describe("createTaskCloseService", () => {
     ]);
   });
 
+  it("stops active Gate Review polling for the closed task", async () => {
+    const stoppedGateTasks: string[] = [];
+    const service = createTaskCloseService({
+      taskService: {
+        async markTaskCleaned() {
+          return CLEANED_TASK;
+        },
+        async cleanupTask() {
+          return { taskSlug: "demo-task", taskClosed: true } as never;
+        }
+      },
+      sessionService: emptyTaskSessions(),
+      translationService: {
+        async stopTask() {}
+      },
+      roundService: {
+        stopTask() {}
+      },
+      gateReviewService: {
+        stopTask(taskSlug) {
+          stoppedGateTasks.push(taskSlug);
+        }
+      }
+    });
+
+    await service.closeTask("/repo", "demo-task");
+
+    expect(stoppedGateTasks).toEqual(["demo-task"]);
+  });
+
   it("stops running workflow and tool sessions owned by the task", async () => {
     const stopped: string[] = [];
     const service = createTaskCloseService({

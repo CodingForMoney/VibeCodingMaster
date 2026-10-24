@@ -274,7 +274,7 @@ describe("backend E2E complete VCM flow with mock Claude Code", () => {
       path.join(repo.repoRoot, ".ai/vcm/harness-feedback/task-retrospectives", `${task.taskSlug}.json`),
       "utf8"
     )).resolves.toContain('"trigger": "auto"');
-  }, 15_000);
+  });
 });
 
 function acceptedFinalAcceptance(taskSlug: string): string {

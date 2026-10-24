@@ -54,6 +54,35 @@ describe("gateway-service long connection", () => {
     service.stop();
   });
 
+  it("selects only listed projects through /use-project", async () => {
+    const settings = createSettings({
+      enabled: true,
+      binding: {
+        token: "token-1",
+        boundUserId: "user-1",
+        loginUserId: "user-1"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const connectedProjectPaths: string[] = [];
+    const channel = createManualChannel(sentTexts);
+    const service = createService({ settings, channel, connectedProjectPaths });
+    await service.setConnectionEnabled(true);
+
+    channel.deliver([
+      { messageId: "m1", fromUserId: "user-1", text: "/use-project /some/other/repo" },
+      { messageId: "m2", fromUserId: "user-1", text: "/use-project /repo" },
+      { messageId: "m3", fromUserId: "user-1", text: "/use-project 1" }
+    ]);
+    await waitFor(() => sentTexts.length === 3);
+
+    expect(sentTexts[0]).toContain("Project not found: /some/other/repo");
+    expect(sentTexts[1]).toContain("Selected project:\n/repo");
+    expect(sentTexts[2]).toContain("Selected project:\n/repo");
+    expect(connectedProjectPaths).toEqual(["/repo", "/repo"]);
+    service.stop();
+  });
+
   it("keeps polling when the Gateway toggle is turned off after binding", async () => {
     const settings = createSettings({
       enabled: true,
@@ -1211,6 +1240,7 @@ function createService(input: {
   };
   pmSession?: RoleSessionRecord | null;
   roleSessions?: Partial<Record<VcmRoleName, RoleSessionRecord | null>>;
+  connectedProjectPaths?: string[];
   runtimeWrites?: string[];
   translateGatewayOutput?: (input: {
     repoRoot: string;
@@ -1258,7 +1288,8 @@ function createService(input: {
       async getRecentRepositoryPaths() {
         return [project.repoRoot];
       },
-      async connectProject() {
+      async connectProject({ repoPath }: { repoPath: string }) {
+        input.connectedProjectPaths?.push(repoPath);
         return project;
       },
       async pullCurrentProject() {

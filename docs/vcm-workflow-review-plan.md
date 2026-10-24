@@ -94,8 +94,9 @@ Dispatch uses this lifecycle:
    approval.
 
 Submitting or confirming a dispatch updates Workflow Progress and runtime state
-through `.ai/vcm/workflow-control-transaction.json`. An interrupted paired write
-is replayed before state is read. Project startup recovers message state first,
+through `.ai/vcm/workflow-control-transaction.json`. State reads expose an
+interrupted paired write without replaying it; the next locked operation or
+project recovery replays it. Project startup recovers message state first,
 then returns only undelivered `dispatching` approvals to `pending`. Delivered
 unconfirmed approvals retain their claim and warning until a late Hook, manual
 confirmation, or explicit cancellation. Confirmation reuses the pre-delivery

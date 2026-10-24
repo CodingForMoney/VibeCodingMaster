@@ -1199,11 +1199,12 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     if (existing?.status === "running" && deps.runtime.getSession(existing.id)) {
       return existing;
     }
+    if (existing?.claudeSessionId) {
+      // Resume keeps the launch options recorded by the saved Session.
+      return deps.sessionService.resumeRoleSession(baseRepoRoot, taskSlug, role as VcmRoleName);
+    }
     const preferences = await deps.appSettings.getPreferences();
     const options = preferences.launchTemplate.roles[role as VcmRoleName];
-    if (existing?.claudeSessionId) {
-      return deps.sessionService.resumeRoleSession(baseRepoRoot, taskSlug, role as VcmRoleName, options);
-    }
     return deps.sessionService.startRoleSession(baseRepoRoot, taskSlug, role as VcmRoleName, options);
   }
 

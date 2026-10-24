@@ -57,6 +57,8 @@ import {
 } from "../templates/harness/restart-architect-skill.js";
 import { renderResolveDurableDocAssignmentTool } from "../templates/harness/resolve-durable-doc-assignment.js";
 import { readVcmPackageVersion } from "../app-version.js";
+import { DEFAULT_ARCHITECT_WORKER_SETTINGS, normalizeArchitectWorkerSettings } from "../../shared/types/app-settings.js";
+import { ARCHITECT_WORKER_AGENT_TYPES, applyArchitectWorkerSetting } from "../templates/harness/architect-worker-frontmatter.js";
 
 const CLI_DIR = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(CLI_DIR, "../../..");
@@ -126,22 +128,17 @@ const AGENT_FRONTMATTER = {
   },
   "vcm-architect-evidence-worker": {
     description: "Foreground Architect worker for bounded project evidence collection.",
-    tools: "Read, Grep, Glob, Write",
-    model: "opus",
-    effort: "xhigh"
+    tools: "Read, Grep, Glob, Write"
   },
   "vcm-architect-scaffold-worker": {
-    description: "Foreground Architect worker for exact scaffold execution and scaffold validation.",
-    model: "opus",
-    effort: "xhigh"
+    description: "Foreground Architect worker for exact scaffold execution and scaffold validation."
   },
   "vcm-architect-validation-worker": {
     description: "Foreground Architect worker for exact assigned command execution and evidence capture.",
-    tools: "Read, Grep, Glob, Bash, Write",
-    model: "opus",
-    effort: "xhigh"
+    tools: "Read, Grep, Glob, Bash, Write"
   }
 };
+
 
 const REQUIRED_AGENT_DISALLOWED_TOOLS = {
   architect: CODE_ROLE_DISALLOWED_TOOLS,
@@ -586,7 +583,7 @@ async function main() {
   await migrateReviewerAgent({ projectRoot, dryRun, operations });
   const manifest = await buildManifest(projectRoot);
   for (const definition of MANAGED_FILES) {
-    await installManagedFile({ projectRoot, definition, dryRun, operations });
+    await installManagedFile({ projectRoot, definition, dryRun, operations, workerSettings: args.architectWorkers });
   }
   for (const template of DURABLE_DOC_TEMPLATES) {
     await installDurableDocTemplate({ projectRoot, template, dryRun, operations });
@@ -653,7 +650,8 @@ function parseArgs(argv) {
   const args = {
     dryRun: false,
     help: false,
-    projectRoot: undefined
+    projectRoot: undefined,
+    architectWorkers: DEFAULT_ARCHITECT_WORKER_SETTINGS
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -664,6 +662,19 @@ function parseArgs(argv) {
     }
     if (arg === "--dry-run") {
       args.dryRun = true;
+      continue;
+    }
+    if (arg === "--architect-workers") {
+      const value = argv[index + 1];
+      if (!value) {
+        fail("--architect-workers requires a JSON object.");
+      }
+      try {
+        args.architectWorkers = normalizeArchitectWorkerSettings(JSON.parse(value));
+      } catch {
+        fail("--architect-workers must be valid JSON.");
+      }
+      index += 1;
       continue;
     }
     if (arg.startsWith("--")) {
@@ -682,6 +693,7 @@ function printUsage() {
   console.log(`Usage:
   node scripts/install-vcm-harness.mjs <project-root>
   node scripts/install-vcm-harness.mjs <project-root> --dry-run
+  node scripts/install-vcm-harness.mjs <project-root> --architect-workers '<json>'
 
 Installs only fixed VCM harness content.
 
@@ -861,7 +873,7 @@ async function installManifest({ projectRoot, manifest, dryRun, operations, forc
   });
 }
 
-async function installManagedFile({ projectRoot, definition, dryRun, operations }) {
+async function installManagedFile({ projectRoot, definition, dryRun, operations, workerSettings = DEFAULT_ARCHITECT_WORKER_SETTINGS }) {
   const targetPath = resolveInside(projectRoot, definition.path);
   const block = renderManagedBlock(definition);
   const currentContent = await readOptionalText(targetPath);
@@ -893,6 +905,10 @@ async function installManagedFile({ projectRoot, definition, dryRun, operations 
   }
   for (const removedSkill of REMOVED_AGENT_SKILLS[definition.agentName] ?? []) {
     nextContent = removeAgentSkill(nextContent, removedSkill);
+  }
+  const workerType = ARCHITECT_WORKER_AGENT_TYPES[definition.agentName];
+  if (workerType) {
+    nextContent = applyArchitectWorkerSetting(nextContent, workerSettings[workerType]);
   }
 
   await writeIfChanged({
