@@ -537,7 +537,7 @@ describe("gate-review-service", () => {
     const service = createGateReviewService({
       fs: createNodeFileSystemAdapter(),
       runner: createRunner(tmpRepo, [], {
-        "ls-files -s -- . :(exclude).ai/vcm/** :(exclude)docs/**": () => trackedEvidence
+        "ls-files -s -- . :(exclude).ai/vcm/** :(exclude)docs/** :(exclude,glob)**/ARCHITECTURE.md :(exclude).ai/generated/**": () => trackedEvidence
       }),
       runtime: createRuntime(tmpRepo, writes, "approve"),
       projectService: createProjectService(),
@@ -1903,6 +1903,7 @@ function createRuntime(
             "- Invalidated Assumptions: touched assumptions were checked",
             "- Existing-Class Completeness: related class members were reconstructed",
             "- Relationship Evidence: decision-bearing relationships cite LSP evidence and were re-queried",
+            "- Architecture Docs: owning docs updated with the plan and its decisions",
             "- Ownership: state ownership was checked",
             "- Data Flow: data flow was traced",
             "- Lifecycle: completion and failure were checked",
@@ -2267,7 +2268,7 @@ function codeDiffAnalysisLines(): string[] {
     "- State Lifecycle And Failure Paths: applicable state and failures inspected",
     "- Coding Standards: project standards inspected",
     "- Baseline Test Integrity: changed tests and required baseline coverage inspected",
-    "- Generated Context And Durable Docs: applicable context and docs inspected",
+    "- Documentation Fit: applicable context and docs inspected",
     "- Code Readiness: ready",
     ""
   ];

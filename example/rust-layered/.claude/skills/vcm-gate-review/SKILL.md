@@ -13,7 +13,7 @@ Use this skill at every project-manager Gate Review trigger point and whenever V
 
 - `architecture-plan`: after the user confirms `.ai/vcm/handoffs/architecture-brief.md` and architect writes `.ai/vcm/handoffs/architecture-plan.md`, before coder dispatch.
 - `validation-adequacy`: after tester writes a terminal `Test Result: pass|fail` that the active flow permits to reach the gate. Never request this gate for `Test Result: incomplete`.
-- `code-diff`: after Tester completes and the current validation-adequacy Gate finishes successfully for a Coder implementation, Architect Debug fix, or Architecture Diagnosis fix. Identify the production-code source with `--source coder`, `--source architect-debug`, or `--source architect-diagnosis`. Validation-Only Flow does not request code-diff.
+- `code-diff`: after Tester completes, the current validation-adequacy Gate finishes successfully, and Architect docs reconciliation reports `synced` or `unchanged`, for a Coder implementation, Architect Debug fix, or Architecture Diagnosis fix. Rerun it after a docs-only correction or any commit made after its approval. Identify the production-code source with `--source coder`, `--source architect-debug`, or `--source architect-diagnosis`. Validation-Only Flow does not request code-diff.
 
 ## Request
 

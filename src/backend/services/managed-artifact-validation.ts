@@ -48,6 +48,7 @@ export const GATE_ANALYSIS_FIELDS: Record<GateReviewGate, readonly string[]> = {
     "Invalidated Assumptions",
     "Existing-Class Completeness",
     "Relationship Evidence",
+    "Architecture Docs",
     "Ownership",
     "Data Flow",
     "Lifecycle",
@@ -82,7 +83,7 @@ export const GATE_ANALYSIS_FIELDS: Record<GateReviewGate, readonly string[]> = {
     "State Lifecycle And Failure Paths",
     "Coding Standards",
     "Baseline Test Integrity",
-    "Generated Context And Durable Docs",
+    "Documentation Fit",
     "Code Readiness"
   ]
 };

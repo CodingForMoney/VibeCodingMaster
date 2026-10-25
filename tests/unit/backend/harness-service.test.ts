@@ -190,7 +190,8 @@ describe("createHarnessService", () => {
     expect(projectManagerAgent).toContain("**Tester Code-Diff Correction:**");
     expect(projectManagerAgent).toContain("every code-diff finding has `Finding Scope: test-only`");
     expect(projectManagerAgent).toContain("Never run either post-implementation Gate for `Test Result: incomplete`");
-    expect(projectManagerAgent).toContain("Coder implementation -> Tester validation -> validation-adequacy Gate -> code-diff Gate");
+    expect(projectManagerAgent).toContain("Coder implementation -> Tester validation -> validation-adequacy Gate -> Architect docs reconciliation -> code-diff Gate -> Final Acceptance");
+    expect(projectManagerAgent).toContain("**Docs Code-Diff Correction:**");
     expect(projectManagerAgent).toContain("Architect Debug Mode -> Tester -> validation-adequacy Gate -> code-diff --source architect-debug");
     expect(projectManagerAgent).toContain("Architecture Diagnosis Mode -> Tester -> validation-adequacy Gate -> code-diff --source architect-diagnosis");
     expect(projectManagerAgent.match(/\*\*Tester Continuation:/g)).toHaveLength(4);
@@ -260,7 +261,7 @@ describe("createHarnessService", () => {
     expect(diagnosisReviewerAgent).toContain("local workaround for the surface failure");
     expect(diagnosisReviewerAgent).toContain("Independently apply the Tester L3 trigger rules");
     expect(diagnosisReviewerAgent).toContain("Inspect the `Test Infrastructure` section");
-    expect(diagnosisReviewerAgent).toContain("Finding Scope: test-only|implementation");
+    expect(diagnosisReviewerAgent).toContain("Finding Scope: test-only|docs-only|implementation");
     expect(diagnosisReviewerAgent).toContain("L3 Trigger Assessment");
     expect(diagnosisReviewerAgent).toContain("`Test Result: incomplete` is Tester continuation state");
     expect(diagnosisReviewerAgent).toContain("One symbol's reference result cannot");

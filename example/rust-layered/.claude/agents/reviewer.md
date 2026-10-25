@@ -82,7 +82,8 @@ automates it). Run this on every review round, including revision rounds:
   ID sets (or their exact diff) in the report.
 - Verify `Scaffold Build Evidence` names the compile/typecheck commands, a
   green result, and the scaffold commit hash, and that the hash matches the
-  reviewed scaffold commits. Missing, red, or hash-mismatched evidence is
+  reviewed scaffold commits. Commits after it that change only architecture
+  docs do not invalidate the hash. Missing, red, or hash-mismatched evidence is
   `request_changes`.
 - For every module whose build configuration the plan changes, open its package
   manifest and verify the evidence table's dependency claims match it exactly,
@@ -177,6 +178,27 @@ Verify relationship evidence for the plan (record it under Relationship Evidence
 - Record each relationship checked, its recorded source, and your re-query
   result. A relationship that LSP could not re-verify is listed as such; it does
   not count as verified.
+
+Review the architecture docs the plan already changed (record it under
+Architecture Docs). Read every doc named in Docs Impact and the diff the task
+made to it:
+
+- Every architecture doc that owns a fact the plan changes is updated: the
+  project doc for module map, dependency direction, cross-module relationships,
+  major runtime flows, cross-cutting mechanisms, project-wide constraints, and
+  project-level decisions; each module doc for that module's design; and, in a
+  repository with no module-level docs, the project doc or its linked
+  `docs/architecture/<area>.md` for the detailed design. A changed fact with no
+  doc update and no recorded reason is `request_changes`.
+- The doc changes match the Architecture Decision: the same ownership, data
+  flow, lifecycle, boundaries, invariants, and failure model. A doc that
+  contradicts the plan, or that decides something the plan does not, is
+  `request_changes`.
+- Changed decisions are recorded with their rationale and rejected
+  alternatives in the doc's Design Decisions section.
+- The docs describe the current architecture without task history, task or
+  commit labels, validation records, file inventories, or API dumps, and
+  replace superseded descriptions instead of keeping old and new together.
 
 Run a backward-impact pass over the plan:
 
@@ -298,9 +320,11 @@ convert the result to `pass` or independently accept the risk.
 
 Read `.claude/agents/coder.md`, `.claude/agents/tester.md`,
 `.ai/vcm/handoffs/test-report.md`, the current validation-adequacy Gate report,
-and `docs/CODING_STANDARDS.md`; use the architect definition to understand
-implementation responsibility boundaries. Code-diff runs only after Tester
-validation and the current validation-adequacy disposition. VCM excludes
+`.ai/vcm/handoffs/docs-sync-report.md`, and `docs/CODING_STANDARDS.md`; use the
+architect definition to understand implementation responsibility boundaries.
+Code-diff runs only after Tester validation, the current validation-adequacy
+disposition, and Architect docs reconciliation, so the named commits include the
+reconciled architecture docs. VCM excludes
 `[VCM Harness]` commits from the review input. Do not inspect, analyze, cite,
 or report findings from those commits. Review every commit named by VCM and
 nothing else.
@@ -368,9 +392,8 @@ search the current worktree for the same mechanism. If it already exists in at
 least two other files, request changes unless the accepted architecture
 explicitly fixes the owning behavior, confirms that local handling is intended
 and corrects the owning documentation, or records the unresolved issue and
-affected call sites through the Architect-owned known-issue flow. A documented
-post-validation Architect docs sync satisfies the documentation timing; the
-correct disposition must already be explicit. Extracting the workaround into a
+affected call sites through the Architect-owned known-issue flow. The owning
+documentation correction must be present in the reviewed commits. Extracting the workaround into a
 helper is not an upstream disposition. Classify the finding as `implementation`
 unless the owning behavior and contract are entirely test-only.
 
@@ -380,6 +403,30 @@ paths, debug/task-only artifacts, `VCM:CODE`, task-process comments or labels,
 and changes outside its governing evidence. Verify callable and public-surface
 changes against their callers, exports, compatibility obligations, generated
 context, and durable documentation.
+
+Review the architecture docs in the named commits against the final code
+(record it under Documentation Fit):
+
+- The docs describe what the reviewed code actually does: ownership, data
+  flow, lifecycle, boundaries, invariants, failure behavior, and the meaning of
+  changed public surface. A doc statement the code contradicts is
+  `request_changes` with Finding Scope `docs-only`.
+- The `Module Coverage` table in `docs-sync-report.md` is true: every
+  module touched by the named commits appears, an `updated` module's owning
+  doc changed in the task, and an `unchanged` module's reason holds against
+  its code changes.
+- The `Reconciliation Commits` change only architecture docs, active plans,
+  `docs/known-issues.md`, and `.ai/generated/**`. A reconciliation commit
+  that changes code, tests, or configuration is `request_changes` with
+  Finding Scope `implementation`.
+- `docs/known-issues.md` adds the task's confirmed unresolved issues and
+  removes the ones the task resolved.
+- The docs follow the same writing rules as at the architecture-plan gate.
+
+An Architect Debug Branch or Architecture Diagnosis Branch code-diff runs before
+its parent flow reconciles the docs. For those sources, review the docs only for
+contradictions the reviewed commits introduce; the parent flow's reconciliation
+and its own code-diff Gate cover the rest.
 
 Use the completed test report and validation-adequacy disposition as execution
 evidence while independently deciding whether the implementation handles its
@@ -418,6 +465,7 @@ Use this findings structure:
 - Invalidated Assumptions:
 - Existing-Class Completeness:
 - Relationship Evidence:
+- Architecture Docs:
 - Ownership:
 - Data Flow:
 - Lifecycle:
@@ -456,7 +504,7 @@ Use this findings structure:
 - State Lifecycle And Failure Paths:
 - Coding Standards:
 - Baseline Test Integrity:
-- Generated Context And Durable Docs:
+- Documentation Fit:
 - Code Readiness:
 
 ## Findings
@@ -465,8 +513,8 @@ Use this findings structure:
 <!-- File and Line Or Symbol are required for code-diff findings. -->
 - File:
 - Line Or Symbol:
-<!-- Finding Scope is required for code-diff findings. Use test-only only when correction needs no production, runtime, public-contract, dependency, generated-context, architecture, or shared-production change. -->
-- Finding Scope: test-only|implementation
+<!-- Finding Scope is required for code-diff findings. Use test-only only when correction needs no production, runtime, public-contract, dependency, generated-context, architecture, or shared-production change. Use docs-only only when correction changes architecture docs, active plans, known issues, or generated context and no code or test. -->
+- Finding Scope: test-only|docs-only|implementation
 - Evidence:
 - Expected:
 - Gap:
@@ -487,6 +535,7 @@ If there are no findings, write:
 - Invalidated Assumptions:
 - Existing-Class Completeness:
 - Relationship Evidence:
+- Architecture Docs:
 - Ownership:
 - Data Flow:
 - Lifecycle:
@@ -525,7 +574,7 @@ If there are no findings, write:
 - State Lifecycle And Failure Paths:
 - Coding Standards:
 - Baseline Test Integrity:
-- Generated Context And Durable Docs:
+- Documentation Fit:
 - Code Readiness:
 
 ## Findings

@@ -113,7 +113,8 @@ const SOURCE_ARTIFACTS = {
   ],
   "code-diff": [
     ".ai/vcm/handoffs/test-report.md",
-    ".ai/vcm/gate-reviews/validation-adequacy-review.md"
+    ".ai/vcm/gate-reviews/validation-adequacy-review.md",
+    ".ai/vcm/handoffs/docs-sync-report.md"
   ]
 };
 const CODE_DIFF_SOURCE_ARTIFACTS = {
@@ -455,7 +456,7 @@ function inputHash(root, gate, sources, codeDiff) {
     ]);
   }
   if (gate === "validation-adequacy") {
-    const pathspec = ["--", ".", ":(exclude).ai/vcm/**", ":(exclude)docs/**"];
+    const pathspec = ["--", ".", ":(exclude).ai/vcm/**", ":(exclude)docs/**", ":(exclude,glob)**/ARCHITECTURE.md", ":(exclude).ai/generated/**"];
     hashEvidence(root, digest, "untrackedEvidence", pathspec, [
       ["trackedEvidence", ["git", "ls-files", "-s", ...pathspec]],
       ["workingEvidence", ["git", "diff", "--binary", ...pathspec]],

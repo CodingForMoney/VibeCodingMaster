@@ -438,6 +438,7 @@ function analysisForGate(gate: GateReviewGate): string[] {
       "- Invalidated Assumptions: affected assumptions inspected",
       "- Existing-Class Completeness: related class members reconstructed",
       "- Relationship Evidence: decision-bearing relationships cite LSP evidence and were re-queried",
+      "- Architecture Docs: owning docs updated with the plan and its decisions",
       "- Ownership: state owner inspected",
       "- Data Flow: producer and consumer inspected",
       "- Lifecycle: completion and retry inspected",
@@ -481,7 +482,7 @@ function analysisForGate(gate: GateReviewGate): string[] {
     "- State Lifecycle And Failure Paths: write, completion, and retry inspected",
     "- Coding Standards: applicable standards inspected",
     "- Baseline Test Integrity: baseline evidence preserved",
-    "- Generated Context And Durable Docs: no additional impact",
+    "- Documentation Fit: no additional impact",
     "- Code Readiness: corrected range is reviewable",
     ""
   ];

@@ -632,6 +632,52 @@ describe("workflow control service", () => {
     });
   });
 
+  it("reconciles docs before the code-diff Gate and completes only after code-diff reviews the reconciliation", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await enterCodeChangeTester(service, fs, context);
+    await writeTestReport(fs, context, "pass");
+    await writeGateIndex(fs, context, { architecture: "approve", validation: "approve" });
+
+    // The validation-adequacy Gate alone unlocks Architect docs reconciliation.
+    await expect(propose(service, fs, context, "coder", undefined, "skip reconciliation"))
+      .rejects.toMatchObject({ code: "WORKFLOW_TRANSITION_DENIED" });
+    await advance(service, fs, context, "architect", undefined, "reconcile docs with the validated code");
+    await writeDocsSyncReport(fs, context, "synced", "reconciled docs", { approveCodeDiff: false });
+    await writeFinalAcceptance(fs, context);
+
+    await expect(completeFlow(service, fs, context)).rejects.toMatchObject({
+      code: "WORKFLOW_COMPLETION_INVALID",
+      message: expect.stringContaining("The code-diff Gate has not approved the commits made since the final Architect dispatch")
+    });
+    // No role dispatch is legal while the code-diff Gate is pending.
+    await expect(propose(service, fs, context, "tester", undefined, "revalidate"))
+      .rejects.toMatchObject({ code: "WORKFLOW_TRANSITION_DENIED" });
+
+    await writeCodeDiffDecision(fs, context, "approve");
+    await completeFlow(service, fs, context);
+    expect((await service.getProgress(context)).status).toBe("completed");
+  });
+
+  it.each([
+    [["docs-only"], "architect", undefined],
+    [["test-only"], "tester", undefined],
+    [["docs-only", "test-only"], "architect", undefined],
+    [["implementation"], "architect", "architect-debug"]
+  ] as const)("routes a code-diff rejection of the reconciled commits with %j findings to %s", async (scopes, targetRole, requestedFlow) => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await enterCodeChangeTester(service, fs, context);
+    await writeTestReport(fs, context, "pass");
+    await writeGateIndex(fs, context, { architecture: "approve", validation: "approve" });
+    await advance(service, fs, context, "architect", undefined, "reconcile docs with the validated code");
+    await writeDocsSyncReport(fs, context, "synced", "reconciled docs", { approveCodeDiff: false });
+    await writeCodeDiffDecision(fs, context, "request_changes", [...scopes]);
+
+    await expect(advance(service, fs, context, targetRole, requestedFlow, "correct code-diff findings"))
+      .resolves.toBeUndefined();
+  });
+
   it("enforces the complete Code-Change path before accepting completion", async () => {
     const { context, fs } = await createContext(roots);
     const service = createWorkflowControlService({ fs, now: sequenceClock() });
@@ -663,6 +709,7 @@ describe("workflow control service", () => {
     await writeFinalArtifact(fs, context, "docs-sync-report.md", renderDocsSyncReportTemplate(context.taskSlug), [
       ["synced|unchanged|blocked", "synced"]
     ]);
+    await writeCodeDiffDecision(fs, context, "approve");
     await writeFinalArtifact(fs, context, "final-acceptance.md", renderFinalAcceptanceTemplate(context.taskSlug), [
       [
         "accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|needs-docs-sync|blocked-by-user-decision",
@@ -764,6 +811,7 @@ describe("workflow control service", () => {
       expect(await fs.readText(target)).toBe("previous report\n");
       await expect(artifacts.submitArtifact(docsSubmission(context, "docs-sync-report")))
         .resolves.toMatchObject({ status: "ok" });
+      await writeCodeDiffDecision(fs, context, "approve");
       await writeFinalAcceptance(fs, context);
       await completeFlow(service, fs, context);
       expect((await service.getProgress(context)).status).toBe("completed");
@@ -843,6 +891,7 @@ describe("workflow control service", () => {
     await expect(artifacts.submitArtifact(docsSubmission(context, "docs-update-report")))
       .rejects.toMatchObject({ code: "WORKFLOW_DOCS_ARTIFACT_MISMATCH" });
     await artifacts.submitArtifact(docsSubmission(context, "docs-sync-report"));
+    await writeCodeDiffDecision(fs, context, "approve");
     await writeFinalAcceptance(fs, context);
     await completeFlow(service, fs, context);
   });
@@ -1605,6 +1654,7 @@ describe("workflow control service", () => {
     await writeFinalArtifact(fs, context, "docs-sync-report.md", renderDocsSyncReportTemplate(context.taskSlug), [
       ["synced|unchanged|blocked", "synced"]
     ]);
+    await writeCodeDiffDecision(fs, context, "approve");
     await writeFinalArtifact(fs, context, "final-acceptance.md", renderFinalAcceptanceTemplate(context.taskSlug), [[
       "accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|needs-docs-sync|blocked-by-user-decision",
       "accepted"
@@ -1788,6 +1838,7 @@ describe("workflow control service", () => {
     await writeFinalArtifact(fs, context, "docs-sync-report.md", renderDocsSyncReportTemplate(context.taskSlug), [
       ["synced|unchanged|blocked", "synced"]
     ]);
+    await writeCodeDiffDecision(fs, context, "approve");
     await writeFinalArtifact(fs, context, "final-acceptance.md", renderFinalAcceptanceTemplate(context.taskSlug), [
       [
         "accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|needs-docs-sync|blocked-by-user-decision",
@@ -1912,6 +1963,8 @@ function docsSubmission(context: WorkflowControlContext, kind: "docs-update-repo
     mode: "final" as const,
     content: template.replace("synced|unchanged|blocked", "unchanged")
       .replace("none|architect|coder|tester", "none")
+      .replace(/## Module Coverage\n[\s\S]*?\n(?=## )/, "## Module Coverage\n\nNone.\n\n")
+      .replace(/(## Reconciliation Commits\n\n(?:<!--[^\n]*-->\n)?)TBD/, "$1None.")
       .replaceAll("TBD", "Verified task evidence.")
   };
 }
@@ -2135,16 +2188,57 @@ async function writeArchitecturePlan(
   ]);
 }
 
+// Writes the reconciliation report and, unless disabled, the code-diff approval
+// that PM requests after reconciliation in the delivery flows.
 async function writeDocsSyncReport(
   fs: FileSystemAdapter,
   context: WorkflowControlContext,
   decision: "synced" | "unchanged",
-  evidence: string
+  evidence: string,
+  options: { approveCodeDiff?: boolean } = {}
 ): Promise<void> {
   await writeFinalArtifact(fs, context, "docs-sync-report.md", renderDocsSyncReportTemplate(context.taskSlug), [
     ["synced|unchanged|blocked", decision],
     ["## Evidence Reviewed\n\nTBD", `## Evidence Reviewed\n\n${evidence}`]
   ]);
+  if (options.approveCodeDiff !== false) {
+    await writeCodeDiffDecision(fs, context, "approve");
+  }
+}
+
+let codeDiffReviewCount = 0;
+
+// Records a new code-diff Gate result while preserving the other gates and the
+// recorded code source.
+async function writeCodeDiffDecision(
+  fs: FileSystemAdapter,
+  context: WorkflowControlContext,
+  decision: "approve" | "request_changes",
+  findingScopes: Array<"test-only" | "docs-only" | "implementation"> = []
+): Promise<void> {
+  codeDiffReviewCount += 1;
+  const updatedAt = new Date(Date.parse("2026-08-07T00:00:00.000Z") + codeDiffReviewCount * 1000).toISOString();
+  const indexPath = path.join(context.taskRepoRoot, ".ai/vcm/gate-reviews/index.json");
+  const index = await fs.pathExists(indexPath)
+    ? await fs.readJson<{ gates: Record<string, Record<string, unknown>> }>(indexPath)
+    : { version: 1, enabled: true, activeGate: null, gates: {} };
+  const existing = index.gates["code-diff"] ?? {};
+  index.gates["code-diff"] = {
+    ...existing,
+    gate: "code-diff",
+    required: true,
+    status: "completed",
+    decision,
+    requestId: `request-code-diff-${updatedAt}`,
+    inputHash: `input-code-diff-${updatedAt}`,
+    codeDiffSource: existing.codeDiffSource ?? "coder",
+    findings: findingScopes.map((scope, position) => ({ id: `F-${position + 1}`, scope })),
+    reportPath: ".ai/vcm/gate-reviews/code-diff-review.md",
+    completedAt: updatedAt,
+    updatedAt
+  };
+  await fs.ensureDir(path.dirname(indexPath));
+  await fs.writeJsonAtomic(indexPath, index);
 }
 
 async function writeDocsUpdateReport(
@@ -2245,7 +2339,10 @@ async function writeFinalArtifact(
       : template
   ).replaceAll("TBD", "Verified task evidence.");
   if (fileName === "docs-sync-report.md") {
-    content = content.replace("none|architect|coder|tester", "none");
+    content = content
+      .replace("none|architect|coder|tester", "none")
+      .replace(/## Module Coverage\n[\s\S]*?\n(?=## )/, "## Module Coverage\n\nNone.\n\n")
+      .replace("## Reconciliation Commits\n\n<!-- One bare commit hash per line for the commits this reconciliation made, or None. -->\nVerified task evidence.", "## Reconciliation Commits\n\nNone.");
   }
   await fs.writeText(path.join(context.taskRepoRoot, context.handoffDir, fileName), content);
 }

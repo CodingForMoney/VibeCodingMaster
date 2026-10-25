@@ -350,6 +350,12 @@ const WHOLE_FILES = [
     templatePath: "scripts/harness-tools/check-durable-docs"
   },
   {
+    path: ".ai/tools/check-docs-sync",
+    category: "durable-docs-tool",
+    mode: 0o755,
+    templatePath: "scripts/harness-tools/check-docs-sync"
+  },
+  {
     path: ".claude/skills/vcm-architecture-interview/SKILL.md",
     category: "skill",
     mode: 0o644,

@@ -14,6 +14,7 @@ export interface CommandRunnerOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
+  input?: string;
 }
 
 export function createCommandRunner(): CommandRunner {
@@ -24,6 +25,7 @@ export function createCommandRunner(): CommandRunner {
           cwd: options.cwd,
           env: options.env,
           timeout: options.timeoutMs,
+          input: options.input,
           reject: false
         });
 

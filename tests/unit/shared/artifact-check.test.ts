@@ -333,6 +333,17 @@ None.
 ## Known Issues Disposition
 No task issues to promote.
 
+## Module Coverage
+| Module | Owning Doc | Status | Reason |
+| --- | --- | --- | --- |
+| packages/api | packages/api/ARCHITECTURE.md | unchanged | Only test fixtures changed. |
+
+## Reconciliation Commits
+None.
+
+## Docs Sync Check
+.ai/tools/check-docs-sync passed.
+
 ## Correction Owner
 none
 
@@ -343,6 +354,34 @@ None.
 unchanged
 `);
     expect(result.status).toBe("ok");
+  });
+
+  it("requires docs sync coverage of every touched module and bare reconciliation commits", () => {
+    const base = completeTemplate("docs-sync-report", renderDocsSyncReportTemplate("demo"));
+    const withCoverage = (rows: string) => base.replace(
+      "## Module Coverage\n\nNone.",
+      `## Module Coverage\n\n| Module | Owning Doc | Status | Reason |\n| --- | --- | --- | --- |\n${rows}`
+    );
+
+    const valid = withCoverage("| core | core/ARCHITECTURE.md | updated | |\n| api | api/ARCHITECTURE.md | unchanged | Only tests changed. |")
+      .replace("## Reconciliation Commits\n\n<!-- One bare commit hash per line for the commits this reconciliation made, or None. -->\nNone.", "## Reconciliation Commits\n\nabc1234\ndef5678");
+    expect(checkMarkdownArtifact("docs-sync-report", "docs-sync-report.md", valid).status).toBe("ok");
+
+    const missingReason = checkMarkdownArtifact("docs-sync-report", "docs-sync-report.md", withCoverage("| api | api/ARCHITECTURE.md | unchanged | |"));
+    expect(missingReason.status).toBe("incomplete");
+    expect(missingReason.invalidFields.join("\n")).toContain("api is unchanged and needs the reason");
+
+    const badStatus = checkMarkdownArtifact("docs-sync-report", "docs-sync-report.md", withCoverage("| api | api/ARCHITECTURE.md | skipped | n/a |"));
+    expect(badStatus.invalidFields.join("\n")).toContain("Status updated or unchanged");
+
+    const emptyTable = checkMarkdownArtifact("docs-sync-report", "docs-sync-report.md", withCoverage(""));
+    expect(emptyTable.invalidFields.join("\n")).toContain("Module Coverage table has no rows");
+
+    const badCommits = checkMarkdownArtifact("docs-sync-report", "docs-sync-report.md", base.replace(
+      "## Reconciliation Commits\n\n<!-- One bare commit hash per line for the commits this reconciliation made, or None. -->\nNone.",
+      "## Reconciliation Commits\n\n- abc1234 docs: sync"
+    ));
+    expect(badCommits.invalidFields.join("\n")).toContain("Reconciliation Commits must be exactly None.");
   });
 
   it("requires blocked docs sync to identify one correction owner and concrete evidence", () => {
@@ -829,7 +868,9 @@ function completeTemplate(
   kind: "architecture-brief" | "architect-debug" | "architecture-plan" | "test-report" | "docs-update-report" | "docs-sync-report" | "final-acceptance",
   content: string
 ): string {
-  const completed = content.replaceAll("TBD", "None.");
+  const completed = content
+    .replace(/## Module Coverage\n[\s\S]*?\n(?=## )/, "## Module Coverage\n\nNone.\n\n")
+    .replaceAll("TBD", "None.");
   if (kind === "architecture-brief") {
     return completed.replace(
       "Architecture Brief Status: interviewing|confirmed",

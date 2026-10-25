@@ -546,6 +546,22 @@ TBD
 
 TBD
 
+## Module Coverage
+
+<!-- One row per module touched by the task's commits. Status is updated or unchanged; unchanged needs the reason no owned fact changed. Write None. when the task touched no module. -->
+| Module | Owning Doc | Status | Reason |
+| --- | --- | --- | --- |
+
+## Reconciliation Commits
+
+<!-- One bare commit hash per line for the commits this reconciliation made, or None. -->
+TBD
+
+## Docs Sync Check
+
+<!-- Command and result of .ai/tools/check-docs-sync. -->
+TBD
+
 ## Correction Owner
 
 ${renderArtifactOptions(DOCS_SYNC_CORRECTION_OWNERS)}

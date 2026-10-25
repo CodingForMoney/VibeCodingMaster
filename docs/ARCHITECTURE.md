@@ -300,21 +300,38 @@ Most fixed artifacts have one owner. `docs-update-report.md` is shared by
 Architect, Coder, and Tester because Docs-Only Flow assigns documentation to
 the role that owns the relevant project evidence. Auto Memory durable-document
 assignments also use this report with an exact backend-assigned Assignment ID;
-they do not enter Docs-Only Flow. `docs-sync-report.md` remains Architect-owned
-post-validation synchronization for code-producing flows. Its terminal
+they do not enter Docs-Only Flow. `docs-sync-report.md` is the Architect-owned
+docs reconciliation report for code-producing flows. Architect writes the task's
+architecture doc changes during planning, where the architecture-plan Gate
+reviews them with the plan, then reconciles them with the validated code after
+the validation-adequacy Gate and before the code-diff Gate. The code-diff Gate
+reviews the reconciliation commits together with the code, so no doc change
+lands after the last review. The report carries a Module Coverage table for
+every touched module and the list of reconciliation commits. Its terminal
 contract is strict: `synced` and `unchanged` require no correction owner, while
 `blocked` names exactly one Architect, Coder, or Tester owner and records the
 correction evidence. Workflow Control routes that owner and requires the
-affected validation and Gate evidence to be produced again before docs sync
-can complete.
+affected validation and Gate evidence to be produced again before docs
+reconciliation can complete.
+
+Artifact Service runs the task worktree's `.ai/tools/check-docs-sync` on a final
+`synced` or `unchanged` report and rejects it when a touched module is missing
+from Module Coverage, a module marked updated did not change its owning doc, a
+reconciliation commit changes anything other than architecture docs, active
+plans, known issues, or generated context, or a doc that Docs Impact says the
+plan changed was not changed. The validation-adequacy input hash excludes
+`docs/**`, every `ARCHITECTURE.md`, and `.ai/generated/**`, so reconciliation does
+not invalidate an approved validation.
 
 Before writing either documentation report, Artifact Service asks Workflow
 Control to check the confirmed dispatch. Docs-Only requires `docs-update-report`;
-post-validation docs sync in a complete delivery flow requires `docs-sync-report`.
+docs reconciliation in a complete delivery flow requires `docs-sync-report`.
 Wrong-kind submissions leave the existing artifact unchanged. Memory-owned
 documentation assignments and completed flows are outside this stage check.
 Completion still requires a fresh docs-sync report after the final Architect
 dispatch and identifies any newer, wrong-kind docs-update report in the error.
+It also requires a code-diff approval recorded after that dispatch, so every
+reconciliation or follow-up commit is reviewed before acceptance.
 
 The shared PreToolUse guard blocks workflow-role attempts to write managed
 workflow Markdown directly through Bash, Write, or Edit. Route messages, Coder
@@ -362,7 +379,7 @@ the prior validation evidence, and is not recorded as a workflow override. The r
 identifies the current root flow, active Debug or Diagnosis branch, branch
 return, and the first dispatch of the active flow run. A branch return retains
 the parent implementation history even when the authorized return dispatch
-adds another Tester round before docs sync. Those fields isolate repeated and
+adds another Tester round before docs reconciliation. Those fields isolate repeated and
 switched flows from older history. Completion requires evidence produced after
 the current role dispatch; an active branch cannot consume parent Final
 Acceptance or complete independently. Artifact freshness includes both content

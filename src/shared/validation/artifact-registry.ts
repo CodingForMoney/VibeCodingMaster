@@ -208,6 +208,9 @@ export const ARTIFACT_DEFINITIONS: readonly ArtifactDefinition[] = [
       "Public Contract / Module Boundary Notes",
       "Remaining Documentation Risks",
       "Known Issues Disposition",
+      "Module Coverage",
+      "Reconciliation Commits",
+      "Docs Sync Check",
       "Correction Owner",
       "Correction Evidence",
       "Decision"

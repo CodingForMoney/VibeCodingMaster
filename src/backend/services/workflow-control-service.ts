@@ -619,7 +619,8 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
         const source = run.resumedFromBranch ?? (flow === "code-change" ? "coder" : flow);
         const docsTarget = `${flow}/architect`;
         const allowed = await allowedAfterTester(deps.fs, input, state, flow, source, {
-          successTarget: docsTarget
+          successTarget: docsTarget,
+          reconcileBeforeCodeDiff: true
         });
         if (allowed.includes(docsTarget)) expected = "docs-sync-report";
       }
@@ -1061,7 +1062,8 @@ async function allowedCodeChange(
     return allowedAfterTester(fs, input, state, "code-change", resumedFromBranch, {
       testerFailureFlow: "architect-debug",
       implementationFailureFlow: "architect-debug",
-      successTarget: "code-change/architect"
+      successTarget: "code-change/architect",
+      reconcileBeforeCodeDiff: true
     });
   }
   if (coderIndex < 0) {
@@ -1081,7 +1083,8 @@ async function allowedCodeChange(
   return allowedAfterTester(fs, input, state, "code-change", "coder", {
     testerFailureFlow: "architect-debug",
     implementationFailureFlow: "architect-debug",
-    successTarget: "code-change/architect"
+    successTarget: "code-change/architect",
+    reconcileBeforeCodeDiff: true
   });
 }
 
@@ -1151,6 +1154,7 @@ async function allowedArchitectFix(
     if (evidenceIsFresh(state, source, "architect", artifactName, artifact.hash) && artifact.complete) {
       return [`${source}/tester`];
     }
+    if (!parentFlow) return allowedPostImplementationArchitect(fs, input, state, source);
     const docs = await artifactState(fs, input, "docs-sync-report.md", "docs-sync-report");
     return evidenceIsFresh(state, source, "architect", "docs-sync-report.md", docs.hash)
       && (docs.value === "synced" || docs.value === "unchanged")
@@ -1160,7 +1164,8 @@ async function allowedArchitectFix(
   return allowedAfterTester(fs, input, state, source, source, {
     testerFailureFlow: source === "architect-debug" ? "architecture-diagnosis" : undefined,
     implementationFailureFlow: source,
-    successTarget: parentFlow ? `${parentFlow}/architect` : `${source}/architect`
+    successTarget: parentFlow ? `${parentFlow}/architect` : `${source}/architect`,
+    reconcileBeforeCodeDiff: !parentFlow
   });
 }
 
@@ -1183,6 +1188,12 @@ async function allowedPostImplementationArchitect(
   }
   if (evidenceIsFresh(state, flow, "architect", "docs-sync-report.md", docs.hash) && docs.complete) {
     if (docs.value === "synced" || docs.value === "unchanged") {
+      // The code-diff Gate reviews the reconciliation commits with the code.
+      const codeDiff = await gateState(fs, input, "code-diff");
+      if (freshGateDecision(state, flow, "architect", "code-diff", codeDiff) === "request_changes") {
+        return codeDiffCorrectionTargets(codeDiff, flow);
+      }
+      if (!gatePassedForDispatch(state, flow, "architect", "code-diff", codeDiff)) return [];
       if (acceptance.value === "needs-coder-follow-up" && flow === "code-change") return ["code-change/coder"];
       if (acceptance.value === "needs-docs-sync") return [`${flow}/architect`];
       if (acceptance.value === "needs-architect-follow-up") return [`${flow}/architect`];
@@ -1193,6 +1204,20 @@ async function allowedPostImplementationArchitect(
     }
   }
   return [`${flow}/architect`];
+}
+
+// Routes a code-diff Gate that rejected the reconciled commits: docs-only
+// findings return to Architect reconciliation, test-only findings to Tester,
+// and any implementation finding to the flow's Architect fix path.
+function codeDiffCorrectionTargets(
+  codeDiff: GateReviewGateRecord | undefined,
+  flow: "code-change" | "architect-debug" | "architecture-diagnosis"
+): string[] {
+  const scopes = (codeDiff?.findings ?? []).map((finding) => finding.scope);
+  if (scopes.length === 0 || scopes.some((scope) => scope !== "docs-only" && scope !== "test-only")) {
+    return [flow === "code-change" ? "architect-debug/architect" : `${flow}/architect`];
+  }
+  return scopes.includes("docs-only") ? [`${flow}/architect`] : [`${flow}/tester`];
 }
 
 async function allowedActiveCoderDocsCorrection(
@@ -1227,6 +1252,10 @@ async function allowedAfterTester(
     testerFailureFlow?: "architect-debug" | "architecture-diagnosis";
     implementationFailureFlow?: "architect-debug" | "architecture-diagnosis";
     successTarget: string;
+    // Main flows reconcile docs before the code-diff Gate, so the validation-
+    // adequacy Gate alone unlocks the Architect reconciliation dispatch.
+    // Debug and Diagnosis branches still pass their own code-diff Gate first.
+    reconcileBeforeCodeDiff?: boolean;
   }
 ): Promise<string[]> {
   const test = await artifactState(fs, input, "test-report.md", "test-report");
@@ -1243,12 +1272,15 @@ async function allowedAfterTester(
   }
   if (!gatePassedForDispatch(state, currentFlow, "tester", "validation-adequacy", validation)) return [];
   const codeDiff = await gateState(fs, input, "code-diff");
+  // A code-diff rejection recorded after this Tester dispatch (a branch Gate, or
+  // a task that ran code-diff before reconciliation) routes its correction first.
   if (freshGateDecision(state, currentFlow, "tester", "code-diff", codeDiff) === "request_changes") {
     const scopes = new Set(codeDiff?.findings?.map((finding) => finding.scope).filter(Boolean));
     return scopes.size === 1 && scopes.has("test-only")
       ? [`${currentFlow}/tester`]
       : options.implementationFailureFlow ? [`${options.implementationFailureFlow}/architect`] : [];
   }
+  if (options.reconcileBeforeCodeDiff) return [options.successTarget];
   if (!gatePassedForDispatch(state, currentFlow, "tester", "code-diff", codeDiff)) return [];
   const gateCodeSource = codeSource === "architecture-diagnosis" ? "architect-diagnosis" : codeSource;
   const reviewedSources = codeDiff?.codeDiffSources ?? (codeDiff?.codeDiffSource ? [codeDiff.codeDiffSource] : []);
@@ -1654,7 +1686,7 @@ async function validateCompleteDeliveryEvidence(
   if (baseline.targetRole !== "architect") {
     throw workflowError(
       "WORKFLOW_COMPLETION_INVALID",
-      `The latest ${flow} dispatch is to ${baseline.targetRole}. Complete every required downstream validation and Gate step, then route Architect for docs sync before completing the flow.`
+      `The latest ${flow} dispatch is to ${baseline.targetRole}. Complete every required downstream validation and Gate step, route Architect for docs reconciliation, then pass the code-diff Gate before completing the flow.`
     );
   }
 
@@ -1679,6 +1711,15 @@ async function validateCompleteDeliveryEvidence(
     throw workflowError(
       "WORKFLOW_COMPLETION_INVALID",
       `Docs Sync Report Decision must be synced or unchanged before completion; found ${docs.value ?? "missing"}.`
+    );
+  }
+
+  const codeDiff = await gateState(fs, input, "code-diff");
+  if (!gatePassedForDispatch(state, flow, "architect", "code-diff", codeDiff)) {
+    throw workflowError(
+      "WORKFLOW_COMPLETION_INVALID",
+      `The code-diff Gate has not approved the commits made since the final Architect dispatch #${baseline.sequence}, including the docs reconciliation.`,
+      "Run .ai/tools/request-gate-review --gate code-diff with the flow's source after Architect docs reconciliation, then complete Final Acceptance."
     );
   }
 

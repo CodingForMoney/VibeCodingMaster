@@ -18,6 +18,7 @@ export type GateReviewSeverity =
 
 export const CODE_DIFF_FINDING_SCOPES = [
   "test-only",
+  "docs-only",
   "implementation"
 ] as const;
 

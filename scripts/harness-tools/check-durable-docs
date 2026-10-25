@@ -303,6 +303,29 @@ function checkGeneratedArchitectureFacts(root, findings) {
   });
 }
 
+// Area docs under docs/architecture/ split the project doc's detailed design,
+// so docs/ARCHITECTURE.md must link each one.
+function checkAreaDocLinks(root, findings) {
+  const areaDir = path.join(root, "docs/architecture");
+  let entries;
+  try {
+    entries = fs.readdirSync(areaDir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  const projectDoc = path.join(root, "docs/ARCHITECTURE.md");
+  const projectText = isFile(projectDoc) ? fs.readFileSync(projectDoc, "utf8") : "";
+  for (const entry of entries.sort((left, right) => (left.name < right.name ? -1 : 1))) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) {
+      continue;
+    }
+    if (!projectText.includes("architecture/" + entry.name)) {
+      findings.push(finding("DD_AREA_DOC_UNLINKED", "docs/architecture/" + entry.name, 1,
+        "Area architecture doc is not linked from docs/ARCHITECTURE.md."));
+    }
+  }
+}
+
 function main(argv) {
   const args = parseArgs(argv);
   const root = repositoryRoot();
@@ -312,6 +335,7 @@ function main(argv) {
   checkArchitectureHistory(root, findings);
   checkTestingHistory(root, findings);
   checkGeneratedArchitectureFacts(root, findings);
+  checkAreaDocLinks(root, findings);
   findings.sort((left, right) =>
     left.path < right.path ? -1 : left.path > right.path ? 1
       : left.line !== right.line ? left.line - right.line

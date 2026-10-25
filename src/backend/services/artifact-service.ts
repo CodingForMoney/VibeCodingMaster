@@ -102,6 +102,8 @@ export interface SubmitArtifactInput {
 export interface ArtifactServiceDeps {
   workflowControlService?: Pick<WorkflowControlService, "submitProgress" | "assertRouteAuthorized" | "assertDocsArtifactAllowed">;
   getDurableDocAssignment?: (taskRepoRoot: string, role: RoleName) => Promise<DurableDocAssignmentState | undefined>;
+  // Checks a final synced or unchanged docs-sync report against the task commits.
+  checkDocsSync?: (taskRepoRoot: string, reportContent: string) => Promise<string[]>;
 }
 
 const ARTIFACT_PATH_KEYS: Array<[ArtifactKind, keyof HandoffPaths]> = [
@@ -351,6 +353,15 @@ export function createArtifactService(fs: FileSystemAdapter, deps: ArtifactServi
               handoffDir: input.handoffDir,
               taskSlug: input.taskSlug
             }, input.kind, input.role);
+          }
+        }
+        if (input.kind === "docs-sync-report" && input.mode === "final" && deps.checkDocsSync) {
+          const decision = readArtifactSectionValue(normalized, "Decision")?.trim().toLowerCase();
+          if (decision === "synced" || decision === "unchanged") {
+            const findings = await deps.checkDocsSync(input.repoRoot, normalized);
+            if (findings.length > 0) {
+              throw artifactRejected(input.kind, findings);
+            }
           }
         }
         if (input.kind === "workflow-progress") {

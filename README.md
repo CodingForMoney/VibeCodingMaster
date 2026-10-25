@@ -211,10 +211,11 @@ Typical flow:
 
 ```text
 Project Manager
-  -> Architect
+  -> Architect (plan, scaffold, and architecture docs)
   -> Coder
   -> Tester
-  -> Architect docs sync
+  -> Architect docs reconciliation
+  -> code-diff Gate Review (code and docs)
   -> Project Manager final acceptance
 ```
 

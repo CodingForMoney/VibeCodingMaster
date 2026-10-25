@@ -1,0 +1,269 @@
+#!/usr/bin/env node
+"use strict";
+// Check that a task's docs reconciliation covers every touched module.
+//
+// Usage:
+//   .ai/tools/check-docs-sync [--report <path> | --report-stdin] [--base <commit>] [--json]
+//
+// The check compares the task's commits (base..HEAD, excluding [VCM Harness]
+// commits) with .ai/generated/module-index.json and the docs-sync report:
+//   - every module touched by a code change appears in the Module Coverage table;
+//   - a module marked updated had its owning architecture doc changed in the task;
+//   - every listed reconciliation commit belongs to the task and changes only
+//     architecture docs, active plans, known issues, or generated context;
+//   - every document the plan's Docs Impact says it changed was changed.
+// The base defaults to the merge-base of HEAD with the base repository's HEAD.
+
+const childProcess = require("node:child_process");
+const fs = require("node:fs");
+const path = require("node:path");
+
+const HARNESS_COMMIT_PREFIX = "[VCM Harness] ";
+const REPORT_PATH = ".ai/vcm/handoffs/docs-sync-report.md";
+const PLAN_PATH = ".ai/vcm/handoffs/architecture-plan.md";
+const MODULE_INDEX_PATH = ".ai/generated/module-index.json";
+const PROJECT_DOC = "docs/ARCHITECTURE.md";
+const AREA_DOC_DIR = "docs/architecture/";
+const USAGE = "usage: check-docs-sync [-h] [--report REPORT | --report-stdin] [--base BASE] [--json]";
+
+function usageError(message) {
+  process.stderr.write(USAGE + "\ncheck-docs-sync: error: " + message + "\n");
+  process.exit(2);
+}
+
+function parseArgs(argv) {
+  const args = { report: undefined, reportStdin: false, base: undefined, json: false };
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === "-h" || argument === "--help") {
+      process.stdout.write(USAGE + "\n\nCheck that a task's docs reconciliation covers every touched module.\n");
+      process.exit(0);
+    } else if (argument === "--json") {
+      args.json = true;
+    } else if (argument === "--report-stdin") {
+      args.reportStdin = true;
+    } else if (argument === "--report" || argument === "--base") {
+      if (index + 1 >= argv.length) {
+        usageError("argument " + argument + ": expected one argument");
+      }
+      index += 1;
+      args[argument.slice(2)] = argv[index];
+    } else {
+      usageError("unrecognized arguments: " + argument);
+    }
+  }
+  return args;
+}
+
+function git(root, args) {
+  const result = childProcess.spawnSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+  return result.status === 0 ? result.stdout.trim() : "";
+}
+
+function repositoryRoot() {
+  return git(process.cwd(), ["rev-parse", "--show-toplevel"]) || process.cwd();
+}
+
+// The task branch forks from the base repository's checked-out branch, which
+// is the main worktree sharing this repository's git directory.
+function resolveBase(root, explicit) {
+  if (explicit) {
+    return git(root, ["rev-parse", "--verify", explicit + "^{commit}"]) || undefined;
+  }
+  const fromEnv = (process.env.VCM_BASE_COMMIT || "").trim();
+  if (fromEnv && git(root, ["rev-parse", "--verify", fromEnv + "^{commit}"])) {
+    return fromEnv;
+  }
+  const commonDir = git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+  const baseHead = commonDir ? git(root, ["--git-dir", commonDir, "rev-parse", "HEAD"]) : "";
+  const head = git(root, ["rev-parse", "HEAD"]);
+  if (baseHead && baseHead !== head) {
+    return git(root, ["merge-base", "HEAD", baseHead]) || undefined;
+  }
+  const upstream = git(root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]);
+  return upstream ? git(root, ["merge-base", "HEAD", upstream]) || undefined : undefined;
+}
+
+function taskCommits(root, base) {
+  const lines = git(root, ["log", "--format=%H%x09%s", base + "..HEAD"]).split("\n").filter(Boolean);
+  return lines
+    .map((line) => {
+      const separator = line.indexOf("\t");
+      return { sha: line.slice(0, separator), subject: line.slice(separator + 1) };
+    })
+    .filter((commit) => !commit.subject.startsWith(HARNESS_COMMIT_PREFIX))
+    .map((commit) => ({
+      ...commit,
+      files: git(root, ["show", "--format=", "--name-only", "--no-renames", commit.sha]).split("\n").filter(Boolean)
+    }));
+}
+
+function isArchitectureDoc(file) {
+  return file === PROJECT_DOC || file.startsWith(AREA_DOC_DIR) || path.posix.basename(file) === "ARCHITECTURE.md";
+}
+
+// Paths a docs reconciliation commit may change.
+function isReconciliationPath(file) {
+  if (file === "docs/TESTING.md") {
+    return false;
+  }
+  return isArchitectureDoc(file)
+    || file.startsWith("docs/plans/")
+    || file === "docs/known-issues.md"
+    || file.startsWith(".ai/generated/");
+}
+
+// Files that describe or derive from code rather than change it.
+function isDocumentationFile(file) {
+  return isArchitectureDoc(file) || file.startsWith("docs/") || file.startsWith(".ai/") || /\.md$/i.test(file);
+}
+
+function loadModules(root) {
+  const target = path.join(root, MODULE_INDEX_PATH);
+  if (!fs.existsSync(target)) {
+    return undefined;
+  }
+  const index = JSON.parse(fs.readFileSync(target, "utf8"));
+  return (index.layers || []).flatMap((layer) => layer.modules || []).map((module) => ({
+    name: module.name,
+    path: module.path || ".",
+    doc: module.path && module.path !== "." ? module.architectureDoc || module.path + "/ARCHITECTURE.md" : PROJECT_DOC
+  }));
+}
+
+function owningModule(modules, file) {
+  let best;
+  for (const module of modules) {
+    const prefix = module.path === "." ? "" : module.path + "/";
+    if ((prefix === "" || file.startsWith(prefix)) && (!best || prefix.length > best.prefix.length)) {
+      best = { module, prefix };
+    }
+  }
+  return best && best.module;
+}
+
+function sectionContent(content, heading) {
+  const match = new RegExp("^#{1,6}\\s+" + heading.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&") + "\\s*$", "im").exec(content);
+  if (!match) {
+    return undefined;
+  }
+  const after = content.slice(match.index + match[0].length);
+  const next = /\n#{1,6}\s+\S/.exec(after);
+  return (next ? after.slice(0, next.index) : after).replace(/<!--[\s\S]*?-->/g, "").trim();
+}
+
+function tableRows(section) {
+  const lines = (section || "").split(/\r?\n/).map((line) => line.trim()).filter((line) => line.startsWith("|"));
+  return lines.slice(2).map((line) => line.replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim().replace(/^`|`$/g, "")));
+}
+
+function finding(code, subject, message) {
+  return { code, subject, message };
+}
+
+function check(root, reportContent, base) {
+  const findings = [];
+  const modules = loadModules(root);
+  if (!modules) {
+    return [finding("DS_MODULE_INDEX_MISSING", MODULE_INDEX_PATH, "Run .ai/tools/generate-module-index so touched modules can be resolved.")];
+  }
+  const commits = taskCommits(root, base);
+  const changed = new Set(commits.flatMap((commit) => commit.files));
+
+  const touched = new Map();
+  for (const file of changed) {
+    if (isDocumentationFile(file)) {
+      continue;
+    }
+    const module = owningModule(modules, file);
+    if (module) {
+      touched.set(module.path, module);
+    }
+  }
+
+  const coverage = new Map();
+  for (const [moduleCell, , status, reason] of tableRows(sectionContent(reportContent, "Module Coverage"))) {
+    coverage.set(moduleCell, { status: (status || "").toLowerCase(), reason });
+  }
+  const docChanged = (module) => module.doc === PROJECT_DOC
+    ? [...changed].some((file) => file === PROJECT_DOC || file.startsWith(AREA_DOC_DIR))
+    : changed.has(module.doc);
+
+  for (const module of touched.values()) {
+    const row = coverage.get(module.name) || coverage.get(module.path);
+    if (!row) {
+      findings.push(finding("DS_MODULE_NOT_COVERED", module.path,
+        "Module " + module.name + " (" + module.path + ") changed in the task but is missing from Module Coverage; its owning doc is " + module.doc + "."));
+    } else if (row.status === "updated" && !docChanged(module)) {
+      findings.push(finding("DS_DOC_NOT_UPDATED", module.doc,
+        "Module Coverage marks " + module.name + " updated, but the task did not change " + module.doc + "."));
+    } else if (row.status === "unchanged" && !row.reason) {
+      findings.push(finding("DS_UNCHANGED_WITHOUT_REASON", module.path,
+        "Module Coverage marks " + module.name + " unchanged without the reason no owned fact changed."));
+    }
+  }
+
+  const commitLines = (sectionContent(reportContent, "Reconciliation Commits") || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const line of commitLines) {
+    if (line === "None.") {
+      continue;
+    }
+    const commit = commits.find((candidate) => candidate.sha.startsWith(line));
+    if (!commit) {
+      findings.push(finding("DS_UNKNOWN_COMMIT", line, "Reconciliation commit " + line + " is not one of the task's commits since " + base.slice(0, 12) + "."));
+      continue;
+    }
+    for (const file of commit.files.filter((candidate) => !isReconciliationPath(candidate))) {
+      findings.push(finding("DS_RECONCILIATION_NON_DOC", file,
+        "Reconciliation commit " + commit.sha.slice(0, 12) + " changes " + file + "; reconciliation may change only architecture docs, active plans, docs/known-issues.md, and .ai/generated/**."));
+    }
+  }
+
+  const planPath = path.join(root, PLAN_PATH);
+  if (fs.existsSync(planPath)) {
+    for (const [documentCell, change] of tableRows(sectionContent(fs.readFileSync(planPath, "utf8"), "Docs Impact"))) {
+      const document = documentCell.split(/\s+/)[0];
+      const planned = change && !/^(none|unchanged|no change)\b/i.test(change);
+      if (planned && /\.md$/i.test(document) && !changed.has(document)) {
+        findings.push(finding("DS_PLANNED_DOC_NOT_CHANGED", document,
+          "Docs Impact records a change to " + document + ", but the task did not change it."));
+      }
+    }
+  }
+  return findings;
+}
+
+function readReport(args, root) {
+  if (args.reportStdin) {
+    return fs.readFileSync(0, "utf8");
+  }
+  const target = path.resolve(root, args.report || REPORT_PATH);
+  if (!fs.existsSync(target)) {
+    usageError("docs-sync report not found: " + path.relative(root, target));
+  }
+  return fs.readFileSync(target, "utf8");
+}
+
+function main() {
+  const args = parseArgs(process.argv.slice(2));
+  const root = repositoryRoot();
+  const report = readReport(args, root);
+  const base = resolveBase(root, args.base);
+  if (!base) {
+    process.stderr.write("check-docs-sync: cannot determine the task base commit; pass --base <commit>.\n");
+    return 2;
+  }
+  const findings = check(root, report, base);
+  if (args.json) {
+    process.stdout.write(JSON.stringify({ base, findings }, null, 2) + "\n");
+  } else if (findings.length === 0) {
+    process.stdout.write("Docs sync check passed.\n");
+  } else {
+    for (const item of findings) {
+      process.stdout.write(item.code + " " + item.subject + ": " + item.message + "\n");
+    }
+  }
+  return findings.length === 0 ? 0 : 1;
+}
+
+process.exitCode = main();

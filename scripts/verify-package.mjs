@@ -9,6 +9,7 @@ const requiredFiles = [
   "scripts/claude-plugins/vcm-lsp-bridge/.claude-plugin/plugin.json",
   "scripts/claude-plugins/vcm-lsp-bridge/vcm-lsp-proxy.mjs",
   "scripts/harness-tools/check-durable-docs",
+  "scripts/harness-tools/check-docs-sync",
   "scripts/harness-tools/generate-module-index",
   "scripts/harness-tools/generate-public-surface",
   "scripts/harness-tools/run-long-check",

@@ -67,8 +67,9 @@ Check:
 - tester report records terminal `Test Result: pass|fail`, validation commands, results, and skipped checks with reasons; do not accept `Test Result: incomplete`
 - required Gate Reviews are approved, or skipped/overridden through a VCM-recorded user action
 - Gate Review enable state is confirmed authoritatively: do not infer that no Gate Reviews were required from an absent or empty `.ai/vcm/gate-reviews/index.json`. When Gate Review is enabled, a missing index or a required gate without a recorded decision means the gate was skipped — run the matching command from the `vcm-gate-review` skill, including the code source for `code-diff`, and do not accept until each required gate returns `approve`/`already_approved`, `disabled`/`not_required`, or a VCM-recorded user skip/override
-- docs-sync report records docs updated, docs intentionally left unchanged, or required follow-up when docs sync was required
-- when durable docs changed, docs-sync or tester evidence records a passing `.ai/tools/check-durable-docs` result and any cross-document inconsistency was resolved by the owning role
+- docs-sync report records the Module Coverage table, the reconciliation commits, and passing `.ai/tools/check-docs-sync` and `.ai/tools/check-durable-docs` results when docs reconciliation was required
+- the code-diff Gate approval covers the current HEAD commit, so every reconciliation or follow-up commit was reviewed; a commit made after the approval requires rerunning the code-diff Gate before acceptance
+- any cross-document inconsistency was resolved by the owning role
 - known issues are either resolved, promoted to durable docs by architect, or explicitly accepted by the user
 - temporary task state is ready to clean after durable facts are promoted
 
@@ -83,7 +84,7 @@ Choose exactly one:
 - needs-docs-sync
 - blocked-by-user-decision
 
-Do not accept when required role evidence is missing, required Gate Review evidence is missing, tester findings are unresolved, docs sync is missing for durable changes, the durable-doc audit failed or is missing after durable-doc changes, known-issues disposition is missing, or unexplained high-risk files remain.
+Do not accept when required role evidence is missing, required Gate Review evidence is missing, tester findings are unresolved, docs reconciliation is missing for durable changes, the code-diff approval does not cover the current HEAD, the durable-doc audit failed or is missing after durable-doc changes, known-issues disposition is missing, or unexplained high-risk files remain.
 
 ## Output
 

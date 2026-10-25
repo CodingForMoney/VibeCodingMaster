@@ -446,6 +446,10 @@ function validateArtifactFields(
         ));
       }
     }
+    if (decision === "synced" || decision === "unchanged") {
+      invalidFields.push(...validateModuleCoverage(readArtifactSectionContent(content, "Module Coverage")));
+      invalidFields.push(...validateReconciliationCommits(readArtifactSectionContent(content, "Reconciliation Commits")));
+    }
     if (decision === "blocked") {
       if (!owner || owner === "none") {
         invalidFields.push("Correction Owner must be architect, coder, or tester when Decision is blocked.");
@@ -582,6 +586,55 @@ function readInlineField(content: string, field: string): string | undefined {
 
 function isAllowedValue<T extends string>(value: string | undefined, allowed: readonly T[]): value is T {
   return value !== undefined && allowed.includes(value as T);
+}
+
+const MODULE_COVERAGE_HEADER = ["Module", "Owning Doc", "Status", "Reason"];
+
+function stripHtmlComments(value: string): string {
+  return value.replace(/<!--[\s\S]*?-->/g, "");
+}
+const MODULE_COVERAGE_STATUSES = ["updated", "unchanged"];
+
+function tableCells(line: string): string[] {
+  return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+}
+
+// Module Coverage is exactly None. or a Module | Owning Doc | Status | Reason
+// table whose rows are updated, or unchanged with a reason.
+function validateModuleCoverage(section: string | undefined): string[] {
+  const lines = stripHtmlComments(section ?? "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length === 1 && lines[0] === STRICT_NONE_VALUE) {
+    return [];
+  }
+  const tableLines = lines.filter((line) => line.startsWith("|"));
+  if (tableLines.length !== lines.length || tableLines.length < 2
+    || tableCells(tableLines[0]!).join("|") !== MODULE_COVERAGE_HEADER.join("|")) {
+    return [`Module Coverage must be exactly ${STRICT_NONE_VALUE} or a | ${MODULE_COVERAGE_HEADER.join(" | ")} | table with one row per touched module.`];
+  }
+  const rows = tableLines.slice(2).map(tableCells);
+  if (rows.length === 0) {
+    return [`Module Coverage table has no rows; write exactly ${STRICT_NONE_VALUE} when the task touched no module.`];
+  }
+  const errors: string[] = [];
+  for (const row of rows) {
+    const [module, doc, status, reason] = row;
+    if (!module || !doc || !MODULE_COVERAGE_STATUSES.includes((status ?? "").toLowerCase())) {
+      errors.push(`Module Coverage row "${row.join(" | ")}" needs a module, an owning doc, and Status updated or unchanged.`);
+    } else if (status!.toLowerCase() === "unchanged" && !reason) {
+      errors.push(`Module Coverage row for ${module} is unchanged and needs the reason no owned fact changed.`);
+    }
+  }
+  return errors;
+}
+
+function validateReconciliationCommits(section: string | undefined): string[] {
+  const lines = stripHtmlComments(section ?? "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length === 1 && lines[0] === STRICT_NONE_VALUE) {
+    return [];
+  }
+  return lines.length > 0 && lines.every((line) => DOCS_UPDATE_COMMIT_PATTERN.test(line))
+    ? []
+    : [`Reconciliation Commits must be exactly ${STRICT_NONE_VALUE} or one bare lowercase commit hash (7-40 characters) per line.`];
 }
 
 function isExactNone(value: string | undefined): boolean {

@@ -164,10 +164,9 @@ describe("backend E2E with mock Claude Code", () => {
       ["pass|fail|incomplete", "pass"], ["L3 Required: yes|no", "L3 Required: no"],
       ["none|repair-required|repaired|production-change-required", "none"]
     ]));
-    await writeWorkflowGateIndex(task.worktreePath, {
-      validation: "approve", codeDiff: "approve",
-      codeDiffSource: flow === "code-change" ? "coder" : flow === "architect-debug" ? "architect-debug" : "architect-diagnosis"
-    }, "2026-09-09T00:01:00.000Z");
+    const codeDiffSource = flow === "code-change" ? "coder" : flow === "architect-debug" ? "architect-debug" : "architect-diagnosis";
+    // Docs reconciliation follows the validation-adequacy Gate and precedes code-diff.
+    await writeWorkflowGateIndex(task.worktreePath, { validation: "approve" }, "2026-09-09T00:01:00.000Z");
     await advanceWorkflow(service, context, "architect", undefined, "synchronize delivery documentation");
     const architect = await startRole(env.app, task.taskSlug, "architect");
     const pm = await startRole(env.app, task.taskSlug, "project-manager");
@@ -206,6 +205,9 @@ describe("backend E2E with mock Claude Code", () => {
     env.mockRuntime.write(architect.id, "Synchronize final delivery documentation");
     await env.mockRuntime.waitForIdle();
     expect(reportSubmitted).toBe(true);
+    await writeWorkflowGateIndex(task.worktreePath, {
+      validation: "approve", codeDiff: "approve", codeDiffSource
+    }, "2026-09-09T00:02:00.000Z");
     await write("final-acceptance.md", completeWorkflowArtifact(renderFinalAcceptanceTemplate(task.taskSlug), [
       ["accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|needs-docs-sync|blocked-by-user-decision", "accepted"]
     ]));
@@ -1182,6 +1184,8 @@ async function advanceWorkflow(
 
 function completeWorkflowArtifact(template: string, replacements: Array<[string, string]>): string {
   return replacements.reduce((content, [from, to]) => content.replace(from, to), template)
+    .replace(/## Module Coverage\n[\s\S]*?\n(?=## )/, "## Module Coverage\n\nNone.\n\n")
+    .replace(/(## Reconciliation Commits\n\n(?:<!--[^\n]*-->\n)?)TBD/, "$1None.")
     .replaceAll("TBD", "Verified E2E workflow evidence.");
 }
 

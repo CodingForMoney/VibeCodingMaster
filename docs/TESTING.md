@@ -230,8 +230,14 @@ tests/
 
 Documentation-artifact regressions cover Code-Change, Architect Debug, and
 code-producing Architecture Diagnosis delivery: submitting `docs-update-report`
-during final docs sync is rejected without overwriting the previous file, then a
-fresh `docs-sync-report` allows completion. Service tests also cover branch
+during docs reconciliation is rejected without overwriting the previous file,
+then a fresh `docs-sync-report` and a code-diff approval recorded after it allow
+completion. Workflow Control tests cover reconciliation before the code-diff
+Gate, completion blocked until code-diff reviews the reconciliation, and routing
+of docs-only, test-only, mixed, and implementation code-diff findings.
+`check-docs-sync` tests drive a real task worktree to cover module coverage,
+updated-doc verification, non-doc reconciliation commits, unknown commits,
+planned doc changes, and backend rejection of a failing report. Service tests also cover branch
 resumption, stale-report diagnostics, draft submissions, Docs-Only owners, and
 completed workflows. The memory-to-durable-doc E2E submits its assigned report
 through the Artifact API with Workflow Control enabled.

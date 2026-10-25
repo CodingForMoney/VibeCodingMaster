@@ -144,7 +144,8 @@ const SOURCE_ARTIFACTS: Record<GateReviewGate, string[]> = {
   ],
   "code-diff": [
     ".ai/vcm/handoffs/test-report.md",
-    ".ai/vcm/gate-reviews/validation-adequacy-review.md"
+    ".ai/vcm/gate-reviews/validation-adequacy-review.md",
+    ".ai/vcm/handoffs/docs-sync-report.md"
   ]
 };
 
@@ -1643,7 +1644,7 @@ async function computeInputHash(
   }
 
   if (gate === "validation-adequacy") {
-    const evidencePathspec = ["--", ".", ":(exclude).ai/vcm/**", ":(exclude)docs/**"];
+    const evidencePathspec = ["--", ".", ":(exclude).ai/vcm/**", ":(exclude)docs/**", ":(exclude,glob)**/ARCHITECTURE.md", ":(exclude).ai/generated/**"];
     digest.update("trackedEvidence");
     digest.update(await commandStdout(deps.runner, taskRepoRoot, ["ls-files", "-s", ...evidencePathspec]));
     digest.update("workingEvidence");

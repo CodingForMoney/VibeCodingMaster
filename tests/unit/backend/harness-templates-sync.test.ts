@@ -22,6 +22,7 @@ const PROJECT_OWNED_GENERATOR_PATHS = [
 
 const EXACT_EXAMPLE_HARNESS_PATHS = [
   ".ai/tools/check-durable-docs",
+  ".ai/tools/check-docs-sync",
   ".ai/tools/package.json",
   ".ai/tools/generate-module-index",
   ".ai/tools/generate-public-surface",

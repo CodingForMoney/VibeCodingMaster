@@ -202,9 +202,22 @@ preserve execution history.
   entries are rewritten around the remaining gap.
 - `docs/plans/**` contains only active or planned work. Completed or superseded
   plans leave that collection; Git and PR history retain their previous form.
-- Architect Docs Sync reconciles changed facts across architecture docs, active
-  plans, testing docs, known issues, code, and generated context. The owning
-  role fixes contradictions before the task can be accepted.
+- Architect writes architecture doc changes during planning, for every doc
+  that owns a fact the plan changes: the project doc owns the module map,
+  dependency direction, cross-module relationships, major runtime flows,
+  cross-cutting mechanisms, project-wide constraints, and project-level design
+  decisions; module docs own each module's design; a single-package repository
+  keeps detailed design in `docs/ARCHITECTURE.md` or linked
+  `docs/architecture/<area>.md` docs. Each doc keeps current Design Decisions
+  with rationale and rejected alternatives.
+- Architect docs reconciliation, after validation and before the code-diff
+  Gate, corrects the docs against the validated code and reconciles changed
+  facts across architecture docs, active plans, testing docs, known issues,
+  code, and generated context. The owning role fixes contradictions before the
+  task can be accepted.
+- `.ai/tools/check-docs-sync` mechanically checks reconciliation coverage: every
+  touched module covered, updated docs actually changed, reconciliation commits
+  limited to documentation, and planned doc changes present.
 - `.ai/tools/check-durable-docs` mechanically checks high-confidence violations
   after bootstrap and durable-doc updates. It supplements semantic Docs Sync;
   it does not attempt to infer architecture correctness.
@@ -356,8 +369,8 @@ project-manager
   -> coder
   -> tester
   -> validation-adequacy Gate Review
-  -> code-diff Gate Review
-  -> architect docs sync
+  -> architect docs reconciliation
+  -> code-diff Gate Review (code and reconciled docs)
   -> project-manager final acceptance
 ```
 
@@ -365,11 +378,12 @@ Additional routes:
 
 - Architect Debug Flow or a code-producing Architecture Diagnosis Flow uses a
   complete code-delivery flow:
-  `project-manager -> architect mode -> tester -> validation-adequacy Gate Review -> code-diff Gate Review -> architect docs sync -> project-manager final acceptance`
+  `project-manager -> architect mode -> tester -> validation-adequacy Gate Review -> architect docs reconciliation -> code-diff Gate Review -> project-manager final acceptance`
 - Architect Debug Branch or Architecture Diagnosis Branch suspends the parent
   flow, records its resume point, runs the mode through tester,
   validation-adequacy Gate Review, and code-diff Gate Review, then returns to
-  that resume point without branch-level final acceptance.
+  that resume point without branch-level docs reconciliation or final
+  acceptance; the parent flow reconciles once.
 - An analysis-only Architecture Diagnosis Flow completes from its diagnosis
   result without final acceptance.
 - Docs-Only Flow:
@@ -598,7 +612,8 @@ Docs-Only Flow uses the shared `docs-update-report.md`, which Architect, Coder,
 or Tester may submit. The code-producing-flow `docs-sync-report.md` remains
 Architect-owned and is not reused for Docs-Only completion. A blocked docs-sync
 report names one correction owner and concrete evidence. PM routes that owner,
-then repeats affected validation and Gates before Architect reruns docs sync.
+then repeats affected validation and Gates before Architect reruns docs
+reconciliation.
 
 Harness Engineer is not a workflow role. It writes the assigned Task Harness
 Retrospective Result Path directly; its Stop Hook reads the report and checks
@@ -649,8 +664,8 @@ Input policy:
   not only the original Architect route command.
 - Code-diff searches for repeated file-local overrides when a changed hunk adds
   one. A third occurrence without the Architect-owned upstream disposition is
-  `request_changes`; a documented post-validation docs-sync commitment is valid
-  when the disposition itself is already explicit.
+  `request_changes` unless the owning documentation correction is present in
+  the reviewed commits.
 - Architecture-plan review independently runs a backward-impact pass over every
   plan-cited or scaffold-touched existing site. It rejects invalidated
   assumptions without architecture correction and incomplete disposition of a
