@@ -158,11 +158,11 @@ h2 {
   transform: translateX(-2px) rotate(-45deg);
 }
 
+/* Grows with its content so .app-sidebar scrolls instead of squeezing sections. */
 .sidebar-content {
   display: flex;
-  flex: 1;
+  flex: 1 0 auto;
   min-width: 0;
-  min-height: 0;
 }
 
 .project-dashboard {
@@ -171,6 +171,10 @@ h2 {
   flex-direction: column;
   width: 100%;
   min-height: 100%;
+}
+
+.project-dashboard > * {
+  flex-shrink: 0;
 }
 
 .app-shell.is-sidebar-collapsed .sidebar-content {
