@@ -33,7 +33,8 @@ export function createClaudeAdapter(runner: CommandRunner): ClaudeAdapter {
       return result.exitCode === 0;
     },
     async getVersion(command = "claude") {
-      const result = await runner.run(command, ["--version"]);
+      // Bounded so a stalled CLI cannot leave a probe process behind.
+      const result = await runner.run(command, ["--version"], { timeoutMs: 10_000 });
       if (result.exitCode !== 0) {
         throw new VcmError({
           code: "CLAUDE_UNAVAILABLE",

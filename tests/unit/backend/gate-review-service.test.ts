@@ -212,6 +212,13 @@ describe("gate-review-service", () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect((await service.getState(tmpRepo, "demo-task")).gates["architecture-plan"].status).toBe("running");
 
+    // A turn the user starts in the Reviewer terminal mid-review does not count.
+    service.recordReviewerPromptSubmitted("demo-task", writes.find((data) => data.includes(requestId)));
+    service.recordReviewerPromptSubmitted("demo-task", "What are you checking right now?");
+    service.recordReviewerTurnEnded("demo-task", "turn-end");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect((await service.getState(tmpRepo, "demo-task")).gates["architecture-plan"].status).toBe("running");
+
     service.recordReviewerPromptSubmitted("demo-task", writes.find((data) => data.includes(requestId)));
     service.recordReviewerTurnEnded("demo-task", "turn-end");
     await waitFor(async () => {

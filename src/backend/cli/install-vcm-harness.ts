@@ -57,6 +57,7 @@ import {
   renderRestartArchitectSkillRules
 } from "../templates/harness/restart-architect-skill.js";
 import { renderResolveDurableDocAssignmentTool } from "../templates/harness/resolve-durable-doc-assignment.js";
+import { PROJECT_OWNED_SHIPPED_SHA256 } from "../templates/harness/project-owned-history.js";
 import { readVcmPackageVersion } from "../app-version.js";
 import { DEFAULT_ARCHITECT_WORKER_SETTINGS, normalizeArchitectWorkerSettings } from "../../shared/types/app-settings.js";
 import { ARCHITECT_WORKER_AGENT_TYPES, applyArchitectWorkerSetting } from "../templates/harness/architect-worker-frontmatter.js";
@@ -313,40 +314,32 @@ const DURABLE_DOC_TEMPLATES = [
   },
 ];
 
-// upgradeableSha256 lists earlier VCM-shipped versions of a project-owned file;
-// an unmodified copy of one of them is upgraded instead of kept.
+// An installed copy that still matches a VCM-shipped version is upgraded
+// instead of kept as project-modified.
 const PROJECT_OWNED_FILES = [
   {
     path: ".ai/tools/generate-module-index",
     category: "generated-context-tool",
     mode: 0o755,
-    templatePath: "scripts/harness-tools/generate-module-index",
-    upgradeableSha256: [
-      "432fc89448bd26c9504b4bfee93ae2306d0cf01e8f00a946189c3c8148f615f7",
-      "96f5763d107e6d95cb605bb5b949e4c40b0715ba3e5bacd9554dfb7f98c332f3",
-      "06b9fcc6da0635f6a53a72f68e0ec1934b1bc4037df386e93d8190004c21b1bb",
-      "711753b3e4c9afa3198e0ae150d8b686dcb0b1110e4208c60686dcac249c5b6e"
-    ]
+    templatePath: "scripts/harness-tools/generate-module-index"
   },
   {
     path: ".ai/tools/generate-public-surface",
     category: "generated-context-tool",
     mode: 0o755,
-    templatePath: "scripts/harness-tools/generate-public-surface",
-    upgradeableSha256: [
-      "08eb2f5a8df6e5db0bc7385f23f19a572ff586124623a985588842a77ce6ffa3",
-      "a4b177f780335962cfccab8de3254456351f9a97ff308d238b5725c7dcb5105e",
-      "f8d3a49b0b055302bc9f780b869fe9e8e04b67decdce79b92d0b62b1d911a15e"
-    ]
+    templatePath: "scripts/harness-tools/generate-public-surface"
   }
 ];
 
 const WHOLE_FILES = [
   {
+    // Makes the extensionless tools load as CommonJS inside ESM projects. A
+    // project's own package.json here is kept rather than replaced.
     path: ".ai/tools/package.json",
     category: "runtime-tool",
     mode: 0o644,
-    templatePath: "scripts/harness-tools/package.json"
+    templatePath: "scripts/harness-tools/package.json",
+    preserveExisting: true
   },
   {
     path: ".ai/tools/check-durable-docs",
@@ -1209,6 +1202,15 @@ async function ensureDirectory({ projectRoot, relativePath, dryRun, operations }
 
 async function installWholeFile({ projectRoot, file, dryRun, operations }) {
   const content = await wholeFileContent(file);
+  if (file.preserveExisting) {
+    const currentContent = await readOptionalText(resolveInside(projectRoot, file.path));
+    if (currentContent !== undefined && currentContent !== ensureTrailingNewline(content)) {
+      operations.push(skip(file.path, isCommonJsPackage(currentContent)
+        ? "exists; project-owned"
+        : "exists; project-owned, but harness tools need \"type\": \"commonjs\" here"));
+      return;
+    }
+  }
   await writeIfChanged({
     targetPath: resolveInside(projectRoot, file.path),
     relativePath: file.path,
@@ -1224,7 +1226,7 @@ async function installProjectOwnedFile({ projectRoot, file, dryRun, operations }
   const targetPath = resolveInside(projectRoot, file.path);
   const currentContent = await readOptionalText(targetPath);
   const upgradeable = currentContent !== undefined
-    && (file.upgradeableSha256 ?? []).includes(createHash("sha256").update(currentContent).digest("hex"));
+    && (PROJECT_OWNED_SHIPPED_SHA256[file.path] ?? []).includes(createHash("sha256").update(currentContent).digest("hex"));
   if (currentContent !== undefined && !upgradeable) {
     operations.push(skip(file.path, "exists; project-owned"));
     return;
@@ -1287,6 +1289,15 @@ async function removeLegacyCodexHarnessPaths({ projectRoot, dryRun, operations }
 
     await fs.rm(targetPath, { recursive: true, force: true });
     operations.push(done(relativePath, "deleted legacy Codex harness path"));
+  }
+}
+
+function isCommonJsPackage(content) {
+  try {
+    const parsed = JSON.parse(content);
+    return parsed?.type === undefined || parsed.type === "commonjs";
+  } catch {
+    return false;
   }
 }
 

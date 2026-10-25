@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
+import { vi } from "vitest";
 import { createServer, type ServerDeps } from "../../../../src/backend/server.js";
 import { createNodeFileSystemAdapter } from "../../../../src/backend/adapters/filesystem.js";
 import { createCommandRunner } from "../../../../src/backend/adapters/command-runner.js";
@@ -57,6 +58,10 @@ import {
 } from "../../../../src/shared/types/session.js";
 import { MockClaudeRuntime } from "./mock-claude-runtime.js";
 import { MockGatewayChannel } from "./mock-gateway-channel.js";
+
+// Backend E2E journeys drive the full server with mock Claude sessions and fixed
+// dispatch delays; the longest take about 30s on a loaded machine.
+vi.setConfig({ testTimeout: 60_000 });
 
 export interface MockClaudeE2eApp {
   app: FastifyInstance;

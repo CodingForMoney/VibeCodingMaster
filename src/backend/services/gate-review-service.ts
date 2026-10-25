@@ -120,8 +120,9 @@ interface ActiveGateRun {
   controller: AbortController;
   taskSlug: string;
   requestId: string;
-  // Set once the Reviewer's UserPromptSubmit carries this request's prompt.
-  promptAccepted: boolean;
+  // True while the Reviewer's latest accepted prompt is this request's prompt;
+  // any other prompt (a user question, a retry) clears it.
+  gateTurnActive: boolean;
   // Set when the Reviewer can no longer write the report for this request.
   reviewerEnded?: string;
 }
@@ -662,7 +663,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       return;
     }
     const controller = new AbortController();
-    const run: ActiveGateRun = { controller, taskSlug: context.taskSlug, requestId, promptAccepted: false };
+    const run: ActiveGateRun = { controller, taskSlug: context.taskSlug, requestId, gateTurnActive: false };
     activeRuns.set(runKey, run);
     try {
       const timestamp = now();
@@ -1197,18 +1198,17 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     },
     recordReviewerPromptSubmitted(taskSlug, prompt) {
       for (const run of activeRunsForTask(taskSlug)) {
-        if (prompt?.includes(run.requestId)) {
-          run.promptAccepted = true;
-        }
+        run.gateTurnActive = Boolean(prompt?.includes(run.requestId));
       }
     },
     recordReviewerTurnEnded(taskSlug, reason) {
       for (const run of activeRunsForTask(taskSlug)) {
-        // A turn end only counts once the Reviewer accepted this request's prompt,
-        // so a late Stop from an earlier turn cannot fail a newer request.
+        // Only the end of the turn that ran this request's prompt counts: a late
+        // Stop from an earlier turn, or a turn the user started in the Reviewer
+        // terminal, must not fail the review.
         if (reason === "process-exit") {
           run.reviewerEnded = "Reviewer process exited before completing the review.";
-        } else if (run.promptAccepted) {
+        } else if (run.gateTurnActive) {
           run.reviewerEnded = "Reviewer ended its turn without submitting the report.";
         }
       }

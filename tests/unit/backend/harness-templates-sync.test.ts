@@ -1,4 +1,5 @@
 import { execFile, execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -8,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createNodeFileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import { createHarnessService } from "../../../src/backend/services/harness-service.js";
 import { renderLegacyProjectCodingStandardsTemplate } from "../../../src/backend/templates/harness/project-coding-standards.js";
+import { PROJECT_OWNED_SHIPPED_SHA256 } from "../../../src/backend/templates/harness/project-owned-history.js";
 
 const execFileAsync = promisify(execFile);
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -217,6 +219,62 @@ describe("harness templates stay in sync with the script installer", () => {
       );
       expect(updatedManifest.entries.find((entry) => entry.path === relativePath)?.uninstall).toBeUndefined();
     }
+  }, 30_000);
+
+  it("lists every shipped generator version so later releases can upgrade it", async () => {
+    for (const relativePath of PROJECT_OWNED_GENERATOR_PATHS) {
+      const template = await readFile(path.join(appRoot, "scripts/harness-tools", path.basename(relativePath)), "utf8");
+      expect(
+        PROJECT_OWNED_SHIPPED_SHA256[relativePath],
+        `${relativePath}: append the current template hash to project-owned-history.ts`
+      ).toContain(createHash("sha256").update(template).digest("hex"));
+    }
+  });
+
+  it("upgrades an unmodified generator from an earlier release", async () => {
+    // The first shipped version is read from git history; skip when it is unavailable.
+    const relativePath = PROJECT_OWNED_GENERATOR_PATHS[0];
+    const templatePath = `scripts/harness-tools/${path.basename(relativePath)}`;
+    let earlier: string;
+    try {
+      const commits = execFileSync("git", ["log", "--format=%H", "--", templatePath], { cwd: appRoot, encoding: "utf8" })
+        .trim()
+        .split("\n");
+      earlier = execFileSync("git", ["show", `${commits[commits.length - 1]}:${templatePath}`], {
+        cwd: appRoot,
+        encoding: "utf8"
+      });
+    } catch {
+      return;
+    }
+    if (!earlier.endsWith("\n")) {
+      earlier += "\n";
+    }
+    expect(PROJECT_OWNED_SHIPPED_SHA256[relativePath]).toContain(createHash("sha256").update(earlier).digest("hex"));
+
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-generator-upgrade-"));
+    await execFileAsync(process.execPath, [installerPath, tmpRepo]);
+    await writeFile(path.join(tmpRepo, relativePath), earlier, "utf8");
+
+    const { stdout } = await execFileAsync(process.execPath, [installerPath, tmpRepo]);
+
+    expect(stdout).toContain(`DONE ${relativePath} - upgrade unmodified project-owned VCM file`);
+    expect(await readFile(path.join(tmpRepo, relativePath), "utf8")).toBe(
+      await readFile(path.join(appRoot, templatePath), "utf8")
+    );
+  }, 30_000);
+
+  it("keeps a project's own .ai/tools/package.json", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-tools-package-"));
+    const packagePath = path.join(tmpRepo, ".ai/tools/package.json");
+    await mkdir(path.dirname(packagePath), { recursive: true });
+    const projectPackage = "{\"type\":\"module\",\"dependencies\":{\"zx\":\"8.0.0\"}}\n";
+    await writeFile(packagePath, projectPackage, "utf8");
+
+    const { stdout } = await execFileAsync(process.execPath, [installerPath, tmpRepo]);
+
+    expect(await readFile(packagePath, "utf8")).toBe(projectPackage);
+    expect(stdout).toContain("SKIP .ai/tools/package.json - exists; project-owned, but harness tools need \"type\": \"commonjs\" here");
   }, 30_000);
 
   it("migrates legacy managed documents without losing project content", async () => {

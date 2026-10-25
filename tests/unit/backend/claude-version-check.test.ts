@@ -41,13 +41,14 @@ describe("claude-version-check", () => {
     await expect(check.getWarning("claude")).resolves.toContain("could not be parsed");
   });
 
-  it("caches the probe until it expires or a refresh is requested", async () => {
+  it("caches the probe and refreshes a stale result in the background", async () => {
     let probes = 0;
     let clock = 0;
+    let version = "2.1.400 (Claude Code)";
     const check = createClaudeVersionCheck({
       async getVersion() {
         probes += 1;
-        return "2.1.400 (Claude Code)";
+        return version;
       }
     }, () => clock);
 
@@ -56,9 +57,52 @@ describe("claude-version-check", () => {
     expect(probes).toBe(1);
     await check.getWarning("claude", { refresh: true });
     expect(probes).toBe(2);
+
     clock += 10 * 60 * 1000;
-    await check.getWarning("claude");
+    version = "2.1.1 (Claude Code)";
+    // A stale entry answers immediately with the cached result while a new probe runs.
+    await expect(check.getWarning("claude")).resolves.toBeUndefined();
     expect(probes).toBe(3);
+    await new Promise((resolve) => setImmediate(resolve));
+    await expect(check.getWarning("claude")).resolves.toContain("Claude Code 2.1.1 is older");
+    expect(probes).toBe(3);
+  });
+
+  it("shares one probe between concurrent callers", async () => {
+    let probes = 0;
+    let release: (value: string) => void = () => undefined;
+    const check = createClaudeVersionCheck({
+      getVersion() {
+        probes += 1;
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      }
+    });
+
+    const pending = [check.getWarning("claude"), check.getWarning("claude"), check.getWarning("claude")];
+    release("2.1.400 (Claude Code)");
+
+    await expect(Promise.all(pending)).resolves.toEqual([undefined, undefined, undefined]);
+    expect(probes).toBe(1);
+  });
+
+  it("reports a probe that does not answer in time and retries failures sooner", async () => {
+    let clock = 0;
+    let respond = false;
+    const check = createClaudeVersionCheck({
+      getVersion() {
+        return respond ? Promise.resolve("2.1.400 (Claude Code)") : new Promise(() => undefined);
+      }
+    }, () => clock, 20);
+
+    await expect(check.getWarning("claude")).resolves.toContain("did not respond within 20ms");
+
+    respond = true;
+    clock += 30 * 1000;
+    await expect(check.getWarning("claude")).resolves.toContain("did not respond");
+    await new Promise((resolve) => setImmediate(resolve));
+    await expect(check.getWarning("claude")).resolves.toBeUndefined();
   });
 
   it("parses the semantic version from Claude Code output", () => {

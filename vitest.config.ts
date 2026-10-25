@@ -11,8 +11,8 @@ export default defineConfig({
       "tests/integration/runtime/**/*.test.ts",
       "tests/e2e/backend/**/*.test.ts"
     ],
-    // Backend E2E journeys drive the full server with mock Claude sessions and
-    // fixed dispatch delays; under a full parallel run they exceed the 5s default.
-    testTimeout: 30_000
+    // Many unit suites spawn git and node subprocesses, which exceed the 5s
+    // default on a loaded machine. Backend E2E raises its own limit further.
+    testTimeout: 15_000
   }
 });
