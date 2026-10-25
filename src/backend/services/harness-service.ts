@@ -41,6 +41,7 @@ import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import { renderArchitectHarnessRules } from "../templates/harness/architect-agent.js";
 import {
   CODE_ROLE_DISALLOWED_TOOLS,
+  EVIDENCE_WORKER_DISALLOWED_TOOLS,
   REVIEWER_DISALLOWED_TOOLS
 } from "../role-tool-policy.js";
 import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
@@ -468,8 +469,9 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     frontmatter: renderAgentFrontmatter(
       "vcm-architect-evidence-worker",
       "Foreground Architect worker for bounded project evidence collection.",
-      { tools: "Read, Grep, Glob, Write" }
+      { disallowedTools: EVIDENCE_WORKER_DISALLOWED_TOOLS.join(", ") }
     ),
+    requiredDisallowedTools: EVIDENCE_WORKER_DISALLOWED_TOOLS,
     architectWorkerType: "evidence",
     renderRules: renderArchitectEvidenceWorkerHarnessRules
   },

@@ -124,7 +124,7 @@ describe("harness templates stay in sync with the script installer", () => {
 
     const evidence = await readFile(path.join(tmpRepo, ".claude/agents/vcm-architect-evidence-worker.md"), "utf8");
     const scaffold = await readFile(path.join(tmpRepo, ".claude/agents/vcm-architect-scaffold-worker.md"), "utf8");
-    expect(evidence).toContain("tools: Read, Grep, Glob, Write\nmodel: fable\neffort: xhigh\n---");
+    expect(evidence).toContain("disallowedTools: Agent, Bash, Edit, NotebookEdit, WebFetch, WebSearch\nmodel: fable\neffort: xhigh\n---");
     expect(scaffold).toContain("model: inherit\n---");
     expect(scaffold).not.toContain("effort:");
 

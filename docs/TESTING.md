@@ -263,7 +263,10 @@ services with controlled runtime doubles:
   show, and ancestor queries, command-scoped repository trust, persistent errors,
   and expected negative results that must not hide execution failures. Architect
   launch regressions cover LSP notices on start/resume, repaired-server detection
-  on restart, and preservation of the caller's system context.
+  on restart, and preservation of the caller's system context. LSP proxy
+  regressions drive a fake language server through `vcm-lsp-proxy.mjs` to cover
+  holding queries during indexing, the explicit not-ready error, cancellation,
+  and progress handling for clients that do not request it.
 - Gate Review cancellation, Reviewer restart, exact request ownership, and
   protection against cancelled-request reports overwriting replacement state.
 - Tester `incomplete` report validation and backend refusal to start

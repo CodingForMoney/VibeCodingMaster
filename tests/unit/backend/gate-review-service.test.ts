@@ -1902,6 +1902,7 @@ function createRuntime(
             "- Code Reality: plan was compared with current code",
             "- Invalidated Assumptions: touched assumptions were checked",
             "- Existing-Class Completeness: related class members were reconstructed",
+            "- Relationship Evidence: decision-bearing relationships cite LSP evidence and were re-queried",
             "- Ownership: state ownership was checked",
             "- Data Flow: data flow was traced",
             "- Lifecycle: completion and failure were checked",

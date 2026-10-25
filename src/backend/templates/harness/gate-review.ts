@@ -40,6 +40,15 @@ implementations, callers, tests, and changed code before deciding the gate. Text
 matches locate evidence; they do not establish behavior or relationship correctness
 without inspection of the corresponding code.
 
+Establish definitions, references, callers, callees, and implementations with
+LSP when a language server is registered for the language. LSP results are
+symbol-specific: query an accessor, backing field, trait declaration,
+implementation, wrapper, and alias separately. An LSP query that fails because
+the server is still indexing returned no result; retry it, and if it still fails,
+record the relationship as not re-verified instead of treating it as empty or
+verified. When no server is registered for a language, say so in the report and
+verify relationships by reading the complete candidate code.
+
 Every Gate Review is a complete review of the current gate inputs. Review all
 required evidence and rerun every required mechanical check before deciding.
 Do not carry forward prior conclusions, closed checks, or partial verification.
@@ -151,6 +160,22 @@ prove the class complete. If Architect used bounded source fallback, verify the
 evidence records the correct prior LSP operation and its missing relationship,
 limits candidate search to the identified owning file or module, and
 semantically verifies every candidate; text matches alone are not evidence.
+
+Verify relationship evidence for the plan (record it under Relationship Evidence):
+
+- Every definition, reference, caller, callee, or implementation relationship
+  the design depends on must cite its source in \`architecture-evidence.md\` or
+  the plan: an LSP operation, runtime evidence, verified bounded source fallback,
+  an external boundary, a generated boundary, or an explicit unresolved status.
+  A decision-bearing relationship with no source, or supported only by text
+  matches, is \`request_changes\`.
+- Re-run the LSP query for each decision-bearing relationship (the callers of a
+  changed surface, the implementations of a changed trait or interface, the
+  producers and consumers of changed data) and compare it with the recorded
+  result. A missing caller, implementation, or consumer is \`request_changes\`.
+- Record each relationship checked, its recorded source, and your re-query
+  result. A relationship that LSP could not re-verify is listed as such; it does
+  not count as verified.
 
 Run a backward-impact pass over the plan:
 
@@ -298,7 +323,9 @@ Before deciding:
   surface, state, lifecycle, event, command, persisted artifact, or public
   contract changes, read its project-owned callers, consumers, readers,
   writers, and adjacent completion, failure, cancellation, retry, recovery, and
-  cleanup paths.
+  cleanup paths. Find the callers and implementations of every changed callable
+  or type with LSP references and implementations, not text search, and record
+  under Callers And Public Surface any that LSP could not resolve.
 - Keep this reading bounded to behavior affected by the named commits. Do
   not expand review to unrelated code, the whole task, whole branch, or PR.
 - Derive applicable boundary and failure cases from the actual changed behavior.

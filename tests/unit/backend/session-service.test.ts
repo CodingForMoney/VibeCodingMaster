@@ -272,7 +272,9 @@ describe("createSessionService", () => {
     expect(started.transcriptPath).toBeUndefined();
     expect(runtimeInputs[0]?.command).toBe("claude");
     expect(runtimeInputs[0]?.cwd).toBe(TASK_WORKTREE);
+    // Reviewer verifies relationship claims, so it launches with the LSP plugin.
     expect(runtimeInputs[0]?.args).toEqual([
+      ...LSP_PLUGIN_ARGS,
       "--agent",
       "reviewer",
       "--model",
@@ -326,6 +328,7 @@ describe("createSessionService", () => {
     expect(nextTask.taskSlug).toBe("another-task");
     expect(secondRuntimeInputs[0]?.cwd).toBe("/repo/.claude/worktrees/another-task");
     expect(secondRuntimeInputs[0]?.args).toEqual([
+      ...LSP_PLUGIN_ARGS,
       "--agent",
       "reviewer",
       "--model",

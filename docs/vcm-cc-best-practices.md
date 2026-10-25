@@ -785,8 +785,10 @@ manifest, module, or public API changes. Do not hand-edit them as durable truth.
 
 For Architect code reading, generated context locates the boundary; it does not
 replace semantic navigation or source inspection. VCM loads its bundled LSP
-bridge only for Architect, and the project runtime must provide the matching
-language-server executable. Launches register only runnable project servers and
+bridge for Architect and Reviewer, and the project runtime must provide the
+matching language-server executable. Queries sent while a server is indexing
+wait for it or fail with an explicit "still indexing" error; that error is never
+an empty result. Launches register only runnable project servers and
 provide Architect with language availability, errors, and installation hints.
 When a required server is missing, Architect reports the environment prerequisite
 instead of substituting source search, and restarts after the environment is repaired.

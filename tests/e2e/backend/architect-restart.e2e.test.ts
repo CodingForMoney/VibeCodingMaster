@@ -761,6 +761,7 @@ async function writeArchitectureGateReport(
     "- Code Reality: verified",
     "- Invalidated Assumptions: verified",
     "- Existing-Class Completeness: verified",
+    "- Relationship Evidence: decision-bearing relationships cite LSP evidence and were re-queried",
     "- Ownership: verified",
     "- Data Flow: verified",
     "- Lifecycle: verified",

@@ -25,7 +25,7 @@ import type { ProjectService } from "./project-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 import type { TaskWorkflowService } from "./task-workflow-service.js";
 import type { CodexBridgeIntegrationService } from "./codex-bridge-integration-service.js";
-import { roleUsesLsp, prepareTaskLspPlugin, renderArchitectLspNotice, VCM_LSP_PLUGIN_DIR } from "./lsp-plugin.js";
+import { roleUsesLsp, prepareTaskLspPlugin, renderLspNotice, VCM_LSP_PLUGIN_DIR } from "./lsp-plugin.js";
 import type { HarnessCodeIntelligenceDetector } from "./code-intelligence-service.js";
 
 export interface SessionService {
@@ -235,7 +235,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const lspPluginDirs = roleUsesLsp(role)
       ? lspStatus ? await prepareTaskLspPlugin(deps.fs, taskRepoRoot, lspStatus) : [VCM_LSP_PLUGIN_DIR]
       : [];
-    const appendSystemPrompt = [input.appendSystemPrompt, lspStatus && renderArchitectLspNotice(lspStatus)]
+    const appendSystemPrompt = [input.appendSystemPrompt, lspStatus && renderLspNotice(lspStatus)]
       .filter(Boolean).join("\n\n") || undefined;
     const startCommand = {
       ...deps.claude.buildRoleStartCommand(

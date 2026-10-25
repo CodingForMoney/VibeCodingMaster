@@ -510,15 +510,20 @@ Use it to:
 - merge task harness commits back to the connected repository branch when
   appropriate
 
-VCM bundles the Claude Code LSP bridge and loads it only for Architect sessions,
-including Codex Bridge launches. The project environment must still
+VCM bundles the Claude Code LSP bridge and loads it for Architect and Reviewer
+sessions, including Codex Bridge launches; Architect's evidence worker can use it
+too. While a language server is still indexing, VCM holds LSP queries until it
+is ready and fails them explicitly if indexing does not finish, instead of
+returning partial results. The project environment must still
 provide the language server for each detected language: `rust-analyzer`,
 `typescript-language-server`, `pyright-langserver`, `gopls`, `clangd`, or
 `jdtls`. Architect preloads `vcm-code-navigation` and uses LSP for semantic
 relationships. Accessors, backing fields, trait items, implementations, wrappers,
 and aliases are queried as separate symbols; a bounded source-text fallback may
 only locate candidates after the correct LSP query is demonstrably partial.
-Other roles use generated context and ordinary source reads. Harness Studio
+At the architecture-plan gate, Reviewer checks that every decision-bearing
+relationship cites its evidence source and re-queries it with LSP. Other roles
+use generated context and ordinary source reads. Harness Studio
 reports whether the server executable and plugin can run; the role Session
 performs the real workspace indexing and semantic query retries.
 

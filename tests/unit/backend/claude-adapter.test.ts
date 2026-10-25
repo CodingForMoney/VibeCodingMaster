@@ -291,7 +291,7 @@ describe("createClaudeAdapter", () => {
     });
   });
 
-  it("does not expose LSP runtime tools to Reviewer", () => {
+  it("gives Reviewer LSP while keeping Agent and Edit disallowed", () => {
     const command = adapter.buildRoleStartCommand(
       "reviewer",
       "claude",
@@ -305,7 +305,10 @@ describe("createClaudeAdapter", () => {
       ["/opt/vcm/plugins/vcm-lsp-bridge"]
     );
 
-    expect(command.args).toEqual(expect.arrayContaining(["--allowedTools", "Glob,Grep"]));
-    expect(command.args).not.toContain("--disallowedTools");
+    expect(command.args).toEqual(expect.arrayContaining(["--plugin-dir", "/opt/vcm/plugins/vcm-lsp-bridge"]));
+    expect(command.args).not.toContain("--allowedTools");
+    const disallowed = command.args[command.args.indexOf("--disallowedTools") + 1]!.split(",");
+    expect(disallowed).toEqual(expect.arrayContaining(["Agent", "Edit"]));
+    expect(disallowed).not.toContain("LSP");
   });
 });

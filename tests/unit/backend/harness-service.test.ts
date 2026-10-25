@@ -122,7 +122,10 @@ describe("createHarnessService", () => {
     expect(restartArchitectSkill).toContain("already_scheduled");
     expect(await fs.readText("/repo/.ai/tools/request-architect-restart")).toContain("/sessions/architect/restart-after-planning");
     const evidenceWorker = await fs.readText("/repo/.claude/agents/vcm-architect-evidence-worker.md");
-    expect(evidenceWorker).toContain("tools: Read, Grep, Glob, Write");
+    // A deny list keeps the parent session's LSP tool available to the worker.
+    expect(evidenceWorker).toContain("disallowedTools: Agent, Bash, Edit, NotebookEdit, WebFetch, WebSearch");
+    expect(evidenceWorker).not.toMatch(/^tools:/m);
+    expect(evidenceWorker).toContain("Use LSP for every definition, reference, caller, callee, and implementation relationship");
     expect(evidenceWorker).toContain("model: opus\neffort: high");
     expect(evidenceWorker).toContain("Do not design architecture");
     expect(evidenceWorker).toContain("You have no shell access");
@@ -430,7 +433,7 @@ describe("createHarnessService", () => {
       "typescript"
     ]);
     expect(harnessStatus.warnings).toEqual(expect.arrayContaining([
-      expect.stringContaining("Architect LSP for TypeScript / JavaScript is unavailable")
+      expect.stringContaining("LSP for TypeScript / JavaScript is unavailable")
     ]));
   });
 

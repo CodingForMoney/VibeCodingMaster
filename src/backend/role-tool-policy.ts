@@ -44,6 +44,15 @@ export const REVIEWER_DISALLOWED_TOOLS = [
   ...LSP_FRONTMATTER_DISALLOWED_TOOLS
 ];
 
+// The evidence worker reads and queries LSP but never runs commands, edits code,
+// or delegates. A deny list keeps the parent session's LSP tool available.
+export const EVIDENCE_WORKER_DISALLOWED_TOOLS = [
+  "Agent",
+  "Bash",
+  "Edit",
+  ...LSP_FRONTMATTER_DISALLOWED_TOOLS
+];
+
 export const CODE_ROLE_RUNTIME_DISALLOWED_TOOLS = [...NON_VCM_ROLE_RUNTIME_TOOLS];
 
 export const REVIEWER_RUNTIME_DISALLOWED_TOOLS = [
@@ -52,7 +61,8 @@ export const REVIEWER_RUNTIME_DISALLOWED_TOOLS = [
   ...NON_VCM_ROLE_RUNTIME_TOOLS
 ];
 
-const LSP_ROLE_NAMES = new Set<RoleName>(["architect"]);
+// Architect makes semantic code claims; Reviewer verifies them at Gate Review.
+const LSP_ROLE_NAMES = new Set<RoleName>(["architect", "reviewer"]);
 
 export function roleUsesLsp(role: RoleName): boolean {
   return LSP_ROLE_NAMES.has(role);

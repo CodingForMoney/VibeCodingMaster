@@ -7,10 +7,11 @@ import type { HarnessCodeIntelligenceStatus } from "../../../src/shared/types/ha
 import { createNodeFileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import {
   prepareTaskLspPlugin,
-  renderArchitectLspNotice,
+  renderLspNotice,
   roleUsesLsp,
   VCM_LSP_PLUGIN_MANIFEST,
-  VCM_LSP_PLUGIN_NAME
+  VCM_LSP_PLUGIN_NAME,
+  VCM_LSP_PROXY_PATH
 } from "../../../src/backend/services/lsp-plugin.js";
 
 let tmpRepo: string | undefined;
@@ -21,7 +22,7 @@ afterEach(async () => {
 });
 
 describe("VCM LSP plugin", () => {
-  it("loads only for code-reading workflow roles", () => {
+  it("loads for the roles that make or verify semantic code claims", () => {
     const roles: RoleName[] = [
       "project-manager",
       "architect",
@@ -32,7 +33,7 @@ describe("VCM LSP plugin", () => {
       "harness-engineer"
     ];
 
-    expect(roles.filter(roleUsesLsp)).toEqual(["architect"]);
+    expect(roles.filter(roleUsesLsp)).toEqual(["architect", "reviewer"]);
   });
 
   it("declares every supported language server in the packaged plugin", async () => {
@@ -82,6 +83,12 @@ describe("VCM LSP plugin", () => {
     const [pluginDir] = await prepareTaskLspPlugin(createNodeFileSystemAdapter(), tmpRepo, status);
     const manifest = JSON.parse(await readFile(path.join(pluginDir!, ".claude-plugin/plugin.json"), "utf8"));
     expect(Object.keys(manifest.lspServers)).toEqual(["rust-analyzer"]);
+    // The server runs behind the readiness proxy with its original command and arguments.
+    expect(manifest.lspServers["rust-analyzer"]).toMatchObject({
+      command: process.execPath,
+      args: [VCM_LSP_PROXY_PATH, "--", "rust-analyzer"],
+      startupTimeout: 180_000
+    });
   });
 
   it("omits a missing project language server without blocking other languages", async () => {
@@ -103,9 +110,10 @@ describe("VCM LSP plugin", () => {
     const manifest = JSON.parse(await readFile(path.join(pluginDir!, ".claude-plugin/plugin.json"), "utf8"));
     expect(Object.keys(manifest.lspServers)).toEqual(["rust-analyzer"]);
     expect(await prepareTaskLspPlugin(createNodeFileSystemAdapter(), tmpRepo, { ...status, languages: status.languages.slice(1) })).toEqual([]);
-    const notice = renderArchitectLspNotice(status);
+    const notice = renderLspNotice(status);
     expect(notice).toContain("Registered language servers: Rust (rust-analyzer)");
-    expect(notice).toContain("Architect LSP for Python is unavailable");
+    expect(notice).toContain("LSP for Python is unavailable");
+    expect(notice).toContain("never read the failure as an empty result");
     expect(notice).toContain("npm install -g pyright");
     expect(notice).toContain("Do not substitute source text search");
   });

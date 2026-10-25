@@ -181,14 +181,25 @@ to project languages and conventions, and subsequent VCM updates preserve them:
   module docs explain meaning and design intent rather than duplicating it.
 
 VCM ships the local `vcm-lsp-bridge` Claude Code plugin. Session Service passes
-it through `--plugin-dir` and enables the LSP tool only for Architect sessions
-on both native Claude and Codex Bridge launches. Only runnable project language
-servers are registered. Launches re-probe the environment and append language
-availability, missing-server errors, and installation hints to Architect's
-system context without replacing its existing restart context. Missing required
-servers are environment prerequisites: Architect reports the affected work
-instead of substituting source-text search, then restarts after environment repair.
-Other roles do not load the plugin.
+it through `--plugin-dir` and enables the LSP tool for Architect and Reviewer
+sessions on both native Claude and Codex Bridge launches: Architect makes
+semantic code claims and Reviewer re-verifies them at Gate Review. Architect's
+evidence worker inherits the tool through a deny-list tool policy. Only runnable
+project language servers are registered. Launches re-probe the environment and
+append language availability, missing-server errors, and installation hints to
+the role's system context without replacing its existing restart context.
+Missing required servers are environment prerequisites: the role reports the
+affected work instead of substituting source-text search, then restarts after
+environment repair. Other roles do not load the plugin.
+
+Each registered server runs behind `vcm-lsp-proxy.mjs`, which the per-task plugin
+manifest names as the server command. The proxy enables work-done progress and
+rust-analyzer quiescence reporting, answers those notifications for the client,
+and holds navigation queries (definitions, references, implementations, symbols,
+call hierarchy, hover) while the server reports loading or indexing. A query
+still waiting after 180 seconds fails with an explicit "still indexing" error, so
+an incomplete index never reads as an empty result. All other traffic passes
+through unchanged.
 Each bundled language server may restart up to three times after a crash. The
 Rust server disables its redundant check-on-save run because VCM roles execute
 the required validation explicitly. Server restart recovers a terminated LSP

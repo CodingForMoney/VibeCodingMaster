@@ -7,6 +7,7 @@ const requiredFiles = [
   "package.json",
   "scripts/fix-node-pty-spawn-helper.mjs",
   "scripts/claude-plugins/vcm-lsp-bridge/.claude-plugin/plugin.json",
+  "scripts/claude-plugins/vcm-lsp-bridge/vcm-lsp-proxy.mjs",
   "scripts/harness-tools/check-durable-docs",
   "scripts/harness-tools/generate-module-index",
   "scripts/harness-tools/generate-public-surface",

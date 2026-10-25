@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { renderArchitectHarnessRules } from "../templates/harness/architect-agent.js";
 import {
   CODE_ROLE_DISALLOWED_TOOLS,
+  EVIDENCE_WORKER_DISALLOWED_TOOLS,
   REVIEWER_DISALLOWED_TOOLS
 } from "../role-tool-policy.js";
 import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
@@ -130,7 +131,7 @@ const AGENT_FRONTMATTER = {
   },
   "vcm-architect-evidence-worker": {
     description: "Foreground Architect worker for bounded project evidence collection.",
-    tools: "Read, Grep, Glob, Write"
+    disallowedTools: EVIDENCE_WORKER_DISALLOWED_TOOLS.join(", ")
   },
   "vcm-architect-scaffold-worker": {
     description: "Foreground Architect worker for exact scaffold execution and scaffold validation."
@@ -143,6 +144,7 @@ const AGENT_FRONTMATTER = {
 
 
 const REQUIRED_AGENT_DISALLOWED_TOOLS = {
+  "vcm-architect-evidence-worker": EVIDENCE_WORKER_DISALLOWED_TOOLS,
   architect: CODE_ROLE_DISALLOWED_TOOLS,
   coder: CODE_ROLE_DISALLOWED_TOOLS,
   reviewer: REVIEWER_DISALLOWED_TOOLS

@@ -47,6 +47,7 @@ export const GATE_ANALYSIS_FIELDS: Record<GateReviewGate, readonly string[]> = {
     "Code Reality",
     "Invalidated Assumptions",
     "Existing-Class Completeness",
+    "Relationship Evidence",
     "Ownership",
     "Data Flow",
     "Lifecycle",
