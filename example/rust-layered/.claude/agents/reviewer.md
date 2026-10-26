@@ -419,6 +419,10 @@ Review the architecture docs in the named commits against the final code
   `docs/known-issues.md`, and `.ai/generated/**`. A reconciliation commit
   that changes code, tests, or configuration is `request_changes` with
   Finding Scope `implementation`.
+- Every implementation-versus-design contradiction recorded under
+  Architecture Drift Check in `docs-sync-report.md` is decided: a confirmed
+  defect is `request_changes` with Finding Scope `implementation`; a
+  contradiction that does not hold is noted in Documentation Fit.
 - `docs/known-issues.md` adds the task's confirmed unresolved issues and
   removes the ones the task resolved.
 - The docs follow the same writing rules as at the architecture-plan gate.

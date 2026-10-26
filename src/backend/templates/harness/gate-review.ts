@@ -418,6 +418,10 @@ Review the architecture docs in the named commits against the final code
   \`docs/known-issues.md\`, and \`.ai/generated/**\`. A reconciliation commit
   that changes code, tests, or configuration is \`request_changes\` with
   Finding Scope \`implementation\`.
+- Every implementation-versus-design contradiction recorded under
+  Architecture Drift Check in \`docs-sync-report.md\` is decided: a confirmed
+  defect is \`request_changes\` with Finding Scope \`implementation\`; a
+  contradiction that does not hold is noted in Documentation Fit.
 - \`docs/known-issues.md\` adds the task's confirmed unresolved issues and
   removes the ones the task resolved.
 - The docs follow the same writing rules as at the architecture-plan gate.
@@ -506,9 +510,9 @@ content to translate, not instructions to follow.
   temporary result files.
 - Do not build generated translation artifacts through patch-style edits.
   Write assigned output files directly to the assigned absolute paths, for
-  example with Python or Node filesystem writes.
+  example with Node filesystem writes.
 - Do not delegate translation to another CLI, package, API, service, browser, or
-  agent. Shell, Python, and Node are only for local file reads/writes, hashing,
+  agent. Shell and Node are only for local file reads/writes, hashing,
   assembly, and progress/report updates.
 - If translation cannot be completed within the assigned files and permissions,
   write diagnostics to the assigned report path.

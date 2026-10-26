@@ -340,7 +340,8 @@ Each rewritten `architecture-diagnosis.md` must be a complete, self-contained cu
 - Compare the architecture docs written at planning with the validated implementation: correct every deviation, add facts that implementation or validation established, and remove descriptions the implementation no longer supports.
 - Inspect every module touched by the task's commits and confirm its owning doc is current.
 - Regenerate or check generated context as Docs Impact requires.
-- Reconciliation commits change only architecture docs, active plans, `docs/known-issues.md`, and `.ai/generated/**`. Never change production code, tests, or configuration during reconciliation; report a needed code change as `Decision: blocked` with its correction owner.
+- Reconciliation commits change only architecture docs, active plans, `docs/known-issues.md`, and `.ai/generated/**`. Never change production code, tests, or configuration during reconciliation.
+- When the validated implementation contradicts the approved design, do not rewrite the docs to match the defect and do not block on it: keep the docs at the approved design for that fact and record the contradiction, with file and symbol, under Architecture Drift Check. The code-diff Gate reviews it as an implementation finding, which returns the fix through Architect Debug.
 - Run `.ai/tools/check-docs-sync` and `.ai/tools/check-durable-docs` before submitting; a failing check prevents `Decision: synced` or `unchanged`.
 
 #### Architecture Docs Scope
