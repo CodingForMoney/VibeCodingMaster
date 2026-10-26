@@ -265,5 +265,9 @@ if (separator >= 0 && process.argv[1] && realpathSync(process.argv[1]) === fileU
     process.stderr.write("usage: vcm-lsp-proxy.mjs -- <server-command> [args...]\n");
     process.exit(2);
   }
-  startProxy({ command, args, input: process.stdin, output: process.stdout, errorOutput: process.stderr });
+  const { server } = startProxy({ command, args, input: process.stdin, output: process.stdout, errorOutput: process.stderr });
+  // Exit with the server so Claude Code sees the crash and restarts it; an open
+  // stdin would otherwise keep the proxy alive with no server behind it.
+  server.on("exit", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
+  server.on("error", () => process.exit(1));
 }

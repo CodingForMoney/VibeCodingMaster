@@ -993,8 +993,7 @@ describe("workflow control service", () => {
     )).rejects.toMatchObject({ code: "WORKFLOW_FOLLOW_UP_APPROVAL_INVALID" });
     await writeGateIndex(fs, context, {
       architecture: "approve",
-      validation: "approve",
-      codeDiff: "approve"
+      validation: "approve"
     }, "2026-08-06T00:00:30.000Z");
 
     await expect(propose(service, fs, context, "tester", undefined, "add approved regression coverage"))
@@ -1027,8 +1026,7 @@ describe("workflow control service", () => {
       .rejects.toMatchObject({ code: "WORKFLOW_TRANSITION_DENIED" });
     await writeGateIndex(fs, context, {
       architecture: "approve",
-      validation: "approve",
-      codeDiff: "approve"
+      validation: "approve"
     }, "2026-08-06T00:00:50.000Z");
     await advanceWithFollowUpApproval(
       service,
@@ -1041,10 +1039,10 @@ describe("workflow control service", () => {
     await writeTestReport(fs, context, "pass", "none", "repeated approved follow-up validation");
     await writeGateIndex(fs, context, {
       architecture: "approve",
-      validation: "approve",
-      codeDiff: "approve"
+      validation: "approve"
     }, "2026-08-06T00:01:10.000Z");
-    await advance(service, fs, context, "architect", undefined, "fresh validation and code-diff Gates");
+    // The follow-up checkpoint precedes docs reconciliation and the code-diff Gate.
+    await advance(service, fs, context, "architect", undefined, "fresh validation; reconcile docs");
   });
 
   it("routes a blocked docs sync to Tester and returns through validation and both Gates", async () => {

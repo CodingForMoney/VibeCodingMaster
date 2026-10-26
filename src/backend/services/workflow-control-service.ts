@@ -263,7 +263,7 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
         if (!followUpAllowed) {
           throw workflowError(
             "WORKFLOW_FOLLOW_UP_APPROVAL_INVALID",
-            "User-approved follow-up work is legal only for a Tester dispatch after a fresh passing Test Report and successful validation-adequacy and code-diff Gates.",
+            "User-approved follow-up work is legal only for a Tester dispatch after a fresh passing Test Report and a successful validation-adequacy Gate (and, in a Debug or Diagnosis Branch, its code-diff Gate).",
             "Use the normal allowed transition, or ask the user only when optional Tester-owned work is proposed after validation is fully green."
           );
         }
@@ -956,11 +956,15 @@ async function canRouteUserApprovedFollowUp(
   if (test.value !== "pass" || !evidenceIsFresh(state, effectiveFlow, "tester", "test-report.md", test.hash)) {
     return false;
   }
-  const validation = await gateState(fs, input, "validation-adequacy");
-  const codeDiff = await gateState(fs, input, "code-diff");
-  if (!gatePassedForDispatch(state, effectiveFlow, "tester", "validation-adequacy", validation)
-    || !gatePassedForDispatch(state, effectiveFlow, "tester", "code-diff", codeDiff)) return false;
   const flowRun = resolveFlowRun(state.flowRun, current);
+  const validation = await gateState(fs, input, "validation-adequacy");
+  if (!gatePassedForDispatch(state, effectiveFlow, "tester", "validation-adequacy", validation)) return false;
+  // A branch passes its own code-diff Gate before it exits. A main flow reaches
+  // this checkpoint before docs reconciliation, so code-diff has not run yet.
+  if (flowRun.activeBranch === effectiveFlow) {
+    const codeDiff = await gateState(fs, input, "code-diff");
+    if (!gatePassedForDispatch(state, effectiveFlow, "tester", "code-diff", codeDiff)) return false;
+  }
   const expectedExit = flowRun.activeBranch === effectiveFlow
     ? `${flowRun.rootFlow}/architect`
     : `${effectiveFlow}/architect`;

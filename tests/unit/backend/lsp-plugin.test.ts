@@ -116,5 +116,10 @@ describe("VCM LSP plugin", () => {
     expect(notice).toContain("never read the failure as an empty result");
     expect(notice).toContain("npm install -g pyright");
     expect(notice).toContain("Do not substitute source text search");
+    // Reviewer finishes the review instead of stopping for a missing server.
+    const reviewerNotice = renderLspNotice(status, "reviewer");
+    expect(reviewerNotice).toContain("complete the review");
+    expect(reviewerNotice).toContain("not LSP-verified");
+    expect(reviewerNotice).not.toContain("stop that work");
   });
 });

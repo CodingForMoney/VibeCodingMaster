@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 "use strict";
 // Check that a task's docs reconciliation covers every touched module.
+// Without .ai/generated/module-index.json the repository is one module named
+// "." whose owning doc is docs/ARCHITECTURE.md (or its docs/architecture/ area docs).
 //
 // Usage:
 //   .ai/tools/check-docs-sync [--report <path> | --report-stdin] [--base <commit>] [--json]
@@ -118,10 +120,14 @@ function isDocumentationFile(file) {
   return isArchitectureDoc(file) || file.startsWith("docs/") || file.startsWith(".ai/") || /\.md$/i.test(file);
 }
 
+// The repository as one module, for projects without a module index (the
+// generator supports Cargo and npm workspaces only).
+const ROOT_MODULE = { name: ".", path: ".", doc: PROJECT_DOC };
+
 function loadModules(root) {
   const target = path.join(root, MODULE_INDEX_PATH);
   if (!fs.existsSync(target)) {
-    return undefined;
+    return [ROOT_MODULE];
   }
   const index = JSON.parse(fs.readFileSync(target, "utf8"));
   return (index.layers || []).flatMap((layer) => layer.modules || []).map((module) => ({
@@ -164,9 +170,6 @@ function finding(code, subject, message) {
 function check(root, reportContent, base) {
   const findings = [];
   const modules = loadModules(root);
-  if (!modules) {
-    return [finding("DS_MODULE_INDEX_MISSING", MODULE_INDEX_PATH, "Run .ai/tools/generate-module-index so touched modules can be resolved.")];
-  }
   const commits = taskCommits(root, base);
   const changed = new Set(commits.flatMap((commit) => commit.files));
 

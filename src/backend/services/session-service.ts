@@ -235,7 +235,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const lspPluginDirs = roleUsesLsp(role)
       ? lspStatus ? await prepareTaskLspPlugin(deps.fs, taskRepoRoot, lspStatus) : [VCM_LSP_PLUGIN_DIR]
       : [];
-    const appendSystemPrompt = [input.appendSystemPrompt, lspStatus && renderLspNotice(lspStatus)]
+    const appendSystemPrompt = [input.appendSystemPrompt, lspStatus && renderLspNotice(lspStatus, role)]
       .filter(Boolean).join("\n\n") || undefined;
     const startCommand = {
       ...deps.claude.buildRoleStartCommand(

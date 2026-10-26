@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { HarnessCodeIntelligenceLanguageStatus, HarnessCodeIntelligenceStatus } from "../../shared/types/harness.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
+import type { RoleName } from "../../shared/types/role.js";
 export { roleUsesLsp } from "../role-tool-policy.js";
 
 export const VCM_LSP_PLUGIN_NAME = "vcm-lsp-bridge";
@@ -72,7 +73,9 @@ export function lspUnavailableWarning(language: HarnessCodeIntelligenceLanguageS
   return `LSP for ${language.label} is unavailable: ${language.error ?? `${language.serverCommand} is not runnable.`} ${recovery} Restart the LSP roles (Architect, Reviewer) after fixing the environment so VCM can detect and register the server again.`;
 }
 
-export function renderLspNotice(status: HarnessCodeIntelligenceStatus): string | undefined {
+// Architect stops semantic work in an unavailable language; Reviewer completes
+// the review and records those relationships as not LSP-verified.
+export function renderLspNotice(status: HarnessCodeIntelligenceStatus, role: RoleName = "architect"): string | undefined {
   if (status.languages.length === 0) return undefined;
   const available = status.languages.filter((language) => language.state === "server_runnable");
   const unavailable = status.languages.filter((language) => language.state !== "server_runnable");
@@ -84,7 +87,9 @@ export function renderLspNotice(status: HarnessCodeIntelligenceStatus): string |
     ] : []),
     ...unavailable.map(lspUnavailableWarning),
     ...(unavailable.length > 0 ? [
-      "If your assignment requires a semantic query in an unavailable language, stop that work and report the environment prerequisite through the current communication channel. Do not substitute source text search or claim the relationship is verified. Continue only after the server is available."
+      role === "reviewer"
+        ? "For relationships in an unavailable language, complete the review by reading the complete candidate code, record each such relationship as not LSP-verified in the report, and name the missing server. Do not stop the review or treat text matches as verified relationships."
+        : "If your assignment requires a semantic query in an unavailable language, stop that work and report the environment prerequisite through the current communication channel. Do not substitute source text search or claim the relationship is verified. Continue only after the server is available."
     ] : [])
   ].join("\n");
 }

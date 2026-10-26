@@ -237,7 +237,8 @@ Gate, completion blocked until code-diff reviews the reconciliation, and routing
 of docs-only, test-only, mixed, and implementation code-diff findings.
 `check-docs-sync` tests drive a real task worktree to cover module coverage,
 updated-doc verification, non-doc reconciliation commits, unknown commits,
-planned doc changes, and backend rejection of a failing report. Service tests also cover branch
+planned doc changes, a repository without a module index, and backend
+rejection of a failing report. Service tests also cover branch
 resumption, stale-report diagnostics, draft submissions, Docs-Only owners, and
 completed workflows. The memory-to-durable-doc E2E submits its assigned report
 through the Artifact API with Workflow Control enabled.
@@ -272,7 +273,8 @@ services with controlled runtime doubles:
   on restart, and preservation of the caller's system context. LSP proxy
   regressions drive a fake language server through `vcm-lsp-proxy.mjs` to cover
   holding queries during indexing, the explicit not-ready error, cancellation,
-  and progress handling for clients that do not request it.
+  progress handling for clients that do not request it, and exiting with the
+  server.
 - Gate Review cancellation, Reviewer restart, exact request ownership, and
   protection against cancelled-request reports overwriting replacement state.
 - Tester `incomplete` report validation and backend refusal to start

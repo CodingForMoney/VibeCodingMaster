@@ -156,6 +156,22 @@ describe("check-docs-sync", () => {
     expect(result.findings.map((finding: { code: string }) => finding.code)).toEqual(["DS_PLANNED_DOC_NOT_CHANGED"]);
   });
 
+  it("treats a repository without a module index as one module owned by docs/ARCHITECTURE.md", async () => {
+    const { task } = await createTaskWorktree();
+    await rm(path.join(task, ".ai/generated/module-index.json"));
+    commit(task, "chore: project without a module index");
+    await writeRepoFile(task, "app.py", "print(2)\n");
+    commit(task, "feat: change app");
+
+    const missing = await runTool(task, report("| packages/api | packages/api/ARCHITECTURE.md | unchanged | n/a |"));
+    expect(missing.findings.map((finding: { code: string; subject: string }) => [finding.code, finding.subject]))
+      .toEqual([["DS_MODULE_NOT_COVERED", "."]]);
+
+    const covered = await runTool(task, report("| . | docs/ARCHITECTURE.md | unchanged | Internal change only. |"));
+    expect(covered.code).toBe(0);
+    expect(covered.findings).toEqual([]);
+  });
+
   it("lets the backend reject a docs-sync report with the tool's findings", async () => {
     const { task } = await createTaskWorktree();
     await writeRepoFile(task, "packages/api/src/index.ts", "export const api = 2;\n");

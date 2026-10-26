@@ -548,7 +548,7 @@ TBD
 
 ## Module Coverage
 
-<!-- One row per module touched by the task's commits. Status is updated or unchanged; unchanged needs the reason no owned fact changed. Write None. when the task touched no module. -->
+<!-- One row per module touched by the task's commits, named by its module-index name or path; without a module index, use one row for module . owned by docs/ARCHITECTURE.md. Status is updated or unchanged; unchanged needs the reason no owned fact changed. Write None. when the task touched no module. -->
 | Module | Owning Doc | Status | Reason |
 | --- | --- | --- | --- |
 

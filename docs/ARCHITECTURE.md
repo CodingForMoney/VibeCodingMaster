@@ -199,7 +199,8 @@ and holds navigation queries (definitions, references, implementations, symbols,
 call hierarchy, hover) while the server reports loading or indexing. A query
 still waiting after 180 seconds fails with an explicit "still indexing" error, so
 an incomplete index never reads as an empty result. All other traffic passes
-through unchanged.
+through unchanged. The proxy exits with its server, so Claude Code's crash
+restart still applies.
 Each bundled language server may restart up to three times after a crash. The
 Rust server disables its redundant check-on-save run because VCM roles execute
 the required validation explicitly. Server restart recovers a terminated LSP
@@ -319,7 +320,9 @@ Artifact Service runs the task worktree's `.ai/tools/check-docs-sync` on a final
 from Module Coverage, a module marked updated did not change its owning doc, a
 reconciliation commit changes anything other than architecture docs, active
 plans, known issues, or generated context, or a doc that Docs Impact says the
-plan changed was not changed. The validation-adequacy input hash excludes
+plan changed was not changed. A repository without
+`.ai/generated/module-index.json` is checked as one module, `.`, owned by
+`docs/ARCHITECTURE.md`. The validation-adequacy input hash excludes
 `docs/**`, every `ARCHITECTURE.md`, and `.ai/generated/**`, so reconciliation does
 not invalidate an approved validation.
 

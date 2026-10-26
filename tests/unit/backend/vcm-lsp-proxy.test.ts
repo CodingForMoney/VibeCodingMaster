@@ -164,4 +164,13 @@ describe("vcm-lsp-proxy", () => {
 
     expect(answer.error?.code).toBe(-32800);
   });
+
+  it("exits with the server so Claude Code can restart a crashed server", async () => {
+    tmpDir = await mkdtemp(path.join(os.tmpdir(), "vcm-lsp-proxy-"));
+    // stdin stays open, as it does while Claude Code is connected.
+    proxy = spawn(process.execPath, [VCM_LSP_PROXY_PATH, "--", process.execPath, "-e", "setTimeout(() => process.exit(3), 100)"]);
+    const exitCode = await new Promise<number | null>((resolve) => proxy!.on("exit", resolve));
+
+    expect(exitCode).toBe(3);
+  });
 });
