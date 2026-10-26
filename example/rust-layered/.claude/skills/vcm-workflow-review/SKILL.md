@@ -71,7 +71,7 @@ VCM binds that authorization to this exact task state, flow, target role, eviden
 
 ## User-Approved Post-Validation Work
 
-When Tester has returned `pass`, validation-adequacy and code-diff are both successful, and the user explicitly approves additional Tester-owned work in the current task, propose Tester again with:
+When Tester has returned `pass`, the validation-adequacy Gate is successful (in a Debug or Diagnosis Branch, also its code-diff Gate), docs reconciliation has not started, and the user explicitly approves additional Tester-owned work in the current task, propose Tester again with:
 
 ```text
 Authorization Text: none
@@ -79,7 +79,7 @@ Violated Rule: none
 Approval Text: <user's exact approval>
 ```
 
-This is a normal one-time follow-up approval, not a Workflow Override. Do not use it before both Gates are successful, for required unresolved coverage, for another owner, or without the user's exact approval. After Tester completes the approved work, rerun Tester validation and every invalidated Gate.
+This is a normal one-time follow-up approval, not a Workflow Override. Do not use it before those Gates are successful, for required unresolved coverage, for another owner, or without the user's exact approval. After Tester completes the approved work, rerun Tester validation and every invalidated Gate.
 
 ## Completion
 

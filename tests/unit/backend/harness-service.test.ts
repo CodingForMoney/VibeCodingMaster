@@ -46,7 +46,7 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/CLAUDE.md")).not.toContain("and retrospective reports must be submitted with `.ai/tools/vcm-artifact`");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("No approval can raise this ceiling");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("Architect Debug Mode runs inside either Architect Debug Flow or Architect Debug Branch");
-    expect(await fs.readText("/repo/CLAUDE.md")).toContain("They do not run their own final acceptance");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("They do not run their own docs reconciliation or final acceptance; the parent flow reconciles once.");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("Final acceptance closes only a complete code-delivery flow");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("targeted diagnostic L3 may run in Architect Debug Mode or Architecture Diagnosis Mode");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("A message without a VCM marker is user communication.");

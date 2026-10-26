@@ -54,15 +54,15 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 - Durable project docs describe current project truth. Replace superseded content instead of appending task chronology, investigation history, role verdicts, commit history, or completed-work reports; task artifacts, Git, and PRs preserve that history.
 - `docs/GLOSSARY.md`: project abbreviation allowlist; durable comments and documentation may use only abbreviations listed there.
 - `docs/CODING_STANDARDS.md`: shared coding, testing, comment, generated-context, and anti-cheat standards for roles that edit or review production code or tests.
-- `docs/ARCHITECTURE.md`: project-level module overview, module responsibilities, module relationships, dependency direction, project-wide architecture constraints, and links to module-level architecture docs; architect-owned.
-- `<module>/ARCHITECTURE.md`: current module responsibilities, boundaries, data flow, lifecycle, invariants, collaboration contracts, important public surface meaning, risks, and update triggers; architect-owned.
+- `docs/ARCHITECTURE.md`: module map, module responsibilities, dependency direction, cross-module relationships, major runtime flows, cross-cutting mechanisms, project-wide constraints, project-level design decisions, and links to module-level and `docs/architecture/*.md` area docs; in a repository without module-level docs it also holds the detailed design; architect-owned.
+- `<module>/ARCHITECTURE.md`: the module's responsibilities, boundaries, data flow, lifecycle, state ownership, invariants, collaboration contracts, important public surface meaning, failure behavior, risks, and module-level design decisions; architect-owned.
 - `docs/TESTING.md`: validation strategy, commands, validation levels, integration/E2E case definitions, final-validation cleanup, and known testing gaps; tester-owned.
 - `docs/known-issues.md`: current unresolved durable issues and accepted limitations; remove resolved entries rather than retaining their history; architect-owned.
 - `docs/plans/**`: active or planned work only. Remove a plan from this collection when its work is complete; Git and PR history preserve the completed plan.
 - `.ai/generated/module-index.json`: generated module index; use it to find layers, modules, manifests, module docs, source files, test files, and workspace dependencies.
 - `.ai/generated/public-surface.json`: generated public surface index; use it to inspect module-to-module public APIs, routes, and source evidence.
 - Generated context is the source of truth for module inventories, source/test file inventories, dependency lists, and complete public-surface listings. Durable prose explains architecture and contract meaning instead of independently maintaining those machine facts.
-- Run `.ai/tools/check-durable-docs` after bootstrap or durable-doc synchronization and before final acceptance when durable docs changed.
+- Run `.ai/tools/check-durable-docs` after bootstrap or durable-doc changes and before final acceptance when durable docs changed. Architect also runs `.ai/tools/check-docs-sync` during docs reconciliation.
 
 ## VCM Glossary Policy
 
@@ -73,10 +73,10 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 ## VCM Task Flow
 
 - All standard workflow routes among project-manager, architect, coder, and tester are PM-hub routes. Project-manager starts and advances every flow; architect, coder, and tester report blockers, failures, conflicts, incomplete work, and findings back to project-manager.
-- Code changes use: `project-manager -> architect interview -> architect planning -> coder -> tester -> architect docs sync -> project-manager final acceptance`.
+- Code changes use: `project-manager -> architect interview -> architect planning (plan, scaffold, and architecture docs) -> coder -> tester -> architect docs reconciliation -> project-manager final acceptance`.
 - Architect Debug Mode runs inside either Architect Debug Flow or Architect Debug Branch. Architecture Diagnosis Mode runs inside either Architecture Diagnosis Flow or Architecture Diagnosis Branch.
-- Code-Change Flow, Architect Debug Flow, and an Architecture Diagnosis Flow that produces code changes run tester validation, validation-adequacy Gate Review, and then code-diff Gate Review before architect docs sync and project-manager final acceptance. An analysis-only Architecture Diagnosis Flow completes from the diagnosis result.
-- Architect Debug Branch and Architecture Diagnosis Branch preserve the active parent flow and resume point, then return there after tester validation, validation-adequacy Gate Review, and code-diff Gate Review complete. They do not run their own final acceptance.
+- Code-Change Flow, Architect Debug Flow, and an Architecture Diagnosis Flow that produces code changes run tester validation, validation-adequacy Gate Review, architect docs reconciliation, and then code-diff Gate Review, which reviews the reconciled docs with the code, before project-manager final acceptance. An analysis-only Architecture Diagnosis Flow completes from the diagnosis result.
+- Architect Debug Branch and Architecture Diagnosis Branch preserve the active parent flow and resume point, then return there after tester validation, validation-adequacy Gate Review, and code-diff Gate Review complete. They do not run their own docs reconciliation or final acceptance; the parent flow reconciles once.
 - Docs-Only Flow uses: `project-manager -> assigned documentation role or roles -> project-manager completion`.
 - Validation-Only Flow uses: `project-manager -> tester -> validation-adequacy Gate Review -> project-manager completion`.
 - Communication-Only Flow uses: `project-manager response or relay -> completion`.

@@ -11,7 +11,7 @@ Use this skill only when project-manager is ready to close a complete VCM code-d
 
 Do not use it for Docs-Only Flow, Validation-Only Flow, Communication-Only Flow, PR-Preparation Flow, analysis-only Diagnosis, Architect Debug Branch, or Architecture Diagnosis Branch.
 
-This skill is a final evidence audit. It does not replace architect docs sync, tester validation acceptance, coder implementation responsibility, or user approval for high-risk decisions.
+This skill is a final evidence audit. It does not replace architect docs reconciliation, tester validation acceptance, coder implementation responsibility, or user approval for high-risk decisions.
 
 Project-manager must not use this skill to perform technical design review, implementation review, source-code analysis, or test adequacy analysis. Missing or conflicting evidence must be routed to the responsible role.
 
