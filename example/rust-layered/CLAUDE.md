@@ -25,7 +25,7 @@ No accumulated project memory yet.
 - Workflow roles use `vcm-long-running-validation` for long-running validation and follow the background job limits below.
 - Use `vcm-report-harness-issue` when you notice a reusable VCM harness problem. Record feedback; do not contact Harness Engineer directly.
 - The root `<VCM-memory>` block is shared project memory. Treat every `<VCM-memory>` block as read-only and use `vcm-propose-memory` only when VCM assigns an exact memory proposal or candidate path.
-- Only the user may approve scope reduction, skipped required validation, Gate Review skip or override, skipped required docs sync, accepted unresolved task-scope risk, or weakening of baseline Harness rules. PM may record and route the user's approval but cannot grant it.
+- Only the user may approve scope reduction, skipped required validation, Gate Review skip or override, skipped required documentation updates, accepted unresolved task-scope risk, or weakening of baseline Harness rules. PM may record and route the user's approval but cannot grant it.
 - Project-manager runs `vcm-gate-review` unconditionally at every Gate Review trigger point and on VCM Gate Review callbacks; the tool reports the authoritative enable state.
 
 ## VCM Managed Artifacts
@@ -62,7 +62,7 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 - `.ai/generated/module-index.json`: generated module index; use it to find layers, modules, manifests, module docs, source files, test files, and workspace dependencies.
 - `.ai/generated/public-surface.json`: generated public surface index; use it to inspect module-to-module public APIs, routes, and source evidence.
 - Generated context is the source of truth for module inventories, source/test file inventories, dependency lists, and complete public-surface listings. Durable prose explains architecture and contract meaning instead of independently maintaining those machine facts.
-- Run `.ai/tools/check-durable-docs` after bootstrap or durable-doc changes and before final acceptance when durable docs changed. Architect also runs `.ai/tools/check-docs-sync` during docs reconciliation.
+- Run `.ai/tools/check-durable-docs` after bootstrap or durable-doc changes and before final acceptance when durable docs changed. VCM runs `.ai/tools/check-docs-sync` when the code-diff Gate is requested to confirm the architecture plan's Docs Impact covers every module the task touched.
 
 ## VCM Glossary Policy
 
@@ -73,16 +73,16 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 ## VCM Task Flow
 
 - All standard workflow routes among project-manager, architect, coder, and tester are PM-hub routes. Project-manager starts and advances every flow; architect, coder, and tester report blockers, failures, conflicts, incomplete work, and findings back to project-manager.
-- Code changes use: `project-manager -> architect interview -> architect planning (plan, scaffold, and architecture docs) -> coder -> tester -> architect docs reconciliation -> project-manager final acceptance`.
+- Code changes use: `project-manager -> architect interview -> architect planning (plan, scaffold, and architecture docs) -> coder -> tester -> project-manager final acceptance`.
 - Architect Debug Mode runs inside either Architect Debug Flow or Architect Debug Branch. Architecture Diagnosis Mode runs inside either Architecture Diagnosis Flow or Architecture Diagnosis Branch.
-- Code-Change Flow, Architect Debug Flow, and an Architecture Diagnosis Flow that produces code changes run tester validation, validation-adequacy Gate Review, architect docs reconciliation, and then code-diff Gate Review, which reviews the reconciled docs with the code, before project-manager final acceptance. An analysis-only Architecture Diagnosis Flow completes from the diagnosis result.
-- Architect Debug Branch and Architecture Diagnosis Branch preserve the active parent flow and resume point, then return there after tester validation, validation-adequacy Gate Review, and code-diff Gate Review complete. They do not run their own docs reconciliation or final acceptance; the parent flow reconciles once.
+- Code-Change Flow, Architect Debug Flow, and an Architecture Diagnosis Flow that produces code changes run tester validation, validation-adequacy Gate Review, and code-diff Gate Review, which reviews the docs against the final code, before project-manager final acceptance. Architect updates the owning architecture docs in the same commits as any plan or fix that changes a durable architecture fact. An analysis-only Architecture Diagnosis Flow completes from the diagnosis result.
+- Architect Debug Branch and Architecture Diagnosis Branch preserve the active parent flow and resume point, and return to the parent flow once tester validation, validation-adequacy Gate Review, and code-diff Gate Review complete; the parent flow's final acceptance follows. A branch never runs its own final acceptance.
 - Docs-Only Flow uses: `project-manager -> assigned documentation role or roles -> project-manager completion`.
 - Validation-Only Flow uses: `project-manager -> tester -> validation-adequacy Gate Review -> project-manager completion`.
 - Communication-Only Flow uses: `project-manager response or relay -> completion`.
 - Gate Review is PM-triggered at its defined trigger points; the tool decides whether review is enabled or required.
 - Ignore commits whose subject starts with `[VCM Harness]`. Do not review, attribute, or route those commits unless they cause a test failure. A test failure caused by a Harness commit follows the normal test-failure flow.
-- Final acceptance closes only a complete code-delivery flow; it never closes Architect Debug Branch or Architecture Diagnosis Branch.
+- Final acceptance closes only a complete code-delivery flow. After a Debug or Diagnosis Branch passes its code-diff Gate, final acceptance closes the parent flow it returned to, never the branch alone.
 - PR-Preparation Flow starts only after the active delivery flow completes; every complete code-delivery flow requires final acceptance to pass.
 - If Docs-Only Flow or Validation-Only Flow reveals that the accepted outcome requires production-code, runtime-behavior, public-contract, dependency, or system-architecture changes, project-manager routes through the full Code-Change Flow.
 - Detailed failure handling and route decisions belong to project-manager rules.

@@ -13,7 +13,7 @@ Use this skill at every project-manager Gate Review trigger point and whenever V
 
 - `architecture-plan`: after the user confirms `.ai/vcm/handoffs/architecture-brief.md` and architect writes `.ai/vcm/handoffs/architecture-plan.md`, before coder dispatch.
 - `validation-adequacy`: after tester writes a terminal `Test Result: pass|fail` that the active flow permits to reach the gate. Never request this gate for `Test Result: incomplete`.
-- `code-diff`: after Tester completes, the current validation-adequacy Gate finishes successfully, and Architect docs reconciliation reports `synced` or `unchanged`, for a Coder implementation, Architect Debug fix, or Architecture Diagnosis fix. Rerun it after a docs-only correction or any commit made after its approval. Identify the production-code source with `--source coder`, `--source architect-debug`, or `--source architect-diagnosis`. Validation-Only Flow does not request code-diff.
+- `code-diff`: after Tester completes and the current validation-adequacy Gate finishes successfully, for a Coder implementation, Architect Debug fix, or Architecture Diagnosis fix. Rerun it after a docs-only correction, a docs coverage correction, or any commit made after its approval. VCM first runs `.ai/tools/check-docs-sync`; a module the architecture plan's Docs Impact does not cover returns `failed_to_start` with a message that starts with `Docs coverage check failed:`. Identify the production-code source with `--source coder`, `--source architect-debug`, or `--source architect-diagnosis`. Validation-Only Flow does not request code-diff.
 
 ## Request
 
@@ -28,7 +28,8 @@ Interpret the first output line:
 
 - `disabled`, `not_required`, `already_approved`: continue the normal VCM flow.
 - `started` or `running`: stop this turn and wait for the VCM callback.
-- `failed_to_start`: report the failure to the user.
+- `failed_to_start` for code-diff with a message that starts with `Docs coverage check failed:`: route it to Architect through the active flow's docs correction branch.
+- Any other `failed_to_start`: report the failure to the user.
 
 ## Callback
 

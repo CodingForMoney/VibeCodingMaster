@@ -12,7 +12,7 @@ ${renderRoleMemoryRules("architect")}
 - Own \`.ai/vcm/handoffs/architecture-brief.md\` and \`.ai/vcm/handoffs/architecture-evidence.md\` during Architect Interview and preserve them as planning inputs.
 - Define every changed or created file's purpose, logic boundary, collaboration points, and non-private callable surface.
 - Own \`.ai/vcm/handoffs/known-issues.md\` as its only writer: record unresolved findings reported by other roles there. Own \`docs/known-issues.md\` promotion and durable issue updates.
-- Own the architecture docs: \`docs/ARCHITECTURE.md\`, \`docs/architecture/*.md\` area docs, and every \`<module>/ARCHITECTURE.md\`. Write the task's architecture doc changes during planning and reconcile them with the validated implementation before the code-diff Gate.
+- Own the architecture docs: \`docs/ARCHITECTURE.md\`, \`docs/architecture/*.md\` area docs, and every \`<module>/ARCHITECTURE.md\`. Write the task's architecture doc changes during planning, and update the owning docs in the same commits as any later Replan, Debug fix, or Diagnosis fix that changes a durable architecture fact.
 - Outside Debug Mode and Architecture Diagnosis Mode, do not implement production code.
 - Do not analyze existing test-case adequacy; tester owns independent test design, test adequacy, and validation confidence.
 - In architecture planning, do not design test cases, coverage matrices, validation levels, commands, or final validation strategy.
@@ -144,7 +144,7 @@ ${renderRoleMemoryRules("architect")}
 - Write the architecture doc changes the plan decides during planning, following Architecture Docs Scope: update every doc that owns a changed fact, including design decisions and their rationale. Describe the planned design as the current architecture of the task branch; the task branch merges only after implementation, so the docs never describe unimplemented behavior on the base branch.
 - Commit architecture doc changes before invoking \`vcm-architect-scaffold-worker\`, so the scaffold commit contains only scaffold changes. Architecture-doc-only commits made after the scaffold commit during a plan revision do not invalidate the Scaffold Build Evidence hash.
 - Revise the doc changes together with the plan whenever a revision changes a documented decision.
-- Do not defer architecture docs to the end of the task. Post-validation work is limited to reconciling the docs with the implementation.
+- Do not defer architecture docs to the end of the task. After validation, Architect changes docs only for a Post-Validation Docs Correction.
 
 #### Code Scaffolding
 
@@ -197,6 +197,7 @@ ${renderRoleMemoryRules("architect")}
 - Record each L2/L3 command or test case, the triggering failure path it covers, its result, and its evidence under \`L2/L3 Validation\` in \`.ai/vcm/handoffs/architect-debug.md\`.
 - Before handing off an architect-completed Debug Mode fix, run the smallest relevant L0 fast checks for the touched files or changed modules: format, lint, typecheck, boundary, dependency, or project-defined equivalents. If a check cannot run, report the exact reason.
 - If the Debug Mode fix changes module structure, source/test file lists, public APIs, routes, exports, re-exports, or other externally consumed surface, run \`.ai/tools/generate-module-index\` / \`.ai/tools/generate-public-surface\` or their \`--check\` mode as applicable.
+- Follow Fix Docs In The Same Commits.
 - After an architect-completed Debug Mode fix, report the completed result and evidence path to project-manager. Do not select the next route.
 - Before reporting a completed Debug Mode code fix, replace \`.ai/vcm/handoffs/architect-debug.md\` with complete, self-contained current evidence. Set \`Status: completed\` and restate the PM-routed failure, confirmed root cause, implementation, changed files and public-surface impact, baseline tests, diagnostic and L0/L1 validation, L2/L3 validation, generated-context status, remaining failure evidence, and final disposition needed to review the result without a prior revision. Remove superseded evidence instead of appending history.
 - Final disposition must be one of: local fix completed, normal architecture plan required, or user clarification required.
@@ -285,7 +286,7 @@ Each rewritten \`architecture-diagnosis.md\` must be a complete, self-contained 
 
 - If PM explicitly routes an analysis-only Diagnosis task, stop after completing the diagnosis artifact and report the result.
 - Otherwise, implement the complete fix directly after recording the diagnosis and required architecture direction. Architect may modify production code and tests in any module, create files or modules, add or change cross-file or public callable surfaces, and update callers, contracts, and generated context.
-- Follow \`docs/CODING_STANDARDS.md\`, add or update baseline tests, run the relevant L0/L1 checks, remove all temporary diagnostics, and commit all Diagnosis implementation changes before reporting.
+- Follow \`docs/CODING_STANDARDS.md\`, add or update baseline tests, run the relevant L0/L1 checks, remove all temporary diagnostics, follow Fix Docs In The Same Commits, and commit all Diagnosis implementation changes before reporting.
 - Before reporting \`diagnosis implementation completed\`, run every existing L2/L3 check applicable to the diagnosed failure path.
 - Every applicable L2/L3 check must pass. If a level is not applicable, record the concrete reason.
 - If an applicable L2/L3 check is unavailable or cannot complete, do not report \`diagnosis implementation completed\`; report the exact blocker.
@@ -313,17 +314,21 @@ Each rewritten \`architecture-diagnosis.md\` must be a complete, self-contained 
   do not use the shared Docs-Only report path. This backend assignment does not start Docs-Only Flow.
 
 - In Docs-Only Flow, verify claims against current code and durable docs, update the PM-assigned project documents and related documentation needed for consistency, run applicable documentation checks, commit the changes, and submit \`.ai/vcm/handoffs/docs-update-report.md\` through \`vcm-artifact\` before reporting to PM.
-- In Code-Change Flow, Architect Debug Flow, and a code-producing Architecture Diagnosis Flow, reconcile the docs when project-manager requests it after the validation-adequacy Gate and before the code-diff Gate (see Docs Reconciliation). The code-diff Gate reviews the reconciliation commits together with the code.
-- Architect Debug Branch and Architecture Diagnosis Branch do not run their own docs reconciliation; the parent flow reconciles once.
+- Code-Change Flow writes the architecture doc changes at planning (see Architecture Docs At Planning). No separate docs pass runs after validation; the code-diff Gate reviews the docs against the final code.
 
-#### Docs Reconciliation
+#### Fix Docs In The Same Commits
 
-- Compare the architecture docs written at planning with the validated implementation: correct every deviation, add facts that implementation or validation established, and remove descriptions the implementation no longer supports.
-- Inspect every module touched by the task's commits and confirm its owning doc is current.
-- Regenerate or check generated context as Docs Impact requires.
-- Reconciliation commits change only architecture docs, active plans, \`docs/known-issues.md\`, and \`.ai/generated/**\`. Never change production code, tests, or configuration during reconciliation.
-- When the validated implementation contradicts the approved design, do not rewrite the docs to match the defect and do not block on it: keep the docs at the approved design for that fact and record the contradiction, with file and symbol, under Architecture Drift Check. The code-diff Gate reviews it as an implementation finding, which returns the fix through Architect Debug.
-- Run \`.ai/tools/check-docs-sync\` and \`.ai/tools/check-durable-docs\` before submitting; a failing check prevents \`Decision: synced\` or \`unchanged\`.
+- A Replan, Debug Mode fix, or Architecture Diagnosis fix that changes a durable architecture fact updates the owning doc (see Architecture Docs Scope) in the same commits, and resolves or rewrites the \`docs/known-issues.md\` entries it affects.
+- In a Code-Change task, a fix that touches a module outside the architecture plan's Docs Impact either updates that module's owning doc or adds a Docs Impact row recording why no owned fact changed. VCM checks Docs Impact coverage with \`.ai/tools/check-docs-sync\` when the code-diff Gate is requested.
+- Regenerate or check generated context as the change requires.
+
+#### Post-Validation Docs Correction
+
+- Applies when project-manager routes, after validation, a code-diff report whose findings are \`docs-only\` (or \`docs-only\` and \`test-only\`), a code-diff start failure from the docs coverage check, or a Final Acceptance \`needs-architect-follow-up\` documentation or known-issues item.
+- Correct every reported documentation finding against the current code, then commit. The code-diff Gate reviews the commits incrementally.
+- Change only architecture docs, active plans, \`docs/known-issues.md\`, and \`.ai/generated/**\`. Production code, tests, configuration, and \`.ai/vcm/handoffs/architecture-plan.md\` stay unchanged: the validation-adequacy approval covers them, and a plan change after validation is a Replan.
+- When the code contradicts the approved design, do not rewrite the docs to match the defect: keep the docs at the approved design for that fact and report the contradiction, with file and symbol, to project-manager as an implementation defect.
+- Run \`.ai/tools/check-docs-sync\` and \`.ai/tools/check-durable-docs\` before reporting.
 
 #### Architecture Docs Scope
 
@@ -340,7 +345,7 @@ Update a doc whenever the task changes a durable architecture fact that the doc 
 - Keep only durable product, protocol, spec, or domain identifiers that future maintainers must understand.
 - Do not turn module architecture docs into source-file inventories, exhaustive callable lists, implementation walkthroughs, or API dumps.
 - Do not duplicate the generated public API index; explain design intent and contract meaning instead.
-- For every touched module, its owning doc is updated or the report records why no owned fact changed.
+- For every touched module, its owning doc is updated or Docs Impact records why no owned fact changed.
 - Do not keep temporary rationale in durable docs; durable design rationale belongs in Design Decisions.
 - Do not move task logs, temporary rationale, or per-task validation history into durable architecture docs.
 - Treat \`.ai/generated/public-surface.json\` as the full machine index for public surface. Verify or report its freshness when public APIs changed; do not replace it with prose in architecture docs.
@@ -352,6 +357,7 @@ Update a doc whenever the task changes a durable architecture fact that the doc 
 
 - Keep \`docs/plans/**\` limited to active or planned work.
 - When a plan is fully implemented or superseded, remove it from the active plans collection instead of converting it into a completion report, changelog, or historical archive; Git and PR history preserve the prior plan.
+- Remove an active plan the task completes during planning, with the other architecture doc changes; the task branch merges only after implementation.
 - Replace superseded requirements in an active plan and reconcile references from other durable docs. Do not append successive task decisions or completed-step narratives.
 - If the same current status, ordering, dependency, or scope is stated in more than one durable document, identify the owning document and make every other reference consistent with it.
 
@@ -367,23 +373,18 @@ Update a doc whenever the task changes a durable architecture fact that the doc 
 - Distinguish product/protocol issues from dev-environment, test-infra, harness, or VCM-tooling issues. Do not mix them in one KI entry.
 - Do not promote a task-local deferral unless it remains relevant after the task ends.
 - Before promoting, record confirmed unresolved findings from the final role handoff reports (test report, coder completion, Gate Review reports) in \`.ai/vcm/handoffs/known-issues.md\`; then promote only confirmed unresolved durable issues that satisfy Known Issues Sync.
-- During docs reconciliation, remove or rewrite resolved/stale KI entries touched by the task so \`docs/known-issues.md\` remains an open-issue snapshot.
+- Remove or rewrite resolved or stale KI entries in the commits that resolve them, so \`docs/known-issues.md\` remains an open-issue snapshot. A promotion or removal decided at Final Acceptance arrives as a \`needs-architect-follow-up\` Post-Validation Docs Correction.
 
 #### Cross-Document Consistency
 
-- Compare every durable fact changed by the task across architecture docs, active plans, testing docs, known issues, code, and generated context. Resolve contradictions before reporting \`synced\`.
+- Compare every durable fact changed by the task across architecture docs, active plans, testing docs, known issues, code, and generated context. Resolve contradictions before reporting the docs current.
 - Verify names, ownership, dependency direction, lifecycle, public contracts, validation commands, current gaps, and active-plan status against their owning source.
-- Do not edit tester-owned \`docs/TESTING.md\` during docs reconciliation. If it contradicts accepted code, generated context, or other durable docs, return \`Decision: blocked\`, \`Correction Owner: tester\`, and the exact conflict as Correction Evidence.
-- Run \`.ai/tools/check-durable-docs\` after durable-doc changes. A failing audit prevents \`Decision: synced\`; fix Architect-owned findings and report Tester-owned findings for routing.
+- Do not edit tester-owned \`docs/TESTING.md\`. If it contradicts accepted code, generated context, or other durable docs, report the exact conflict to project-manager for Tester correction.
+- Run \`.ai/tools/check-durable-docs\` after durable-doc changes. Fix Architect-owned findings before reporting and report Tester-owned findings for routing.
 
-#### Docs Sync Report
+#### Docs Update Report
 
-- Write \`.ai/vcm/handoffs/docs-sync-report.md\` for docs reconciliation in Code-Change Flow, Architect Debug Flow, or a code-producing Architecture Diagnosis Flow. Do not write it for Docs-Only Flow or a Debug/Diagnosis Branch.
 - In Docs-Only Flow, submit the complete \`.ai/vcm/handoffs/docs-update-report.md\` before returning to PM. It must record the decision, changed and reviewed documents, evidence reviewed, checks performed, commit, and remaining documentation issues.
-- The report includes a \`Module Coverage\` table (\`Module | Owning Doc | Status | Reason\`, Status \`updated\` or \`unchanged\`) covering every module touched by the task's commits, named by its module-index name or path (without \`.ai/generated/module-index.json\`, one row for module \`.\` owned by \`docs/ARCHITECTURE.md\`), a \`Reconciliation Commits\` list of the commits this reconciliation made (or \`None.\`), and the result of \`.ai/tools/check-docs-sync\`.
-- The report records decision, evidence reviewed, current-truth reconciliation, generated-context freshness, cross-document consistency, architecture docs, active plans, testing-doc consistency, known-issues disposition, durable-doc audit command and result, docs updated, docs left unchanged, remaining documentation risks, correction owner/evidence, and handoff notes.
-- Each rewritten \`docs-sync-report.md\` must be a complete, self-contained snapshot of the current docs-sync result and must not rely on a prior report revision.
-- \`Decision: synced\` or \`unchanged\` requires \`Correction Owner: none\` and \`Correction Evidence: None.\`. \`Decision: blocked\` requires exactly one \`Correction Owner: architect|coder|tester\` and concrete Correction Evidence.
 
 ### Background Jobs
 

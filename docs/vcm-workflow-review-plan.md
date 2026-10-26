@@ -1,6 +1,6 @@
 # VCM Workflow Control
 
-Last updated: 2026-08-28
+Last updated: 2026-10-26
 
 Status: implemented
 
@@ -149,12 +149,12 @@ results stale when consumed.
 The normal dispatch order is:
 
 ```text
-Architect -> Coder -> Tester -> Architect docs sync
+Architect -> Coder -> Tester -> Final Acceptance
 ```
 
 The Architecture Plan Gate must approve the real plan before Coder. The
-Validation Adequacy and Code Diff Gates must approve after Tester before docs
-sync. Gate Review is controlled by its existing request service rather than a
+Validation Adequacy and Code Diff Gates must approve after Tester before Final
+Acceptance. Gate Review is controlled by its existing request service rather than a
 PM route message, so Gate events are read from the Gate index and are not rows
 in Workflow Progress. Disabled Gates remain pass-through configuration.
 Not-required, skipped, and overridden states satisfy a checkpoint only when the
@@ -171,15 +171,18 @@ Allowed branches include:
 - Code Diff test-only findings return to Tester
 - explicit user-approved Tester-owned work after both green Gates returns to Tester
 - implementation findings enter Architect Debug
-- blocked docs sync routes its exact Architect, Coder, or Tester correction owner, then repeats invalidated validation and Gates before docs sync
+- Code Diff docs-only findings (alone or with test-only findings) and a docs
+  coverage start failure return to Architect, followed by an incremental Code
+  Diff Gate
 - Final Acceptance follow-up returns to the responsible Coder or Architect path
 
 An Architect follow-up from Final Acceptance must produce a fresh complete plan
 and a Gate result newer than that follow-up dispatch before Coder is legal.
 
 Architect Debug may replace itself with Architecture Diagnosis after its first
-Tester failure. A successful Debug or Diagnosis Branch returns by requesting
-`Flow: code-change` with the next Code-Change target. The complete history
+Tester failure. A Debug or Diagnosis Branch that passes its own Code Diff Gate
+has returned to its root flow: the root flow's Final Acceptance follows, and a
+follow-up dispatch requests the root flow. The complete history
 preserves every dispatch, while task runtime state records the current root
 flow, active branch, branch return, and flow-run start sequence. This prevents
 earlier completed flows from being mistaken for the active parent flow.
@@ -189,23 +192,23 @@ earlier completed flows from being mistaken for the active parent flow.
 The normal dispatch order is:
 
 ```text
-Architect -> Tester -> Architect docs sync
+Architect -> Tester -> Final Acceptance
 ```
 
-Validation Adequacy and Code Diff must pass before docs sync. A first failed
-Debug validation may switch to Architecture Diagnosis. When Debug is a branch
-of Code Change, successful review returns to Code Change instead of completing
-as a standalone flow.
+Validation Adequacy and Code Diff must pass before Final Acceptance. A first
+failed Debug validation may switch to Architecture Diagnosis. When Debug is a
+branch of Code Change, successful review returns to Code Change, whose Final
+Acceptance follows.
 
 ### Architecture Diagnosis
 
 The normal implementation path is:
 
 ```text
-Architect -> Tester -> Architect docs sync
+Architect -> Tester -> Final Acceptance
 ```
 
-Validation Adequacy and Code Diff must pass before docs sync. A diagnosis whose
+Validation Adequacy and Code Diff must pass before Final Acceptance. A diagnosis whose
 accepted disposition is analysis-only may complete without an implementation
 dispatch. Failed validation after implemented diagnosis has no automatic
 additional repair branch and must be reported to the user.
@@ -274,7 +277,7 @@ Unit and backend E2E coverage verifies:
   and Diagnosis branches, and parent-flow restoration
 - one-time exact user override binding
 - one-time user-approved post-validation Tester work without an override, with stale Gate rejection afterward
-- strict docs-sync correction owner/evidence and owner-specific return paths
+- docs-only Code Diff corrections and docs coverage start failures routed to Architect
 - route denial without approval and target mismatch rejection
 - claim and baseline capture before terminal submission, release on submission
   failure, and confirmation from the matching target `UserPromptSubmit` or

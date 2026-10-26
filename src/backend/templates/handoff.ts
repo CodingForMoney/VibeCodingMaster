@@ -8,7 +8,6 @@ import {
   CODER_COMPLETION_DECISIONS,
   DOCS_REPORT_DECISIONS,
   DOCS_UPDATE_COMMIT_RULE,
-  DOCS_SYNC_CORRECTION_OWNERS,
   FINAL_ACCEPTANCE_DECISIONS,
   L3_ACTIONS,
   L3_REQUIRED_VALUES,
@@ -513,69 +512,6 @@ ${renderArtifactOptions(ARCHITECTURE_DIAGNOSIS_DISPOSITIONS)}
 `;
 }
 
-export function renderDocsSyncReportTemplate(taskSlug: string): string {
-  return `# Docs Sync Report: ${taskSlug}
-
-${CURRENT_HANDOFF_NOTICE}
-
-## Summary
-
-TBD
-
-## Architecture Drift Check
-
-TBD
-
-## Docs Updated
-
-TBD
-
-## Docs Reviewed And Left Unchanged
-
-TBD
-
-## Public Contract / Module Boundary Notes
-
-TBD
-
-## Remaining Documentation Risks
-
-TBD
-
-## Known Issues Disposition
-
-TBD
-
-## Module Coverage
-
-<!-- One row per module touched by the task's commits, named by its module-index name or path; without a module index, use one row for module . owned by docs/ARCHITECTURE.md. Status is updated or unchanged; unchanged needs the reason no owned fact changed. Write None. when the task touched no module. -->
-| Module | Owning Doc | Status | Reason |
-| --- | --- | --- | --- |
-
-## Reconciliation Commits
-
-<!-- One bare commit hash per line for the commits this reconciliation made, or None. -->
-TBD
-
-## Docs Sync Check
-
-<!-- Command and result of .ai/tools/check-docs-sync. -->
-TBD
-
-## Correction Owner
-
-${renderArtifactOptions(DOCS_SYNC_CORRECTION_OWNERS)}
-
-## Correction Evidence
-
-${STRICT_NONE_VALUE}
-
-## Decision
-
-${renderArtifactOptions(DOCS_REPORT_DECISIONS)}
-`;
-}
-
 export function renderDocsUpdateReportTemplate(taskSlug: string, assignmentId = "docs-only"): string {
   return `# Docs Update Report: ${taskSlug}
 
@@ -688,7 +624,7 @@ TBD
 
 TBD
 
-## Review And Docs Sync
+## Review And Documentation
 
 TBD
 

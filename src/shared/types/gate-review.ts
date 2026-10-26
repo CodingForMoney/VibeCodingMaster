@@ -32,6 +32,10 @@ export const CODE_DIFF_SOURCES = [
 
 export type CodeDiffSource = typeof CODE_DIFF_SOURCES[number];
 
+// Prefixes the code-diff error recorded when the Docs Impact coverage check
+// refuses to start the Gate; Workflow Control routes it to Architect.
+export const CODE_DIFF_DOCS_COVERAGE_ERROR_PREFIX = "Docs coverage check failed:";
+
 export type GateReviewGateStatus =
   | "disabled"
   | "not_required"

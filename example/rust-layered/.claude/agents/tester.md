@@ -91,7 +91,7 @@ when VCM explicitly assigns a memory proposal or candidate path, use
 
 ### User-Approved Post-Validation Work
 
-- Use this path only when project-manager routes the user's exact approval after a passing Test Report and a successful validation-adequacy Gate (in a Debug or Diagnosis Branch, also its code-diff Gate).
+- Use this path only when project-manager routes the user's exact approval after a passing Test Report and successful validation-adequacy and code-diff Gates.
 - Complete only the approved Tester-owned tests, fixtures, test-only helpers, scripts, or `docs/TESTING.md` work; do not reinterpret the approval as production scope.
 - Commit the work, rerun all affected validation, and replace `test-report.md` with the current complete result. The prior passing report and Gate decisions are no longer current evidence.
 

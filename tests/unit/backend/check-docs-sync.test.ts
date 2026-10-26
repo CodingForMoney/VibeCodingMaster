@@ -5,7 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { createCommandRunner } from "../../../src/backend/adapters/command-runner.js";
-import { createDocsSyncCheck } from "../../../src/backend/services/docs-sync-check.js";
+import { createDocsCoverageCheck } from "../../../src/backend/services/docs-sync-check.js";
 
 const execFileAsync = promisify(execFile);
 const toolSource = path.join(process.cwd(), "scripts/harness-tools/check-docs-sync");
@@ -62,52 +62,47 @@ async function createTaskWorktree() {
   return { base, task };
 }
 
-function report(coverage: string, commits = "None.") {
-  return [
-    "# Docs Sync Report: demo",
+// Writes a complete architecture plan whose Docs Impact holds the given rows.
+async function writePlan(root: string, rows: string[], planningResult = "complete") {
+  await writeRepoFile(root, ".ai/vcm/handoffs/architecture-plan.md", [
+    `Planning Result: ${planningResult}`,
     "",
-    "## Module Coverage",
+    "## Docs Impact",
     "",
-    "| Module | Owning Doc | Status | Reason |",
-    "| --- | --- | --- | --- |",
-    coverage,
-    "",
-    "## Reconciliation Commits",
-    "",
-    commits,
-    "",
-    "## Decision",
-    "",
-    "synced",
+    "| Document | Change | Reason |",
+    "| --- | --- | --- |",
+    ...rows,
     ""
-  ].join("\n");
+  ].join("\n"));
 }
 
-async function runTool(cwd: string, reportContent: string, extraArgs: string[] = []) {
-  const reportPath = path.join(cwd, ".ai/vcm/handoffs/docs-sync-report.md");
-  await writeRepoFile(cwd, ".ai/vcm/handoffs/docs-sync-report.md", reportContent);
+async function runTool(cwd: string, extraArgs: string[] = []) {
   try {
-    const { stdout } = await execFileAsync(process.execPath, [path.join(cwd, ".ai/tools/check-docs-sync"), "--json", "--report", reportPath, ...extraArgs], { cwd });
-    return { code: 0, ...JSON.parse(stdout) as { base: string; findings: Array<{ code: string; subject: string }> } };
+    const { stdout } = await execFileAsync(process.execPath, [path.join(cwd, ".ai/tools/check-docs-sync"), "--json", ...extraArgs], { cwd });
+    return { code: 0, ...JSON.parse(stdout) as { base?: string; skipped?: string; findings: Array<{ code: string; subject: string }> } };
   } catch (error) {
     const failure = error as { code: number; stdout: string; stderr: string };
     return { code: failure.code, ...(failure.stdout ? JSON.parse(failure.stdout) : { findings: [] }), stderr: failure.stderr };
   }
 }
 
+function codes(result: { findings: Array<{ code: string; subject: string }> }) {
+  return result.findings.map((finding) => [finding.code, finding.subject]);
+}
+
 describe("check-docs-sync", () => {
-  it("passes when every touched module is covered and reconciliation changes only docs", async () => {
+  it("passes when every touched module's doc changed or Docs Impact explains why not", async () => {
     const { base, task } = await createTaskWorktree();
+    await writePlan(task, [
+      "| `packages/core/ARCHITECTURE.md` | Document the new counter. | Behavior changes. |",
+      "| `packages/api/ARCHITECTURE.md` | none | Only tests changed. |"
+    ]);
     await writeRepoFile(task, "packages/core/src/index.ts", "export const core = 2;\n");
+    await writeRepoFile(task, "packages/core/ARCHITECTURE.md", "# Core\n\nUpdated design.\n");
     await writeRepoFile(task, "packages/api/src/index.test.ts", "test\n");
     commit(task, "feat: change core");
-    await writeRepoFile(task, "packages/core/ARCHITECTURE.md", "# Core\n\nUpdated design.\n");
-    const reconciliation = commit(task, "docs: reconcile core");
 
-    const result = await runTool(task, report([
-      "| @demo/core | packages/core/ARCHITECTURE.md | updated | |",
-      "| packages/api | packages/api/ARCHITECTURE.md | unchanged | Only tests changed. |"
-    ].join("\n"), reconciliation.slice(0, 7)));
+    const result = await runTool(task);
 
     expect(result.code).toBe(0);
     // The base is the merge-base with the base repository's checked-out branch.
@@ -115,45 +110,47 @@ describe("check-docs-sync", () => {
     expect(result.findings).toEqual([]);
   });
 
-  it("reports uncovered modules, docs claimed updated but unchanged, and non-doc reconciliation commits", async () => {
+  it("accepts an owning-doc update for a module Docs Impact does not list", async () => {
     const { task } = await createTaskWorktree();
+    await writePlan(task, []);
+    await writeRepoFile(task, "packages/api/src/index.ts", "export const api = 2;\n");
+    await writeRepoFile(task, "packages/api/ARCHITECTURE.md", "# API\n\nRetry contract.\n");
+    commit(task, "fix: retry api calls");
+
+    expect((await runTool(task)).findings).toEqual([]);
+  });
+
+  it("reports uncovered modules, unexplained no-change rows, and planned docs the task never changed", async () => {
+    const { task } = await createTaskWorktree();
+    await writePlan(task, [
+      "| `packages/core/ARCHITECTURE.md` | Document the new counter. | Behavior changes. |",
+      "| `docs/ARCHITECTURE.md` | none | |"
+    ]);
     await writeRepoFile(task, "packages/core/src/index.ts", "export const core = 2;\n");
     await writeRepoFile(task, "packages/api/src/index.ts", "export const api = 2;\n");
     commit(task, "feat: change both modules");
-    await writeRepoFile(task, "packages/core/src/extra.ts", "export const extra = 1;\n");
-    const reconciliation = commit(task, "docs: reconcile");
 
-    const result = await runTool(task, report(
-      "| @demo/core | packages/core/ARCHITECTURE.md | updated | |",
-      `${reconciliation}\n0000000`
-    ));
+    const result = await runTool(task);
 
     expect(result.code).toBe(1);
-    expect(result.findings.map((finding: { code: string; subject: string }) => [finding.code, finding.subject])).toEqual([
-      ["DS_DOC_NOT_UPDATED", "packages/core/ARCHITECTURE.md"],
+    expect(codes(result)).toEqual([
       ["DS_MODULE_NOT_COVERED", "packages/api"],
-      ["DS_RECONCILIATION_NON_DOC", "packages/core/src/extra.ts"],
-      ["DS_UNKNOWN_COMMIT", "0000000"]
+      ["DS_PLANNED_DOC_NOT_CHANGED", "packages/core/ARCHITECTURE.md"],
+      ["DS_UNCHANGED_WITHOUT_REASON", "docs/ARCHITECTURE.md"]
     ]);
   });
 
-  it("reports a document the plan's Docs Impact changed that the task never changed", async () => {
+  it("skips a task without a complete architecture plan", async () => {
     const { task } = await createTaskWorktree();
-    await writeRepoFile(task, ".ai/vcm/handoffs/architecture-plan.md", [
-      "## Docs Impact",
-      "",
-      "| Document | Change | Reason |",
-      "| --- | --- | --- |",
-      "| `packages/api/ARCHITECTURE.md` | Document the new retry contract. | Contract changes. |",
-      "| `packages/core/ARCHITECTURE.md` | none | No owned fact changes. |",
-      ""
-    ].join("\n"));
     await writeRepoFile(task, "packages/api/src/index.ts", "export const api = 2;\n");
-    commit(task, "feat: change api");
+    commit(task, "fix: debug repair");
 
-    const result = await runTool(task, report("| @demo/api | packages/api/ARCHITECTURE.md | unchanged | Retry is internal. |"));
+    const missing = await runTool(task);
+    expect(missing).toMatchObject({ code: 0, findings: [] });
+    expect(missing.skipped).toContain("architecture-plan.md");
 
-    expect(result.findings.map((finding: { code: string }) => finding.code)).toEqual(["DS_PLANNED_DOC_NOT_CHANGED"]);
+    await writePlan(task, [], "incomplete");
+    expect(await runTool(task)).toMatchObject({ code: 0, findings: [] });
   });
 
   it("treats a repository without a module index as one module owned by docs/ARCHITECTURE.md", async () => {
@@ -163,27 +160,27 @@ describe("check-docs-sync", () => {
     await writeRepoFile(task, "app.py", "print(2)\n");
     commit(task, "feat: change app");
 
-    const missing = await runTool(task, report("| packages/api | packages/api/ARCHITECTURE.md | unchanged | n/a |"));
-    expect(missing.findings.map((finding: { code: string; subject: string }) => [finding.code, finding.subject]))
-      .toEqual([["DS_MODULE_NOT_COVERED", "."]]);
+    await writePlan(task, ["| `packages/api/ARCHITECTURE.md` | none | Not touched. |"]);
+    expect(codes(await runTool(task))).toEqual([["DS_MODULE_NOT_COVERED", "."]]);
 
-    const covered = await runTool(task, report("| . | docs/ARCHITECTURE.md | unchanged | Internal change only. |"));
+    await writePlan(task, ["| `docs/ARCHITECTURE.md` | none | Internal change only. |"]);
+    const covered = await runTool(task);
     expect(covered.code).toBe(0);
     expect(covered.findings).toEqual([]);
   });
 
-  it("lets the backend reject a docs-sync report with the tool's findings", async () => {
+  it("lets the backend refuse the code-diff Gate with the tool's findings", async () => {
     const { task } = await createTaskWorktree();
     await writeRepoFile(task, "packages/api/src/index.ts", "export const api = 2;\n");
     commit(task, "feat: change api");
-    const check = createDocsSyncCheck(createCommandRunner());
+    const check = createDocsCoverageCheck(createCommandRunner());
 
-    await expect(check(task, report("| @demo/api | packages/api/ARCHITECTURE.md | unchanged | Internal refactor. |")))
-      .resolves.toEqual([]);
-    const errors = await check(task, report("| @demo/core | packages/core/ARCHITECTURE.md | unchanged | Not touched. |"));
-    expect(errors).toEqual([expect.stringContaining("DS_MODULE_NOT_COVERED packages/api")]);
+    await writePlan(task, ["| `packages/api/ARCHITECTURE.md` | none | Internal refactor. |"]);
+    await expect(check(task)).resolves.toEqual([]);
+    await writePlan(task, ["| `packages/core/ARCHITECTURE.md` | none | Not touched. |"]);
+    expect(await check(task)).toEqual([expect.stringContaining("DS_MODULE_NOT_COVERED packages/api")]);
     // A worktree whose harness predates the tool is not checked.
     await rm(path.join(task, ".ai/tools/check-docs-sync"));
-    await expect(check(task, report(""))).resolves.toEqual([]);
+    await expect(check(task)).resolves.toEqual([]);
   });
 });

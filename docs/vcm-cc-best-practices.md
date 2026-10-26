@@ -178,7 +178,7 @@ docs/plans/               # active or planned work only
 Ownership:
 
 - Architect owns architecture planning, module boundaries, code scaffolding,
-  Debug Mode, docs sync, and durable architecture docs.
+  Debug Mode, and durable architecture docs.
 - Tester owns independent validation and `docs/TESTING.md` as current
   validation strategy, with integration/E2E case lists.
 - PM owns routing and final evidence acceptance, not technical analysis.
@@ -210,17 +210,21 @@ preserve execution history.
   keeps detailed design in `docs/ARCHITECTURE.md` or linked
   `docs/architecture/<area>.md` docs. Each doc keeps current Design Decisions
   with rationale and rejected alternatives.
-- Architect docs reconciliation, after validation and before the code-diff
-  Gate, corrects the docs against the validated code and reconciles changed
-  facts across architecture docs, active plans, testing docs, known issues,
-  code, and generated context. The owning role fixes contradictions before the
-  task can be accepted.
-- `.ai/tools/check-docs-sync` mechanically checks reconciliation coverage: every
-  touched module covered, updated docs actually changed, reconciliation commits
-  limited to documentation, and planned doc changes present.
+- Any later Replan, Debug fix, or Diagnosis fix that changes a durable
+  architecture fact updates the owning doc in the same commits. No separate
+  docs pass runs after validation: the code-diff Gate reviews the docs against
+  the final code, and a `docs-only` finding returns to Architect for a
+  correction that the rerun code-diff Gate reviews incrementally. Known-issues
+  promotion or removal decided at Final Acceptance arrives as
+  `needs-architect-follow-up`.
+- `.ai/tools/check-docs-sync` runs when the code-diff Gate is requested. With a
+  complete architecture plan, every touched module must have a changed owning
+  doc or a Docs Impact row with a no-change reason, and every doc Docs Impact
+  records as changed must have changed; otherwise the request fails to start.
 - `.ai/tools/check-durable-docs` mechanically checks high-confidence violations
-  after bootstrap and durable-doc updates. It supplements semantic Docs Sync;
-  it does not attempt to infer architecture correctness.
+  after bootstrap and durable-doc updates. It supplements the semantic
+  Documentation Fit review; it does not attempt to infer architecture
+  correctness.
 
 ## 5. Runtime State
 
@@ -246,7 +250,6 @@ Current runtime paths include:
 <taskRepoRoot>/.ai/vcm/handoffs/coder-completion.md
 <taskRepoRoot>/.ai/vcm/handoffs/test-report.md
 <taskRepoRoot>/.ai/vcm/handoffs/docs-update-report.md
-<taskRepoRoot>/.ai/vcm/handoffs/docs-sync-report.md
 <taskRepoRoot>/.ai/vcm/handoffs/workflow-progress.md
 <taskRepoRoot>/.ai/vcm/handoffs/final-acceptance.md
 <taskRepoRoot>/.ai/vcm/handoffs/known-issues.md
@@ -310,7 +313,7 @@ VCM roles:
   routing owner, gate tracker, final evidence acceptance owner, and PR
   preparation owner.
 - `architect`: architecture plan, Scaffold Manifest, code scaffolding, Debug
-  Mode, complete task planning, module docs, and docs sync.
+  Mode, complete task planning, and module docs.
 - `coder`: implementation inside the approved plan, scaffold completion,
   baseline tests, and cleanup of task-only code markers/comments.
 - `tester`: independent validation, test adequacy, missing test additions,
@@ -369,8 +372,7 @@ project-manager
   -> coder
   -> tester
   -> validation-adequacy Gate Review
-  -> architect docs reconciliation
-  -> code-diff Gate Review (code and reconciled docs)
+  -> code-diff Gate Review (code and docs)
   -> project-manager final acceptance
 ```
 
@@ -378,12 +380,13 @@ Additional routes:
 
 - Architect Debug Flow or a code-producing Architecture Diagnosis Flow uses a
   complete code-delivery flow:
-  `project-manager -> architect mode -> tester -> validation-adequacy Gate Review -> architect docs reconciliation -> code-diff Gate Review -> project-manager final acceptance`
+  `project-manager -> architect mode -> tester -> validation-adequacy Gate Review -> code-diff Gate Review -> project-manager final acceptance`
 - Architect Debug Branch or Architecture Diagnosis Branch suspends the parent
   flow, records its resume point, runs the mode through tester,
-  validation-adequacy Gate Review, and code-diff Gate Review, then returns to
-  that resume point without branch-level docs reconciliation or final
-  acceptance; the parent flow reconciles once.
+  validation-adequacy Gate Review, and code-diff Gate Review, and then has
+  returned to the parent flow: the parent flow's final acceptance follows, and
+  its follow-ups continue in the parent flow. A branch never runs its own final
+  acceptance.
 - An analysis-only Architecture Diagnosis Flow completes from its diagnosis
   result without final acceptance.
 - Docs-Only Flow:
@@ -609,11 +612,8 @@ errors to the role. The PreToolUse guard blocks direct Bash, Write, or Edit
 updates to managed workflow Markdown.
 
 Docs-Only Flow uses the shared `docs-update-report.md`, which Architect, Coder,
-or Tester may submit. The code-producing-flow `docs-sync-report.md` remains
-Architect-owned and is not reused for Docs-Only completion. A blocked docs-sync
-report names one correction owner and concrete evidence. PM routes that owner,
-then repeats affected validation and Gates before Architect reruns docs
-reconciliation.
+or Tester may submit. Code-producing flows have no separate documentation
+report; their doc commits are reviewed by the code-diff Gate.
 
 Harness Engineer is not a workflow role. It writes the assigned Task Harness
 Retrospective Result Path directly; its Stop Hook reads the report and checks
@@ -936,15 +936,16 @@ backend restart and disabling Auto Memory.
 
 `vcm-final-acceptance` is PM's final evidence audit for a complete code-delivery
 flow, including Architect Debug Flow or an Architecture Diagnosis Flow that
-produced code changes. Architect Debug Branch or Architecture Diagnosis Branch
-returns to the recorded parent-flow resume point and does not run its own final acceptance.
+produced code changes. An Architect Debug Branch or Architecture Diagnosis
+Branch that passes its code-diff Gate returns to its parent flow, whose final
+acceptance follows; the branch never runs its own final acceptance.
 PM must not use final acceptance for analysis-only or unfinished branch flows, or for
 technical design review, implementation review, source-code analysis, or test
 adequacy analysis.
 
 It checks whether required evidence exists and has clear decisions:
 
-- architecture plan or docs-sync decision when needed
+- architecture plan or architecture diagnosis when needed
 - tester test result and validation evidence when needed
 - required Gate Review decisions when enabled
 - known-issues disposition
@@ -953,7 +954,7 @@ It checks whether required evidence exists and has clear decisions:
 - changed-file scope explanation
 
 Do not accept when required role evidence is missing, tester findings are
-unresolved, docs sync is missing for durable changes, the durable-doc audit is
+unresolved, the code-diff approval does not cover the current HEAD, the durable-doc audit is
 missing or failed after durable-doc changes, known-issues disposition is
 missing, or unexplained high-risk files remain.
 

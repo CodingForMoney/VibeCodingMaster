@@ -1268,6 +1268,58 @@ describe("gate-review-service", () => {
     });
   });
 
+  it("refuses to start code-diff while the docs coverage check reports findings", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-code-diff-docs-coverage-"));
+    await writeHarnessFiles(tmpRepo);
+    let coverageFindings = ["DS_MODULE_NOT_COVERED packages/api: Module @demo/api changed in the task."];
+    const checkedRoots: string[] = [];
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo, [], {
+        "rev-parse HEAD": ({ cwd }) => cwd === tmpRepo ? "base-sha" : "head-sha",
+        "merge-base --is-ancestor base-sha head-sha": "",
+        "log --oneline --reverse base-sha..head-sha": "abc1234 implement route",
+        "show --format= --name-only --find-renames abc1234": "src/feature.ts",
+        "show --format= --stat --find-renames abc1234": " src/feature.ts | 4 ++",
+        "show --format= --binary --find-renames abc1234": "diff --git a/src/feature.ts b/src/feature.ts\n"
+      }),
+      runtime: createRuntime(tmpRepo, [], "approve"),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["validation-adequacy", "code-diff"]),
+      sessionService: createSessionService(),
+      roundService: createRoundService(),
+      checkDocsCoverage: async (taskRepoRoot) => {
+        checkedRoots.push(taskRepoRoot);
+        return coverageFindings;
+      },
+      reportPollIntervalMs: 5
+    });
+
+    expect((await service.requestReviewGate(tmpRepo, "demo-task", "validation-adequacy")).status).toBe("started");
+    await waitFor(async () => {
+      const record = (await service.getState(tmpRepo!, "demo-task")).gates["validation-adequacy"];
+      return record.status === "completed" && record.decision === "approve";
+    });
+
+    const refused = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", { codeDiffSource: "coder" });
+    expect(refused).toMatchObject({
+      status: "failed_to_start",
+      message: expect.stringMatching(/^Docs coverage check failed: DS_MODULE_NOT_COVERED packages\/api/),
+      record: { status: "failed", error: expect.stringMatching(/^Docs coverage check failed:/) }
+    });
+    expect(checkedRoots).toEqual([taskWorktree(tmpRepo)]);
+
+    coverageFindings = [];
+    expect((await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", {
+      codeDiffSource: "coder"
+    })).status).toBe("started");
+    await waitFor(async () => {
+      const record = (await service.getState(tmpRepo!, "demo-task")).gates["code-diff"];
+      return record.status === "completed" && record.decision === "approve";
+    });
+  });
+
   it("rejects code-diff when Tester evidence changes after validation-adequacy approval", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-code-diff-stale-validation-"));
     await writeHarnessFiles(tmpRepo);

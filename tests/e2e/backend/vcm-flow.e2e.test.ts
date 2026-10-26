@@ -8,7 +8,6 @@ import {
   renderArchitecturePlanTemplate,
   renderCoderCompletionTemplate,
   renderDocsUpdateReportTemplate,
-  renderDocsSyncReportTemplate,
   renderFinalAcceptanceTemplate,
   renderTestReportTemplate
 } from "../../../src/backend/templates/handoff.js";
@@ -127,7 +126,7 @@ describe("backend E2E with mock Claude Code", () => {
     expect((await service.getState(context)).pendingDispatch?.targetRole).toBe("tester");
   });
 
-  it.each(["code-change", "architect-debug", "architecture-diagnosis"] as const)("rejects the wrong docs artifact and completes %s with docs-sync through the API", async (flow) => {
+  it.each(["code-change", "architect-debug", "architecture-diagnosis"] as const)("corrects a docs-only code-diff finding through Architect and completes %s through the API", async (flow) => {
     const env = await createMockClaudeE2eApp({ workflowControl: true });
     cleanups.push(() => env.close());
     const repo = await createE2eRepo();
@@ -165,51 +164,28 @@ describe("backend E2E with mock Claude Code", () => {
       ["none|repair-required|repaired|production-change-required", "none"]
     ]));
     const codeDiffSource = flow === "code-change" ? "coder" : flow === "architect-debug" ? "architect-debug" : "architect-diagnosis";
-    // Docs reconciliation follows the validation-adequacy Gate and precedes code-diff.
-    await writeWorkflowGateIndex(task.worktreePath, { validation: "approve" }, "2026-09-09T00:01:00.000Z");
-    await advanceWorkflow(service, context, "architect", undefined, "synchronize delivery documentation");
+    // The code-diff Gate follows validation-adequacy; a docs-only finding returns to Architect.
+    await writeWorkflowGateIndex(task.worktreePath, {
+      validation: "approve", codeDiff: "request_changes", codeDiffSource, codeDiffScopes: ["docs-only"]
+    }, "2026-09-09T00:01:00.000Z");
+    await advanceWorkflow(service, context, "architect", undefined, "correct the reported docs");
     const architect = await startRole(env.app, task.taskSlug, "architect");
     const pm = await startRole(env.app, task.taskSlug, "project-manager");
-    const original = await fs.readFile(path.join(task.worktreePath, context.handoffDir, "docs-update-report.md"), "utf8");
-    let reportSubmitted = false;
-    env.mockRuntime.onPrompt("architect", "Synchronize final delivery documentation", async (ctx) => {
+    let docsCorrected = false;
+    env.mockRuntime.onPrompt("architect", "Correct the reported docs", async (ctx) => {
       await ctx.userPromptSubmit();
-      const wrong = await env.app.inject({
-        method: "POST", url: `/api/tasks/${task.taskSlug}/artifacts/submit`,
-        payload: {
-          role: "architect", runtimeSessionToken: architect.runtimeSessionToken,
-          kind: "docs-update-report", mode: "final",
-          content: completeWorkflowArtifact(renderDocsUpdateReportTemplate(task.taskSlug), [
-            ["synced|unchanged|blocked", "synced"], ["## Commit\n\nTBD", "## Commit\n\nabc1234"]
-          ])
-        }
-      });
-      expect(wrong.statusCode, wrong.body).toBe(422);
-      expect(wrong.body).toContain("WORKFLOW_DOCS_ARTIFACT_MISMATCH");
-      expect(wrong.body).toContain(".ai/vcm/handoffs/docs-sync-report.md");
-      expect(await fs.readFile(path.join(ctx.cwd, context.handoffDir, "docs-update-report.md"), "utf8")).toBe(original);
-      const correct = await env.app.inject({
-        method: "POST", url: `/api/tasks/${task.taskSlug}/artifacts/submit`,
-        payload: {
-          role: "architect", runtimeSessionToken: architect.runtimeSessionToken,
-          kind: "docs-sync-report", mode: "final",
-          content: completeWorkflowArtifact(renderDocsSyncReportTemplate(task.taskSlug), [
-            ["synced|unchanged|blocked", "synced"], ["none|architect|coder|tester", "none"]
-          ])
-        }
-      });
-      expect(correct.statusCode, correct.body).toBe(200);
-      reportSubmitted = true;
+      await ctx.writeFile("docs/ARCHITECTURE.md", "# Architecture\n\nCorrected to match the final code.\n");
+      docsCorrected = true;
       await ctx.stop();
     });
-    env.mockRuntime.write(architect.id, "Synchronize final delivery documentation");
+    env.mockRuntime.write(architect.id, "Correct the reported docs");
     await env.mockRuntime.waitForIdle();
-    expect(reportSubmitted).toBe(true);
+    expect(docsCorrected).toBe(true);
     await writeWorkflowGateIndex(task.worktreePath, {
       validation: "approve", codeDiff: "approve", codeDiffSource
     }, "2026-09-09T00:02:00.000Z");
     await write("final-acceptance.md", completeWorkflowArtifact(renderFinalAcceptanceTemplate(task.taskSlug), [
-      ["accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|needs-docs-sync|blocked-by-user-decision", "accepted"]
+      ["accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|blocked-by-user-decision", "accepted"]
     ]));
     const current = await service.getProgress(context);
     const completed = await env.app.inject({
@@ -1196,6 +1172,7 @@ async function writeWorkflowGateIndex(
     validation?: "approve" | "request_changes";
     codeDiff?: "approve" | "request_changes";
     codeDiffSource?: "coder" | "architect-debug" | "architect-diagnosis";
+    codeDiffScopes?: Array<"test-only" | "docs-only" | "implementation">;
   },
   updatedAt: string
 ): Promise<void> {
@@ -1210,6 +1187,9 @@ async function writeWorkflowGateIndex(
     requestId: decision ? `request-${gate}-${updatedAt}` : undefined,
     inputHash: decision ? `input-${gate}-${updatedAt}` : undefined,
     codeDiffSource: gate === "code-diff" && decision ? decisions.codeDiffSource ?? "coder" : undefined,
+    findings: gate === "code-diff" && decisions.codeDiffScopes
+      ? decisions.codeDiffScopes.map((scope, position) => ({ id: `F-${position + 1}`, scope }))
+      : undefined,
     reportPath: `.ai/vcm/gate-reviews/${gate}-review.md`,
     promptPath: `.ai/vcm/gate-reviews/${gate}-prompt.md`,
     completedAt: decision ? updatedAt : undefined,

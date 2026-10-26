@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyInstance } from "fastify";
 import fastifyStatic from "@fastify/static";
 import type { ArtifactService } from "./services/artifact-service.js";
-import { createDocsSyncCheck } from "./services/docs-sync-check.js";
+import { createDocsCoverageCheck } from "./services/docs-sync-check.js";
 import { createArtifactService } from "./services/artifact-service.js";
 import { createClaudeAdapter } from "./adapters/claude-adapter.js";
 import { createCodexBridgeAdapter } from "./adapters/codex-bridge-adapter.js";
@@ -314,8 +314,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   const workflowControlService = createWorkflowControlService({ fs });
   const artifactService = createArtifactService(fs, {
     workflowControlService,
-    getDurableDocAssignment: (taskRepoRoot, role) => autoMemoryService.getDurableDocAssignment(taskRepoRoot, role),
-    checkDocsSync: createDocsSyncCheck(runner)
+    getDurableDocAssignment: (taskRepoRoot, role) => autoMemoryService.getDurableDocAssignment(taskRepoRoot, role)
   });
   const projectService = createProjectService({
     fs,
@@ -423,6 +422,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     sessionService,
     roundService,
     workflowControlService,
+    checkDocsCoverage: createDocsCoverageCheck(runner),
     onArchitecturePlanDisposition: ({ repoRoot, taskSlug, accepted }) =>
       architectRestartService.recordArchitectureGateDisposition(repoRoot, taskSlug, accepted)
   });

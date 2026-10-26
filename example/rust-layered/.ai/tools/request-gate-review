@@ -113,8 +113,7 @@ const SOURCE_ARTIFACTS = {
   ],
   "code-diff": [
     ".ai/vcm/handoffs/test-report.md",
-    ".ai/vcm/gate-reviews/validation-adequacy-review.md",
-    ".ai/vcm/handoffs/docs-sync-report.md"
+    ".ai/vcm/gate-reviews/validation-adequacy-review.md"
   ]
 };
 const CODE_DIFF_SOURCE_ARTIFACTS = {

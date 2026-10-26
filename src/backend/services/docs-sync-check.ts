@@ -11,18 +11,17 @@ interface DocsSyncFinding {
   message: string;
 }
 
-// Runs the task worktree's check-docs-sync against a candidate docs-sync report
-// and returns one error per finding. A worktree whose harness predates the tool
-// is not checked.
-export function createDocsSyncCheck(runner: CommandRunner) {
-  return async (taskRepoRoot: string, reportContent: string): Promise<string[]> => {
+// Runs the task worktree's check-docs-sync, which compares the task's commits
+// with the architecture plan's Docs Impact, and returns one error per finding.
+// A worktree whose harness predates the tool is not checked.
+export function createDocsCoverageCheck(runner: CommandRunner) {
+  return async (taskRepoRoot: string): Promise<string[]> => {
     const tool = path.join(taskRepoRoot, DOCS_SYNC_TOOL);
     if (!fs.existsSync(tool)) {
       return [];
     }
-    const result = await runner.run(process.execPath, [tool, "--report-stdin", "--json"], {
+    const result = await runner.run(process.execPath, [tool, "--json"], {
       cwd: taskRepoRoot,
-      input: reportContent,
       timeoutMs: DOCS_SYNC_TIMEOUT_MS
     });
     if (result.exitCode === 0) {
@@ -36,6 +35,6 @@ export function createDocsSyncCheck(runner: CommandRunner) {
     } catch {
       // Fall through to the raw tool error below.
     }
-    return [`${DOCS_SYNC_TOOL} could not check the report: ${(result.stderr || result.stdout).trim() || `exit ${result.exitCode}`}`];
+    return [`${DOCS_SYNC_TOOL} could not check the task: ${(result.stderr || result.stdout).trim() || `exit ${result.exitCode}`}`];
   };
 }

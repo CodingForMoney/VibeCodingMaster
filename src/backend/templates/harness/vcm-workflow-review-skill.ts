@@ -65,7 +65,7 @@ VCM binds that authorization to this exact task state, flow, target role, eviden
 
 ## User-Approved Post-Validation Work
 
-When Tester has returned \`pass\`, the validation-adequacy Gate is successful (in a Debug or Diagnosis Branch, also its code-diff Gate), docs reconciliation has not started, and the user explicitly approves additional Tester-owned work in the current task, propose Tester again with:
+When Tester has returned \`pass\`, the validation-adequacy and code-diff Gates are successful, Final Acceptance has not routed a follow-up, and the user explicitly approves additional Tester-owned work in the current task, propose Tester again with:
 
 \`\`\`text
 Authorization Text: none

@@ -22,7 +22,7 @@ describe("createStatusService", () => {
             "architecture-plan": "ok",
             "known-issues": "ok",
             "test-report": "ok",
-            "docs-sync-report": "incomplete",
+            "docs-update-report": "incomplete",
             "final-acceptance": "ok"
           });
         }
@@ -118,7 +118,7 @@ function createArtifactSummary(statuses: Record<ArtifactSummary["checks"][number
       architecturePlanPath: ".ai/vcm/handoffs/architecture-plan.md",
       knownIssuesPath: ".ai/vcm/handoffs/known-issues.md",
       testReportPath: ".ai/vcm/handoffs/test-report.md",
-      docsSyncReportPath: ".ai/vcm/handoffs/docs-sync-report.md",
+      docsUpdateReportPath: ".ai/vcm/handoffs/docs-update-report.md",
       finalAcceptancePath: ".ai/vcm/handoffs/final-acceptance.md"
     },
     checks: Object.entries(statuses).map(([kind, status]) => ({

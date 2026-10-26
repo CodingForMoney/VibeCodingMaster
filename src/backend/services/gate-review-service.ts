@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import {
+  CODE_DIFF_DOCS_COVERAGE_ERROR_PREFIX,
   CODE_DIFF_FINDING_SCOPES,
   CODE_DIFF_SOURCES,
   GATE_REVIEW_GATES,
@@ -64,6 +65,8 @@ export interface GateReviewServiceDeps {
     "getRoleSession" | "markRoleActivityRunning" | "restartRoleSession" | "resumeRoleSession" | "startRoleSession"
   >;
   roundService: Pick<RoundService, "recordRoleTurnEvent">;
+  // Checks the architecture plan's Docs Impact against the task's commits.
+  checkDocsCoverage?: (taskRepoRoot: string) => Promise<string[]>;
   workflowControlService?: Pick<WorkflowControlService, "getProgress" | "getState">
     & Partial<Pick<WorkflowControlService, "runWhileNotAwaitingUser">>;
   onArchitecturePlanDisposition?: (input: {
@@ -144,8 +147,7 @@ const SOURCE_ARTIFACTS: Record<GateReviewGate, string[]> = {
   ],
   "code-diff": [
     ".ai/vcm/handoffs/test-report.md",
-    ".ai/vcm/gate-reviews/validation-adequacy-review.md",
-    ".ai/vcm/handoffs/docs-sync-report.md"
+    ".ai/vcm/gate-reviews/validation-adequacy-review.md"
   ]
 };
 
@@ -519,6 +521,14 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
           record: index.gates[gate],
           message: prerequisiteError
         };
+      }
+      const coverageFindings = deps.checkDocsCoverage
+        ? await deps.checkDocsCoverage(context.taskRepoRoot)
+        : [];
+      if (coverageFindings.length > 0) {
+        const message = `${CODE_DIFF_DOCS_COVERAGE_ERROR_PREFIX} ${coverageFindings.join(" ")}`;
+        index = await recordCodeDiffStartFailure(index, context, gate, codeDiffSource, message, codeDiffInput);
+        return { status: "failed_to_start", gate, record: index.gates[gate], message };
       }
     }
 

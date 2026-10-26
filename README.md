@@ -214,7 +214,7 @@ Project Manager
   -> Architect (plan, scaffold, and architecture docs)
   -> Coder
   -> Tester
-  -> Architect docs reconciliation
+  -> validation-adequacy Gate Review
   -> code-diff Gate Review (code and docs)
   -> Project Manager final acceptance
 ```

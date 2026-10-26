@@ -610,7 +610,7 @@ function renderFinalAcceptance(decision: string): string {
     "All changes traced.",
     "## Validation Summary",
     "Checks passed.",
-    "## Review And Docs Sync",
+    "## Review And Documentation",
     "Complete.",
     "## Known Issues Disposition",
     "None.",

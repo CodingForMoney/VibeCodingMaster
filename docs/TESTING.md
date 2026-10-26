@@ -223,24 +223,24 @@ tests/
 | INT-RT-006 | PM question hard pause and delivery | `vcm-ask-user` + Workflow Control + Claude hooks + translation + Gateway | The user receives PM's actual final reply and advancement stays locked until direct user input | Registration cancels the pending approval/proposal without synthesizing a reply; CC terminal/transcript and panel/Gateway use the same full reply under every translation scope; translation off preserves the original; success/failure share one translation; Pause Alert never contains the registered question; repeated Stop/panel reload do not duplicate replies or translation; new Gate requests/retries, routing, and completion are blocked; callbacks do not unlock; direct user input requires fresh approval | L2/L3, on PM communication, workflow, reply, translation, Gateway, or Hook change | Workflow-control unit tests, Pause Alert presentation tests, and backend mock-Claude/Gateway E2E |
 | INT-RT-007 | Multi-role Docs-Only Flow | Workflow Control + Artifact API + Architect/Coder/Tester sessions | Documentation-only work can be assigned to the role that owns the relevant evidence without entering code or validation gates | All three roles may submit `docs-update-report.md`; each sequential assignment requires a fresh report; only the latest `synced` or `unchanged` result completes; a testing-document update by Tester remains Docs-Only | L2, on Docs-Only or managed-artifact changes | Covered by artifact, workflow-control, Harness-template, and backend mock-Claude E2E tests |
 | INT-RT-008 | Workflow-role Restart With Context | Session routes + Role Context Restart Service + Claude Hook | A fresh workflow-role Session can continue from durable task artifacts without a new context document | All five workflow roles receive role-specific artifact references and one continuation prompt; Translator and Harness Engineer are rejected; the first prompt clears intent; backend restart recreates an unconfirmed replacement | L2, on Session restart or recovery changes | Covered by `role-context-restart.e2e.test.ts` with the mock Claude runtime |
-| INT-RT-009 | Post-validation follow-up and docs-sync correction | Workflow Control + managed artifacts + PM route authorization | Fully green validation can accept one explicit Tester-owned follow-up without a workflow override, and blocked docs sync returns to its declared owner | Missing, reused, wrong-owner, or wrong-checkpoint approval is rejected; the matching approval is consumed once; old Test/Gate evidence becomes stale; blocked docs sync requires exact owner/evidence and returns through every invalidated validation step | L2, on Workflow Control or docs-sync contract changes | Covered by workflow-control, artifact-contract, Harness-template, and backend mock-Claude E2E tests |
+| INT-RT-009 | Post-validation follow-up and docs correction | Workflow Control + Gate Review + PM route authorization | Fully green validation can accept one explicit Tester-owned follow-up without a workflow override, and docs-only code-diff findings or docs coverage failures return to Architect | Missing, reused, or wrong-checkpoint approval is rejected before both Gates pass; the matching approval is consumed once; old Test/Gate evidence becomes stale; a docs correction completes only after an incremental code-diff approval and a fresh Final Acceptance | L2, on Workflow Control or code-diff routing changes | Covered by workflow-control, gate-review, Harness-template, and backend mock-Claude E2E tests |
 | INT-RT-010 | Workflow Control paired-state recovery | Workflow Progress + Workflow Control runtime state + message recovery | A crash or backend restart cannot leave a false approval, duplicate history row, or an unrecoverable delivered route | Interrupted paired writes replay from the transaction record; undelivered dispatches return to pending; delivered unconfirmed dispatches retain their claim and pre-delivery baseline for late Hook or explicit manual confirmation; missing or inconsistent paired state fails closed | L2, on Workflow Control persistence or runtime recovery changes | Covered by Workflow Control and runtime recovery service tests plus backend mock-Claude workflow journeys |
 
 ### Backend E2E (implemented: `tests/e2e/backend/`)
 
-Documentation-artifact regressions cover Code-Change, Architect Debug, and
-code-producing Architecture Diagnosis delivery: submitting `docs-update-report`
-during docs reconciliation is rejected without overwriting the previous file,
-then a fresh `docs-sync-report` and a code-diff approval recorded after it allow
-completion. Workflow Control tests cover reconciliation before the code-diff
-Gate, completion blocked until code-diff reviews the reconciliation, and routing
-of docs-only, test-only, mixed, and implementation code-diff findings.
-`check-docs-sync` tests drive a real task worktree to cover module coverage,
-updated-doc verification, non-doc reconciliation commits, unknown commits,
-planned doc changes, a repository without a module index, and backend
-rejection of a failing report. Service tests also cover branch
-resumption, stale-report diagnostics, draft submissions, Docs-Only owners, and
-completed workflows. The memory-to-durable-doc E2E submits its assigned report
+Documentation regressions cover Code-Change, Architect Debug, and
+code-producing Architecture Diagnosis delivery: a docs-only code-diff finding
+routes to Architect, and an incremental code-diff approval with a fresh Final
+Acceptance completes the flow through the Artifact API. Workflow Control tests
+cover the code-diff Gate directly after validation-adequacy, completion blocked
+until code-diff approves, routing of docs-only, test-only, mixed, and
+implementation findings, docs coverage start failures, and a Debug or Diagnosis
+Branch that returns to its root flow's Final Acceptance once its code-diff Gate
+passes. `check-docs-sync` tests drive a real task worktree to cover Docs Impact
+coverage of touched modules, owning-doc updates, no-change reasons, planned doc
+changes, tasks without a complete plan, a repository without a module index,
+and the backend check that refuses to start code-diff. Service tests also cover
+Docs-Only owners and completed workflows. The memory-to-durable-doc E2E submits its assigned report
 through the Artifact API with Workflow Control enabled.
 
 The backend suite currently covers these journeys through real routes and

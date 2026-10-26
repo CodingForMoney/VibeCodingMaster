@@ -4,7 +4,6 @@ import {
   renderArchitecturePlanTemplate,
   renderArchitectDebugTemplate,
   renderDocsUpdateReportTemplate,
-  renderDocsSyncReportTemplate,
   renderFinalAcceptanceTemplate,
   renderTestReportTemplate
 } from "../../../src/backend/templates/handoff.js";
@@ -308,104 +307,6 @@ Implement the manifest.
     expect(result.missingHeadings).toContain("Failure Model");
   });
 
-  it("supports docs sync reports", () => {
-    const result = checkMarkdownArtifact("docs-sync-report", "docs-sync-report.md", `
-# Docs Sync Report
-
-## Summary
-Checked.
-
-## Architecture Drift Check
-No drift.
-
-## Docs Updated
-None.
-
-## Docs Reviewed And Left Unchanged
-README.md remains current.
-
-## Public Contract / Module Boundary Notes
-No changes.
-
-## Remaining Documentation Risks
-None.
-
-## Known Issues Disposition
-No task issues to promote.
-
-## Module Coverage
-| Module | Owning Doc | Status | Reason |
-| --- | --- | --- | --- |
-| packages/api | packages/api/ARCHITECTURE.md | unchanged | Only test fixtures changed. |
-
-## Reconciliation Commits
-None.
-
-## Docs Sync Check
-.ai/tools/check-docs-sync passed.
-
-## Correction Owner
-none
-
-## Correction Evidence
-None.
-
-## Decision
-unchanged
-`);
-    expect(result.status).toBe("ok");
-  });
-
-  it("requires docs sync coverage of every touched module and bare reconciliation commits", () => {
-    const base = completeTemplate("docs-sync-report", renderDocsSyncReportTemplate("demo"));
-    const withCoverage = (rows: string) => base.replace(
-      "## Module Coverage\n\nNone.",
-      `## Module Coverage\n\n| Module | Owning Doc | Status | Reason |\n| --- | --- | --- | --- |\n${rows}`
-    );
-
-    const valid = withCoverage("| core | core/ARCHITECTURE.md | updated | |\n| api | api/ARCHITECTURE.md | unchanged | Only tests changed. |")
-      .replace("## Reconciliation Commits\n\n<!-- One bare commit hash per line for the commits this reconciliation made, or None. -->\nNone.", "## Reconciliation Commits\n\nabc1234\ndef5678");
-    expect(checkMarkdownArtifact("docs-sync-report", "docs-sync-report.md", valid).status).toBe("ok");
-
-    const missingReason = checkMarkdownArtifact("docs-sync-report", "docs-sync-report.md", withCoverage("| api | api/ARCHITECTURE.md | unchanged | |"));
-    expect(missingReason.status).toBe("incomplete");
-    expect(missingReason.invalidFields.join("\n")).toContain("api is unchanged and needs the reason");
-
-    const badStatus = checkMarkdownArtifact("docs-sync-report", "docs-sync-report.md", withCoverage("| api | api/ARCHITECTURE.md | skipped | n/a |"));
-    expect(badStatus.invalidFields.join("\n")).toContain("Status updated or unchanged");
-
-    const emptyTable = checkMarkdownArtifact("docs-sync-report", "docs-sync-report.md", withCoverage(""));
-    expect(emptyTable.invalidFields.join("\n")).toContain("Module Coverage table has no rows");
-
-    const badCommits = checkMarkdownArtifact("docs-sync-report", "docs-sync-report.md", base.replace(
-      "## Reconciliation Commits\n\n<!-- One bare commit hash per line for the commits this reconciliation made, or None. -->\nNone.",
-      "## Reconciliation Commits\n\n- abc1234 docs: sync"
-    ));
-    expect(badCommits.invalidFields.join("\n")).toContain("Reconciliation Commits must be exactly None.");
-  });
-
-  it("requires blocked docs sync to identify one correction owner and concrete evidence", () => {
-    const content = completeTemplate("docs-sync-report", renderDocsSyncReportTemplate("demo"))
-      .replace("## Correction Owner\n\nnone", "## Correction Owner\n\ntester")
-      .replace("## Correction Evidence\n\nNone.", "## Correction Evidence\n\ndocs/TESTING.md records the wrong command.")
-      .replace("## Decision\n\nunchanged", "## Decision\n\nblocked");
-    const result = checkMarkdownArtifact("docs-sync-report", "docs-sync-report.md", content);
-
-    expect(result.status).toBe("ok");
-  });
-
-  it("rejects a correction owner on a green docs sync result", () => {
-    const content = completeTemplate("docs-sync-report", renderDocsSyncReportTemplate("demo"))
-      .replace("## Correction Owner\n\nnone", "## Correction Owner\n\ntester")
-      .replace("## Correction Evidence\n\nNone.", "## Correction Evidence\n\ndocs/TESTING.md needs correction.");
-    const result = checkMarkdownArtifact("docs-sync-report", "docs-sync-report.md", content);
-
-    expect(result.status).toBe("incomplete");
-    expect(result.invalidFields).toContain(
-      "Correction Owner must contain exactly \"none\" when Decision is unchanged; found \"tester\"."
-    );
-  });
-
   it("supports final acceptance reports", () => {
     const result = checkMarkdownArtifact("final-acceptance", "final-acceptance.md", `
 # Final Acceptance
@@ -422,7 +323,7 @@ All changes traced.
 ## Validation Summary
 Checks passed.
 
-## Review And Docs Sync
+## Review And Documentation
 Tester and docs sync complete.
 
 ## Known Issues Disposition
@@ -726,32 +627,6 @@ Nothing to promote.
     );
   });
 
-  it("rejects invalid docs-sync decisions", () => {
-    const result = checkMarkdownArtifact("docs-sync-report", "docs-sync-report.md", `
-# Docs Sync Report
-
-## Summary
-Checked.
-## Architecture Drift Check
-None.
-## Docs Updated
-None.
-## Docs Reviewed And Left Unchanged
-README.md.
-## Public Contract / Module Boundary Notes
-None.
-## Remaining Documentation Risks
-None.
-## Known Issues Disposition
-None.
-## Decision
-looks-good
-`);
-
-    expect(result.status).toBe("incomplete");
-    expect(result.invalidFields[0]).toContain("synced|unchanged|blocked");
-  });
-
   it("rejects invalid final-acceptance decisions", () => {
     const content = renderFinalAcceptanceTemplate("demo")
       .replaceAll("TBD", "None.");
@@ -768,7 +643,6 @@ looks-good
       ["architecture-plan", renderArchitecturePlanTemplate("demo")],
       ["test-report", renderTestReportTemplate("demo")],
       ["docs-update-report", renderDocsUpdateReportTemplate("demo")],
-      ["docs-sync-report", renderDocsSyncReportTemplate("demo")],
       ["final-acceptance", renderFinalAcceptanceTemplate("demo")]
     ] as const;
 
@@ -802,17 +676,11 @@ looks-good
     );
     expect(renderTestReportTemplate("demo")).toContain("L3 Required: yes|no");
     expect(renderTestReportTemplate("demo")).toContain("<run-existing|updated|added>");
-    expect(renderDocsSyncReportTemplate("demo")).toContain(
-      "## Decision\n\nsynced|unchanged|blocked"
-    );
-    expect(renderDocsSyncReportTemplate("demo")).toContain(
-      "## Correction Owner\n\nnone|architect|coder|tester"
-    );
     expect(renderDocsUpdateReportTemplate("demo")).toContain(
       "## Decision\n\nsynced|unchanged|blocked"
     );
     expect(renderFinalAcceptanceTemplate("demo")).toContain(
-      "## Decision\n\naccepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|needs-docs-sync|blocked-by-user-decision"
+      "## Decision\n\naccepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|blocked-by-user-decision"
     );
   });
 
@@ -852,7 +720,7 @@ looks-good
 
     expect(result.status).toBe("incomplete");
     expect(result.invalidFields).toContain(
-      "Decision must contain exactly \"accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|needs-docs-sync|blocked-by-user-decision\"; found \"accepted Everything passed.\"."
+      "Decision must contain exactly \"accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|blocked-by-user-decision\"; found \"accepted Everything passed.\"."
     );
   });
 });
@@ -865,12 +733,10 @@ function docsCommitReport(commit: string): string {
 }
 
 function completeTemplate(
-  kind: "architecture-brief" | "architect-debug" | "architecture-plan" | "test-report" | "docs-update-report" | "docs-sync-report" | "final-acceptance",
+  kind: "architecture-brief" | "architect-debug" | "architecture-plan" | "test-report" | "docs-update-report" | "final-acceptance",
   content: string
 ): string {
-  const completed = content
-    .replace(/## Module Coverage\n[\s\S]*?\n(?=## )/, "## Module Coverage\n\nNone.\n\n")
-    .replaceAll("TBD", "None.");
+  const completed = content.replaceAll("TBD", "None.");
   if (kind === "architecture-brief") {
     return completed.replace(
       "Architecture Brief Status: interviewing|confirmed",
@@ -891,7 +757,7 @@ function completeTemplate(
   }
   if (kind === "final-acceptance") {
     return completed.replace(
-      "accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|needs-docs-sync|blocked-by-user-decision",
+      "accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|blocked-by-user-decision",
       "accepted"
     );
   }
@@ -900,11 +766,6 @@ function completeTemplate(
       "Planning Result: complete|incomplete|user clarification required",
       "Planning Result: complete"
     );
-  }
-  if (kind === "docs-sync-report") {
-    return completed
-      .replace("none|architect|coder|tester", "none")
-      .replace("synced|unchanged|blocked", "unchanged");
   }
   if (kind === "docs-update-report") {
     return completed.replace("synced|unchanged|blocked", "unchanged");

@@ -90,7 +90,7 @@ describe("machine-consumed harness contracts", () => {
 
   it("uses the exact final-acceptance decision options in the skill template", () => {
     expect(renderVcmFinalAcceptanceSkillRules()).toContain(
-      "accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|needs-docs-sync|blocked-by-user-decision"
+      "accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|blocked-by-user-decision"
     );
   });
 

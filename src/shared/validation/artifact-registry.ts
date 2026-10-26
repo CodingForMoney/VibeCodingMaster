@@ -197,26 +197,6 @@ export const ARTIFACT_DEFINITIONS: readonly ArtifactDefinition[] = [
     ]
   },
   {
-    kind: "docs-sync-report",
-    fileName: "docs-sync-report.md",
-    owner: "architect",
-    requiredHeadings: [
-      "Summary",
-      "Architecture Drift Check",
-      "Docs Updated",
-      "Docs Reviewed And Left Unchanged",
-      "Public Contract / Module Boundary Notes",
-      "Remaining Documentation Risks",
-      "Known Issues Disposition",
-      "Module Coverage",
-      "Reconciliation Commits",
-      "Docs Sync Check",
-      "Correction Owner",
-      "Correction Evidence",
-      "Decision"
-    ]
-  },
-  {
     kind: "workflow-progress",
     fileName: "workflow-progress.md",
     owner: "project-manager",
@@ -236,7 +216,7 @@ export const ARTIFACT_DEFINITIONS: readonly ArtifactDefinition[] = [
       "Evidence Reviewed",
       "Scope Traceability",
       "Validation Summary",
-      "Review And Docs Sync",
+      "Review And Documentation",
       "Known Issues Disposition",
       "Gate Review Gates",
       "Cleanup Readiness",

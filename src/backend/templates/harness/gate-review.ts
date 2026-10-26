@@ -319,11 +319,11 @@ convert the result to \`pass\` or independently accept the risk.
 
 Read \`.claude/agents/coder.md\`, \`.claude/agents/tester.md\`,
 \`.ai/vcm/handoffs/test-report.md\`, the current validation-adequacy Gate report,
-\`.ai/vcm/handoffs/docs-sync-report.md\`, and \`docs/CODING_STANDARDS.md\`; use the
-architect definition to understand implementation responsibility boundaries.
-Code-diff runs only after Tester validation, the current validation-adequacy
-disposition, and Architect docs reconciliation, so the named commits include the
-reconciled architecture docs. VCM excludes
+and \`docs/CODING_STANDARDS.md\`; use the architect definition to understand
+implementation responsibility boundaries. Code-diff runs only after Tester
+validation and the current validation-adequacy disposition. The named commits
+carry the architecture doc changes made with the plan and with every later fix,
+and a rerun after a docs-only correction names the correction commits. VCM excludes
 \`[VCM Harness]\` commits from the review input. Do not inspect, analyze, cite,
 or report findings from those commits. Review every commit named by VCM and
 nothing else.
@@ -410,26 +410,17 @@ Review the architecture docs in the named commits against the final code
   flow, lifecycle, boundaries, invariants, failure behavior, and the meaning of
   changed public surface. A doc statement the code contradicts is
   \`request_changes\` with Finding Scope \`docs-only\`.
-- The \`Module Coverage\` table in \`docs-sync-report.md\` is true: every
-  module touched by the named commits appears, an \`updated\` module's owning
-  doc changed in the task, and an \`unchanged\` module's reason holds against
-  its code changes.
-- The \`Reconciliation Commits\` change only architecture docs, active plans,
-  \`docs/known-issues.md\`, and \`.ai/generated/**\`. A reconciliation commit
-  that changes code, tests, or configuration is \`request_changes\` with
-  Finding Scope \`implementation\`.
-- Every implementation-versus-design contradiction recorded under
-  Architecture Drift Check in \`docs-sync-report.md\` is decided: a confirmed
-  defect is \`request_changes\` with Finding Scope \`implementation\`; a
-  contradiction that does not hold is noted in Documentation Fit.
-- \`docs/known-issues.md\` adds the task's confirmed unresolved issues and
-  removes the ones the task resolved.
+- Every module the named commits touch has a current owning doc: each changed
+  owned fact is updated, or the Docs Impact table in
+  \`.ai/vcm/handoffs/architecture-plan.md\`, when the task has a plan, records a
+  no-change reason that holds against the code changes. A missing or stale
+  owning-doc update is \`request_changes\` with Finding Scope \`docs-only\`.
+- Where a doc states the approved design and the code departs from it, decide
+  which one is wrong: a code defect is Finding Scope \`implementation\`; a
+  wrong doc is \`docs-only\`.
+- \`docs/known-issues.md\` removes or rewrites the entries the named commits
+  resolve.
 - The docs follow the same writing rules as at the architecture-plan gate.
-
-An Architect Debug Branch or Architecture Diagnosis Branch code-diff runs before
-its parent flow reconciles the docs. For those sources, review the docs only for
-contradictions the reviewed commits introduce; the parent flow's reconciliation
-and its own code-diff Gate cover the rest.
 
 Use the completed test report and validation-adequacy disposition as execution
 evidence while independently deciding whether the implementation handles its
@@ -551,7 +542,7 @@ Use this skill at every project-manager Gate Review trigger point and whenever V
 
 - \`architecture-plan\`: after the user confirms \`.ai/vcm/handoffs/architecture-brief.md\` and architect writes \`.ai/vcm/handoffs/architecture-plan.md\`, before coder dispatch.
 - \`validation-adequacy\`: after tester writes a terminal \`Test Result: pass|fail\` that the active flow permits to reach the gate. Never request this gate for \`Test Result: incomplete\`.
-- \`code-diff\`: after Tester completes, the current validation-adequacy Gate finishes successfully, and Architect docs reconciliation reports \`synced\` or \`unchanged\`, for a Coder implementation, Architect Debug fix, or Architecture Diagnosis fix. Rerun it after a docs-only correction or any commit made after its approval. Identify the production-code source with \`--source coder\`, \`--source architect-debug\`, or \`--source architect-diagnosis\`. Validation-Only Flow does not request code-diff.
+- \`code-diff\`: after Tester completes and the current validation-adequacy Gate finishes successfully, for a Coder implementation, Architect Debug fix, or Architecture Diagnosis fix. Rerun it after a docs-only correction, a docs coverage correction, or any commit made after its approval. VCM first runs \`.ai/tools/check-docs-sync\`; a module the architecture plan's Docs Impact does not cover returns \`failed_to_start\` with a message that starts with \`Docs coverage check failed:\`. Identify the production-code source with \`--source coder\`, \`--source architect-debug\`, or \`--source architect-diagnosis\`. Validation-Only Flow does not request code-diff.
 
 ## Request
 
@@ -566,7 +557,8 @@ Interpret the first output line:
 
 - \`disabled\`, \`not_required\`, \`already_approved\`: continue the normal VCM flow.
 - \`started\` or \`running\`: stop this turn and wait for the VCM callback.
-- \`failed_to_start\`: report the failure to the user.
+- \`failed_to_start\` for code-diff with a message that starts with \`Docs coverage check failed:\`: route it to Architect through the active flow's docs correction branch.
+- Any other \`failed_to_start\`: report the failure to the user.
 
 ## Callback
 
@@ -607,8 +599,7 @@ const SOURCE_ARTIFACTS = {
   ],
   "code-diff": [
     ".ai/vcm/handoffs/test-report.md",
-    ".ai/vcm/gate-reviews/validation-adequacy-review.md",
-    ".ai/vcm/handoffs/docs-sync-report.md"
+    ".ai/vcm/gate-reviews/validation-adequacy-review.md"
   ]
 };
 const CODE_DIFF_SOURCE_ARTIFACTS = {

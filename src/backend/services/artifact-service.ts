@@ -29,7 +29,6 @@ import {
   renderArchitectDebugTemplate,
   renderCoderCompletionTemplate,
   renderDocsUpdateReportTemplate,
-  renderDocsSyncReportTemplate,
   renderFinalAcceptanceTemplate,
   renderKnownIssuesTemplate,
   renderPlanningProgressTemplate,
@@ -100,10 +99,8 @@ export interface SubmitArtifactInput {
 }
 
 export interface ArtifactServiceDeps {
-  workflowControlService?: Pick<WorkflowControlService, "submitProgress" | "assertRouteAuthorized" | "assertDocsArtifactAllowed">;
+  workflowControlService?: Pick<WorkflowControlService, "submitProgress" | "assertRouteAuthorized">;
   getDurableDocAssignment?: (taskRepoRoot: string, role: RoleName) => Promise<DurableDocAssignmentState | undefined>;
-  // Checks a final synced or unchanged docs-sync report against the task commits.
-  checkDocsSync?: (taskRepoRoot: string, reportContent: string) => Promise<string[]>;
 }
 
 const ARTIFACT_PATH_KEYS: Array<[ArtifactKind, keyof HandoffPaths]> = [
@@ -117,7 +114,6 @@ const ARTIFACT_PATH_KEYS: Array<[ArtifactKind, keyof HandoffPaths]> = [
   ["architecture-diagnosis", "architectureDiagnosisPath"],
   ["test-report", "testReportPath"],
   ["docs-update-report", "docsUpdateReportPath"],
-  ["docs-sync-report", "docsSyncReportPath"],
   ["workflow-progress", "workflowProgressPath"],
   ["final-acceptance", "finalAcceptancePath"]
 ];
@@ -157,7 +153,6 @@ export function createArtifactService(fs: FileSystemAdapter, deps: ArtifactServi
         architectureDiagnosisPath: path.posix.join(handoffDir, "architecture-diagnosis.md"),
         testReportPath: path.posix.join(handoffDir, "test-report.md"),
         docsUpdateReportPath: path.posix.join(handoffDir, "docs-update-report.md"),
-        docsSyncReportPath: path.posix.join(handoffDir, "docs-sync-report.md"),
         workflowProgressPath: path.posix.join(handoffDir, "workflow-progress.md"),
         finalAcceptancePath: path.posix.join(handoffDir, "final-acceptance.md")
       };
@@ -188,7 +183,6 @@ export function createArtifactService(fs: FileSystemAdapter, deps: ArtifactServi
         [paths.architectureDiagnosisPath, renderArchitectureDiagnosisTemplate(input.taskSlug)],
         [paths.testReportPath, renderTestReportTemplate(input.taskSlug)],
         [paths.docsUpdateReportPath, renderDocsUpdateReportTemplate(input.taskSlug)],
-        [paths.docsSyncReportPath, renderDocsSyncReportTemplate(input.taskSlug)],
         [paths.workflowProgressPath, renderWorkflowProgressTemplate(input.taskSlug)],
         [paths.finalAcceptancePath, renderFinalAcceptanceTemplate(input.taskSlug)],
         ...Object.values(paths.messageRoutePaths).map((messagePath): [string, string] => [
@@ -342,27 +336,6 @@ export function createArtifactService(fs: FileSystemAdapter, deps: ArtifactServi
         });
         if (validation.errors.length > 0) {
           throw artifactRejected(input.kind, validation.errors);
-        }
-        if ((input.kind === "docs-update-report" || input.kind === "docs-sync-report")
-          && deps.workflowControlService) {
-          // Memory-owned documentation work is independent of PM's active dispatch.
-          if (!assignment) {
-            await deps.workflowControlService.assertDocsArtifactAllowed({
-              taskRepoRoot: input.repoRoot,
-              stateRoot: input.stateRoot ?? ".ai/vcm",
-              handoffDir: input.handoffDir,
-              taskSlug: input.taskSlug
-            }, input.kind, input.role);
-          }
-        }
-        if (input.kind === "docs-sync-report" && input.mode === "final" && deps.checkDocsSync) {
-          const decision = readArtifactSectionValue(normalized, "Decision")?.trim().toLowerCase();
-          if (decision === "synced" || decision === "unchanged") {
-            const findings = await deps.checkDocsSync(input.repoRoot, normalized);
-            if (findings.length > 0) {
-              throw artifactRejected(input.kind, findings);
-            }
-          }
         }
         if (input.kind === "workflow-progress") {
           if (input.mode !== "final") {

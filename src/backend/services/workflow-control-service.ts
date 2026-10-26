@@ -3,8 +3,12 @@ import path from "node:path";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import { resolveRepoPath } from "../adapters/filesystem.js";
 import { VcmError } from "../errors.js";
-import type { DispatchableRole, RoleName } from "../../shared/types/role.js";
-import type { GateReviewGateRecord, GateReviewIndex } from "../../shared/types/gate-review.js";
+import type { DispatchableRole } from "../../shared/types/role.js";
+import {
+  CODE_DIFF_DOCS_COVERAGE_ERROR_PREFIX,
+  type GateReviewGateRecord,
+  type GateReviewIndex
+} from "../../shared/types/gate-review.js";
 import type {
   WorkflowControlState,
   WorkflowDispatchEvidenceBaseline,
@@ -53,7 +57,6 @@ export interface WorkflowControlService {
   resolveUserInput(input: WorkflowControlContext): Promise<WorkflowControlState>;
   runWhileNotAwaitingUser<T>(input: WorkflowControlContext, run: () => Promise<T>): Promise<T>;
   submitProgress(input: WorkflowControlContext, content: string): Promise<WorkflowProgressSubmissionResult>;
-  assertDocsArtifactAllowed(input: WorkflowControlContext, kind: "docs-update-report" | "docs-sync-report", role: RoleName): Promise<void>;
   assertRouteAuthorized(input: WorkflowRouteAuthorizationInput): Promise<void>;
   claimDispatch(input: Required<WorkflowRouteAuthorizationInput>): Promise<void>;
   releaseDispatch(input: WorkflowControlContext, messageId: string): Promise<void>;
@@ -584,8 +587,6 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
     resolveUserInput,
     runWhileNotAwaitingUser,
     submitProgress,
-    assertDocsArtifactAllowed: (input, kind, role) =>
-      withLock(statePath(input), () => assertDocsArtifactAllowed(input, kind, role)),
     assertRouteAuthorized: (input) => withLock(statePath(input), () => assertRouteAuthorized(input)),
     claimDispatch,
     releaseDispatch,
@@ -594,45 +595,6 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
     confirmDispatch,
     recoverTask
   };
-
-  async function assertDocsArtifactAllowed(
-    input: WorkflowControlContext,
-    kind: "docs-update-report" | "docs-sync-report",
-    role: RoleName
-  ): Promise<void> {
-    const state = await getState(input);
-    failOnStateWarnings(state);
-    const progress = await readProgress(deps.fs, input);
-    const active = state.activeDispatch;
-    if (progress.status !== "active" || !active || active.targetRole !== role) return;
-
-    let expected: "docs-update-report" | "docs-sync-report" | undefined;
-    if (progress.flow === "docs-only") {
-      expected = "docs-update-report";
-    } else if (role === "architect" && (progress.flow === "code-change"
-      || progress.flow === "architect-debug" || progress.flow === "architecture-diagnosis")) {
-      const flow = progress.flow;
-      const run = resolveFlowRun(state.flowRun, progress);
-      const hadTester = progress.history.some((entry) => entry.sequence >= run.startedAtSequence
-        && entry.sequence < active.sequence && entry.targetRole === "tester");
-      if (!run.activeBranch && hadTester) {
-        const source = run.resumedFromBranch ?? (flow === "code-change" ? "coder" : flow);
-        const docsTarget = `${flow}/architect`;
-        const allowed = await allowedAfterTester(deps.fs, input, state, flow, source, {
-          successTarget: docsTarget,
-          reconcileBeforeCodeDiff: true
-        });
-        if (allowed.includes(docsTarget)) expected = "docs-sync-report";
-      }
-    }
-    if (expected && expected !== kind) {
-      throw workflowError(
-        "WORKFLOW_DOCS_ARTIFACT_MISMATCH",
-        `${kind} was not written: the active ${progress.flow} dispatch #${active.sequence} requires ${path.posix.join(input.handoffDir, `${expected}.md`)}.`,
-        `Submit --kind ${expected} through .ai/tools/vcm-artifact. The two documentation reports are not interchangeable.`
-      );
-    }
-  }
 
   async function requestUserInput(
     input: WorkflowControlContext,
@@ -956,19 +918,13 @@ async function canRouteUserApprovedFollowUp(
   if (test.value !== "pass" || !evidenceIsFresh(state, effectiveFlow, "tester", "test-report.md", test.hash)) {
     return false;
   }
-  const flowRun = resolveFlowRun(state.flowRun, current);
   const validation = await gateState(fs, input, "validation-adequacy");
   if (!gatePassedForDispatch(state, effectiveFlow, "tester", "validation-adequacy", validation)) return false;
-  // A branch passes its own code-diff Gate before it exits. A main flow reaches
-  // this checkpoint before docs reconciliation, so code-diff has not run yet.
-  if (flowRun.activeBranch === effectiveFlow) {
-    const codeDiff = await gateState(fs, input, "code-diff");
-    if (!gatePassedForDispatch(state, effectiveFlow, "tester", "code-diff", codeDiff)) return false;
-  }
-  const expectedExit = flowRun.activeBranch === effectiveFlow
-    ? `${flowRun.rootFlow}/architect`
-    : `${effectiveFlow}/architect`;
-  return allowedTransitions.length === 1 && allowedTransitions[0] === expectedExit;
+  const codeDiff = await gateState(fs, input, "code-diff");
+  if (!gatePassedForDispatch(state, effectiveFlow, "tester", "code-diff", codeDiff)) return false;
+  // Both Gates passed and no Final Acceptance follow-up is pending: the flow
+  // is waiting for Final Acceptance, the checkpoint the follow-up returns to.
+  return allowedTransitions.length === 0;
 }
 
 async function getAllowedTransitions(
@@ -1012,8 +968,6 @@ async function getAllowedTransitions(
     if (!gatePassedForDispatch(state, flow, "tester", "validation-adequacy", validationGate)) return [];
     return [];
   }
-  const coderDocsCorrection = await allowedActiveCoderDocsCorrection(fs, input, state, flow);
-  if (coderDocsCorrection) return coderDocsCorrection;
   const segment = activeFlowSegment(current.history, flow, flowRun.startedAtSequence);
   if (flow === "code-change") {
     return allowedCodeChange(fs, input, state, segment, flowRun.resumedFromBranch);
@@ -1059,21 +1013,10 @@ async function allowedCodeChange(
 ): Promise<string[]> {
   const coderIndex = findLastIndex(segment, (entry) => entry.targetRole === "coder");
   const testerIndex = findLastIndex(segment, (entry) => entry.targetRole === "tester");
-  if (resumedFromBranch && coderIndex < 0) {
-    if (testerIndex < 0) {
-      return allowedPostImplementationArchitect(fs, input, state, "code-change");
-    }
-    return allowedAfterTester(fs, input, state, "code-change", resumedFromBranch, {
-      testerFailureFlow: "architect-debug",
-      implementationFailureFlow: "architect-debug",
-      successTarget: "code-change/architect",
-      reconcileBeforeCodeDiff: true
-    });
-  }
-  if (coderIndex < 0) {
+  if (coderIndex < 0 && !resumedFromBranch) {
     return (await allowedFreshArchitecturePlan(fs, input, state)) ?? ["code-change/architect"];
   }
-  if (testerIndex < coderIndex) {
+  if (coderIndex >= 0 && testerIndex < coderIndex) {
     const coder = await artifactState(fs, input, "coder-completion.md", "coder-completion");
     if (!evidenceIsFresh(state, "code-change", "coder", "coder-completion.md", coder.hash)) {
       return ["code-change/coder"];
@@ -1081,15 +1024,20 @@ async function allowedCodeChange(
     if (coder.value === "failed") return ["architect-debug/architect"];
     return coder.value === "ready_for_review" ? ["code-change/tester"] : ["code-change/coder"];
   }
+  // An Architect dispatch after validation (a code-diff docs correction or a
+  // Final Acceptance follow-up, including the first dispatch after a branch
+  // returns) is reviewed by an incremental code-diff Gate.
   if (segment.some((entry, index) => index > testerIndex && entry.targetRole === "architect")) {
-    return allowedPostImplementationArchitect(fs, input, state, "code-change");
+    return allowedPostImplementationArchitect(fs, input, state, "code-change", "code-change");
   }
-  return allowedAfterTester(fs, input, state, "code-change", "coder", {
-    testerFailureFlow: "architect-debug",
-    implementationFailureFlow: "architect-debug",
-    successTarget: "code-change/architect",
-    reconcileBeforeCodeDiff: true
-  });
+  return allowedAfterTester(
+    fs,
+    input,
+    state,
+    "code-change",
+    resumedFromBranch && coderIndex < 0 ? resumedFromBranch : "coder",
+    { testerFailureFlow: "architect-debug", acceptanceFlow: "code-change" }
+  );
 }
 
 async function allowedFreshArchitecturePlan(
@@ -1123,18 +1071,17 @@ async function allowedArchitectFix(
 ): Promise<string[]> {
   const architectIndex = findLastIndex(segment, (entry) => entry.targetRole === "architect");
   const testerIndex = findLastIndex(segment, (entry) => entry.targetRole === "tester");
-  if (resumedFromBranch && architectIndex >= 0 && testerIndex < 0) {
-    return allowedPostImplementationArchitect(fs, input, state, source);
-  }
+  // A branch that passes its own code-diff Gate has returned to its parent, so
+  // Final Acceptance and its follow-ups belong to the parent flow.
+  const acceptanceFlow = parentFlow ?? source;
   if (architectIndex < 0) return [`${source}/architect`];
-  if (testerIndex < 0) {
-    const artifact = source === "architect-debug"
-      ? await artifactState(fs, input, "architect-debug.md", "architect-debug")
-      : await artifactState(fs, input, "architecture-diagnosis.md", "architecture-diagnosis");
-    const artifactName = source === "architect-debug" ? "architect-debug.md" : "architecture-diagnosis.md";
-    if (!evidenceIsFresh(state, source, "architect", artifactName, artifact.hash)) {
-      return [`${source}/architect`];
-    }
+  const artifactName = source === "architect-debug" ? "architect-debug.md" : "architecture-diagnosis.md";
+  const artifact = source === "architect-debug"
+    ? await artifactState(fs, input, artifactName, "architect-debug")
+    : await artifactState(fs, input, artifactName, "architecture-diagnosis");
+  const artifactFresh = evidenceIsFresh(state, source, "architect", artifactName, artifact.hash);
+  if (testerIndex < 0 && !resumedFromBranch) {
+    if (!artifactFresh) return [`${source}/architect`];
     if (source === "architect-debug" && artifact.disposition === ARCHITECT_DEBUG_NORMAL_PLAN_DISPOSITION) {
       return ["code-change/architect"];
     }
@@ -1147,29 +1094,17 @@ async function allowedArchitectFix(
     return artifact.complete ? [`${source}/tester`] : [`${source}/architect`];
   }
   if (architectIndex > testerIndex) {
-    const artifactName = source === "architect-debug" ? "architect-debug.md" : "architecture-diagnosis.md";
-    const artifact = source === "architect-debug"
-      ? await artifactState(fs, input, artifactName, "architect-debug")
-      : await artifactState(fs, input, artifactName, "architecture-diagnosis");
-    if (evidenceIsFresh(state, source, "architect", artifactName, artifact.hash)
-      && artifact.disposition === "user clarification required") {
+    if (artifactFresh && artifact.disposition === "user clarification required") {
       return [`${source}/architect`];
     }
-    if (evidenceIsFresh(state, source, "architect", artifactName, artifact.hash) && artifact.complete) {
-      return [`${source}/tester`];
-    }
-    if (!parentFlow) return allowedPostImplementationArchitect(fs, input, state, source);
-    const docs = await artifactState(fs, input, "docs-sync-report.md", "docs-sync-report");
-    return evidenceIsFresh(state, source, "architect", "docs-sync-report.md", docs.hash)
-      && (docs.value === "synced" || docs.value === "unchanged")
-      ? []
-      : [`${source}/architect`];
+    // A new fix needs validation; any other post-validation Architect change
+    // is reviewed by an incremental code-diff Gate.
+    if (artifactFresh && artifact.complete) return [`${source}/tester`];
+    return allowedPostImplementationArchitect(fs, input, state, source, acceptanceFlow);
   }
   return allowedAfterTester(fs, input, state, source, source, {
     testerFailureFlow: source === "architect-debug" ? "architecture-diagnosis" : undefined,
-    implementationFailureFlow: source,
-    successTarget: parentFlow ? `${parentFlow}/architect` : `${source}/architect`,
-    reconcileBeforeCodeDiff: !parentFlow
+    acceptanceFlow
   });
 }
 
@@ -1177,10 +1112,9 @@ async function allowedPostImplementationArchitect(
   fs: FileSystemAdapter,
   input: WorkflowControlContext,
   state: WorkflowControlState,
-  flow: "code-change" | "architect-debug" | "architecture-diagnosis"
+  flow: "code-change" | "architect-debug" | "architecture-diagnosis",
+  acceptanceFlow: WorkflowFlow
 ): Promise<string[]> {
-  const docs = await artifactState(fs, input, "docs-sync-report.md", "docs-sync-report");
-  const acceptance = await artifactState(fs, input, "final-acceptance.md", "final-acceptance");
   if (flow === "code-change") {
     const planningTransition = await allowedFreshArchitecturePlan(
       fs,
@@ -1190,29 +1124,19 @@ async function allowedPostImplementationArchitect(
     );
     if (planningTransition !== undefined) return planningTransition;
   }
-  if (evidenceIsFresh(state, flow, "architect", "docs-sync-report.md", docs.hash) && docs.complete) {
-    if (docs.value === "synced" || docs.value === "unchanged") {
-      // The code-diff Gate reviews the reconciliation commits with the code.
-      const codeDiff = await gateState(fs, input, "code-diff");
-      if (freshGateDecision(state, flow, "architect", "code-diff", codeDiff) === "request_changes") {
-        return codeDiffCorrectionTargets(codeDiff, flow);
-      }
-      if (!gatePassedForDispatch(state, flow, "architect", "code-diff", codeDiff)) return [];
-      if (acceptance.value === "needs-coder-follow-up" && flow === "code-change") return ["code-change/coder"];
-      if (acceptance.value === "needs-docs-sync") return [`${flow}/architect`];
-      if (acceptance.value === "needs-architect-follow-up") return [`${flow}/architect`];
-      return [];
-    }
-    if (docs.value === "blocked" && docs.correctionOwner && docs.correctionOwner !== "none") {
-      return [`${flow}/${docs.correctionOwner}`];
-    }
+  const codeDiff = await gateState(fs, input, "code-diff");
+  if (freshGateDecision(state, flow, "architect", "code-diff", codeDiff) === "request_changes") {
+    return codeDiffCorrectionTargets(codeDiff, flow);
+  }
+  if (gatePassedForDispatch(state, flow, "architect", "code-diff", codeDiff)) {
+    return finalAcceptanceFollowUpTargets(fs, input, state, flow, "architect", acceptanceFlow);
   }
   return [`${flow}/architect`];
 }
 
-// Routes a code-diff Gate that rejected the reconciled commits: docs-only
-// findings return to Architect reconciliation, test-only findings to Tester,
-// and any implementation finding to the flow's Architect fix path.
+// Routes a code-diff Gate rejection: any implementation finding goes to the
+// flow's Architect fix path, docs-only findings (alone or with test-only ones)
+// to Architect first, and test-only findings to Tester.
 function codeDiffCorrectionTargets(
   codeDiff: GateReviewGateRecord | undefined,
   flow: "code-change" | "architect-debug" | "architecture-diagnosis"
@@ -1224,25 +1148,23 @@ function codeDiffCorrectionTargets(
   return scopes.includes("docs-only") ? [`${flow}/architect`] : [`${flow}/tester`];
 }
 
-async function allowedActiveCoderDocsCorrection(
+// After a passed code-diff Gate, PM runs Final Acceptance. Only a Final
+// Acceptance produced after the latest dispatch can route a follow-up.
+async function finalAcceptanceFollowUpTargets(
   fs: FileSystemAdapter,
   input: WorkflowControlContext,
   state: WorkflowControlState,
-  flow: "code-change" | "architect-debug" | "architecture-diagnosis"
-): Promise<string[] | undefined> {
-  const active = state.activeDispatch;
-  if (!active || active.flow !== flow || active.targetRole !== "coder") return undefined;
-  const docs = await artifactState(fs, input, "docs-sync-report.md", "docs-sync-report");
-  if (!docs.complete
-    || docs.value !== "blocked"
-    || docs.correctionOwner !== "coder"
-    || active.artifactHashes["docs-sync-report.md"] !== docs.hash) return undefined;
-  const coder = await artifactState(fs, input, "coder-completion.md", "coder-completion");
-  if (!evidenceIsFresh(state, flow, "coder", "coder-completion.md", coder.hash)
-    || coder.value === "incomplete") return [`${flow}/coder`];
-  if (coder.value === "ready_for_review") return [`${flow}/tester`];
-  if (flow === "code-change") return ["architect-debug/architect"];
-  if (flow === "architect-debug") return ["architecture-diagnosis/architect"];
+  flow: WorkflowFlow,
+  targetRole: DispatchableRole,
+  acceptanceFlow: WorkflowFlow
+): Promise<string[]> {
+  const acceptance = await artifactState(fs, input, "final-acceptance.md", "final-acceptance");
+  if (!acceptance.complete
+    || !evidenceProducedAfterActiveDispatch(state, flow, targetRole, "final-acceptance.md", acceptance.hash)) {
+    return [];
+  }
+  if (acceptance.value === "needs-coder-follow-up" && acceptanceFlow === "code-change") return ["code-change/coder"];
+  if (acceptance.value === "needs-architect-follow-up") return [`${acceptanceFlow}/architect`];
   return [];
 }
 
@@ -1254,12 +1176,7 @@ async function allowedAfterTester(
   codeSource: "coder" | "architect-debug" | "architecture-diagnosis",
   options: {
     testerFailureFlow?: "architect-debug" | "architecture-diagnosis";
-    implementationFailureFlow?: "architect-debug" | "architecture-diagnosis";
-    successTarget: string;
-    // Main flows reconcile docs before the code-diff Gate, so the validation-
-    // adequacy Gate alone unlocks the Architect reconciliation dispatch.
-    // Debug and Diagnosis branches still pass their own code-diff Gate first.
-    reconcileBeforeCodeDiff?: boolean;
+    acceptanceFlow: WorkflowFlow;
   }
 ): Promise<string[]> {
   const test = await artifactState(fs, input, "test-report.md", "test-report");
@@ -1276,20 +1193,21 @@ async function allowedAfterTester(
   }
   if (!gatePassedForDispatch(state, currentFlow, "tester", "validation-adequacy", validation)) return [];
   const codeDiff = await gateState(fs, input, "code-diff");
-  // A code-diff rejection recorded after this Tester dispatch (a branch Gate, or
-  // a task that ran code-diff before reconciliation) routes its correction first.
   if (freshGateDecision(state, currentFlow, "tester", "code-diff", codeDiff) === "request_changes") {
-    const scopes = new Set(codeDiff?.findings?.map((finding) => finding.scope).filter(Boolean));
-    return scopes.size === 1 && scopes.has("test-only")
-      ? [`${currentFlow}/tester`]
-      : options.implementationFailureFlow ? [`${options.implementationFailureFlow}/architect`] : [];
+    return codeDiffCorrectionTargets(codeDiff, currentFlow);
   }
-  if (options.reconcileBeforeCodeDiff) return [options.successTarget];
+  // The docs coverage check refused to start code-diff: Architect updates the
+  // owning docs, then PM requests code-diff again.
+  if (codeDiff?.status === "failed"
+    && codeDiff.error?.startsWith(CODE_DIFF_DOCS_COVERAGE_ERROR_PREFIX)
+    && gateRecordIsFresh(state, currentFlow, "tester", "code-diff", codeDiff)) {
+    return [`${currentFlow}/architect`];
+  }
   if (!gatePassedForDispatch(state, currentFlow, "tester", "code-diff", codeDiff)) return [];
   const gateCodeSource = codeSource === "architecture-diagnosis" ? "architect-diagnosis" : codeSource;
   const reviewedSources = codeDiff?.codeDiffSources ?? (codeDiff?.codeDiffSource ? [codeDiff.codeDiffSource] : []);
   if (codeDiff?.status === "completed" && !reviewedSources.includes(gateCodeSource)) return [];
-  return [options.successTarget];
+  return finalAcceptanceFollowUpTargets(fs, input, state, currentFlow, "tester", options.acceptanceFlow);
 }
 
 async function artifactState(
@@ -1304,7 +1222,6 @@ async function artifactState(
   infrastructure?: string;
   hasUserApprovedCoverageGap?: boolean;
   disposition?: string;
-  correctionOwner?: DispatchableRole | "none";
 }> {
   const relative = path.posix.join(input.handoffDir, fileName);
   const absolute = resolveRepoPath(input.taskRepoRoot, relative);
@@ -1318,7 +1235,7 @@ async function artifactState(
   if (kind === "architect-debug") value = inline("Status") ?? readArtifactSectionContent(content, "Final Disposition")?.trim().toLowerCase();
   if (kind === "architecture-diagnosis") value = readArtifactSectionContent(content, "Final Disposition")?.trim().toLowerCase();
   if (kind === "test-report") value = inline("Test Result");
-  if (kind === "docs-update-report" || kind === "docs-sync-report" || kind === "final-acceptance") {
+  if (kind === "docs-update-report" || kind === "final-acceptance") {
     value = readArtifactSectionContent(content, "Decision")?.trim().toLowerCase();
   }
   const infrastructure = kind === "test-report"
@@ -1331,19 +1248,13 @@ async function artifactState(
   const disposition = kind === "architect-debug" || kind === "architecture-diagnosis"
     ? readArtifactSectionContent(content, "Final Disposition")?.trim().toLowerCase()
     : undefined;
-  const correctionOwner = kind === "docs-sync-report"
-    ? readArtifactSectionContent(content, "Correction Owner")?.trim().toLowerCase()
-    : undefined;
   return {
     complete: check.status === "ok",
     hash: await artifactFingerprint(fs, absolute, content),
     value,
     infrastructure,
     hasUserApprovedCoverageGap,
-    disposition,
-    correctionOwner: correctionOwner === "none" || asTargetRole(correctionOwner)
-      ? correctionOwner as DispatchableRole | "none"
-      : undefined
+    disposition
   };
 }
 
@@ -1607,7 +1518,7 @@ async function describeBlockedCheckpoint(
     if (baseline.flow === "architecture-diagnosis" && test.value === "fail") {
       return "Architecture Diagnosis stopped after the current Tester failure. Record the user's decision and use one exact Workflow Override if the user authorizes another Architect repair.";
     }
-    return "The latest Tester result is waiting for its current validation-adequacy or code-diff Gate result.";
+    return "The latest Tester result is waiting for its current validation-adequacy or code-diff Gate result, or, after both Gates pass, for Final Acceptance.";
   }
   if (baseline.targetRole === "architect") {
     return "The latest Architect dispatch has not produced the fresh workflow artifact required for its next step.";
@@ -1628,17 +1539,10 @@ async function validateCompletion(
     throw workflowError("WORKFLOW_COMPLETION_INVALID", "An unstarted workflow cannot be completed.");
   }
   const flowRun = resolveFlowRun(state.flowRun, candidate);
-  if (flowRun.activeBranch === candidate.flow) {
-    throw workflowError(
-      "WORKFLOW_COMPLETION_INVALID",
-      `${candidate.flow} is an active branch and must return to ${flowRun.rootFlow} before completion.`
-    );
-  }
-  if (candidate.flow === "code-change" || candidate.flow === "architect-debug") {
-    await validateCompleteDeliveryEvidence(fs, input, state, candidate.flow);
-    return;
-  }
-  if (candidate.flow === "architecture-diagnosis") {
+  // A Debug or Diagnosis Branch returns to its parent once it passes its own
+  // code-diff Gate, so the parent's Final Acceptance completes the run there.
+  const inBranch = flowRun.activeBranch === candidate.flow;
+  if (candidate.flow === "architecture-diagnosis" && !inBranch) {
     const diagnosis = await artifactState(fs, input, "architecture-diagnosis.md", "architecture-diagnosis");
     if (diagnosis.disposition === "analysis completed"
       && evidenceProducedAfterActiveDispatch(
@@ -1648,7 +1552,10 @@ async function validateCompletion(
         "architecture-diagnosis.md",
         diagnosis.hash
       )) return;
-    await validateCompleteDeliveryEvidence(fs, input, state, candidate.flow);
+  }
+  if (candidate.flow === "code-change" || candidate.flow === "architect-debug"
+    || candidate.flow === "architecture-diagnosis") {
+    await validateCompleteDeliveryEvidence(fs, input, state, { ...candidate, status: "active" }, candidate.flow, flowRun);
     return;
   }
   if (candidate.flow === "docs-only") {
@@ -1678,7 +1585,9 @@ async function validateCompleteDeliveryEvidence(
   fs: FileSystemAdapter,
   input: WorkflowControlContext,
   state: WorkflowControlState,
-  flow: "code-change" | "architect-debug" | "architecture-diagnosis"
+  current: WorkflowProgressDocument,
+  flow: "code-change" | "architect-debug" | "architecture-diagnosis",
+  flowRun: WorkflowFlowRun
 ): Promise<void> {
   const baseline = state.activeDispatch;
   if (!baseline || baseline.flow !== flow) {
@@ -1687,43 +1596,33 @@ async function validateCompleteDeliveryEvidence(
       `The latest confirmed dispatch does not belong to the active ${flow} flow.`
     );
   }
-  if (baseline.targetRole !== "architect") {
+  const validated = current.history.some((entry) => entry.sequence >= flowRun.startedAtSequence
+    && entry.sequence < baseline.sequence && entry.targetRole === "tester");
+  if (baseline.targetRole !== "tester" && !(baseline.targetRole === "architect" && validated)) {
     throw workflowError(
       "WORKFLOW_COMPLETION_INVALID",
-      `The latest ${flow} dispatch is to ${baseline.targetRole}. Complete every required downstream validation and Gate step, route Architect for docs reconciliation, then pass the code-diff Gate before completing the flow.`
+      `The latest ${flow} dispatch is to ${baseline.targetRole}. Complete Tester validation and the validation-adequacy and code-diff Gates before completing the flow.`
     );
   }
-
-  const docs = await artifactState(fs, input, "docs-sync-report.md", "docs-sync-report");
-  if (!docs.complete || baseline.artifactHashes["docs-sync-report.md"] === docs.hash) {
-    const update = await artifactState(fs, input, "docs-update-report.md", "docs-update-report");
-    const wrongReport = update.hash !== MISSING_EVIDENCE_HASH
-      && baseline.artifactHashes["docs-update-report.md"] !== update.hash;
-    const reason = !docs.complete
-      ? "Docs Sync Report is missing or malformed for this complete delivery flow."
-      : "Docs Sync Report was not produced after the final Architect dispatch.";
-    throw workflowError(
-      "WORKFLOW_COMPLETION_INVALID",
-      `${reason} Required file: ${path.posix.join(input.handoffDir, "docs-sync-report.md")}, produced after dispatch #${baseline.sequence} (${baseline.confirmedAt}).`
-        + (wrongReport
-          ? ` ${path.posix.join(input.handoffDir, "docs-update-report.md")} was updated after this dispatch, but cannot replace docs-sync-report.md.`
-          : ""),
-      "Ask Architect to submit --kind docs-sync-report through .ai/tools/vcm-artifact with Decision: synced or unchanged and Correction Owner: none. Report blocked with its correction owner when synchronization is incomplete."
-    );
-  }
-  if (docs.value !== "synced" && docs.value !== "unchanged") {
-    throw workflowError(
-      "WORKFLOW_COMPLETION_INVALID",
-      `Docs Sync Report Decision must be synced or unchanged before completion; found ${docs.value ?? "missing"}.`
-    );
+  if (baseline.targetRole === "tester") {
+    const test = await artifactState(fs, input, "test-report.md", "test-report");
+    const validation = await gateState(fs, input, "validation-adequacy");
+    if (!evidenceProducedAfterActiveDispatch(state, flow, "tester", "test-report.md", test.hash)
+      || !(test.value === "pass" || (test.value === "fail" && test.hasUserApprovedCoverageGap))
+      || !gatePassedForDispatch(state, flow, "tester", "validation-adequacy", validation)) {
+      throw workflowError(
+        "WORKFLOW_COMPLETION_INVALID",
+        `The latest Tester dispatch #${baseline.sequence} has no passing Test Report with a passed validation-adequacy Gate.`
+      );
+    }
   }
 
   const codeDiff = await gateState(fs, input, "code-diff");
-  if (!gatePassedForDispatch(state, flow, "architect", "code-diff", codeDiff)) {
+  if (!gatePassedForDispatch(state, flow, baseline.targetRole, "code-diff", codeDiff)) {
     throw workflowError(
       "WORKFLOW_COMPLETION_INVALID",
-      `The code-diff Gate has not approved the commits made since the final Architect dispatch #${baseline.sequence}, including the docs reconciliation.`,
-      "Run .ai/tools/request-gate-review --gate code-diff with the flow's source after Architect docs reconciliation, then complete Final Acceptance."
+      `The code-diff Gate has not approved the work since the latest ${baseline.targetRole} dispatch #${baseline.sequence}.`,
+      "Run .ai/tools/request-gate-review --gate code-diff for the current changes, then complete Final Acceptance."
     );
   }
 
@@ -1743,7 +1642,14 @@ async function validateCompleteDeliveryEvidence(
   if (baseline.artifactHashes["final-acceptance.md"] === acceptance.hash) {
     throw workflowError(
       "WORKFLOW_COMPLETION_INVALID",
-      "Final Acceptance was not produced after the final Architect dispatch."
+      `Final Acceptance was not produced after the latest dispatch #${baseline.sequence}.`
+    );
+  }
+  const pending = await getAllowedTransitions(fs, input, state, current);
+  if (pending.length > 0) {
+    throw workflowError(
+      "WORKFLOW_COMPLETION_INVALID",
+      `The ${flow} flow still requires a dispatch before completion: ${pending.join(", ")}.`
     );
   }
 }

@@ -22,7 +22,6 @@ import {
   renderArchitecturePlanTemplate,
   renderArchitectDebugTemplate,
   renderCoderCompletionTemplate,
-  renderDocsSyncReportTemplate,
   renderDocsUpdateReportTemplate,
   renderFinalAcceptanceTemplate,
   renderKnownIssuesTemplate,
@@ -42,16 +41,15 @@ const STATIC_TEMPLATES: Record<ArtifactKind, string> = {
   "architecture-diagnosis": renderArchitectureDiagnosisTemplate("demo"),
   "test-report": renderTestReportTemplate("demo"),
   "docs-update-report": renderDocsUpdateReportTemplate("demo"),
-  "docs-sync-report": renderDocsSyncReportTemplate("demo"),
   "workflow-progress": renderWorkflowProgressTemplate("demo"),
   "final-acceptance": renderFinalAcceptanceTemplate("demo")
 };
 
 describe("managed artifact contracts", () => {
-  it("registers all 18 managed artifact kinds exactly once", () => {
-    expect(MANAGED_ARTIFACT_DEFINITIONS).toHaveLength(18);
-    expect(new Set(MANAGED_ARTIFACT_DEFINITIONS.map((definition) => definition.kind)).size).toBe(18);
-    expect(MANAGED_ARTIFACT_DEFINITIONS.filter((definition) => definition.storage === "handoff")).toHaveLength(13);
+  it("registers all 17 managed artifact kinds exactly once", () => {
+    expect(MANAGED_ARTIFACT_DEFINITIONS).toHaveLength(17);
+    expect(new Set(MANAGED_ARTIFACT_DEFINITIONS.map((definition) => definition.kind)).size).toBe(17);
+    expect(MANAGED_ARTIFACT_DEFINITIONS.filter((definition) => definition.storage === "handoff")).toHaveLength(12);
     expect(MANAGED_ARTIFACT_DEFINITIONS.filter((definition) => definition.storage === "dynamic")).toHaveLength(5);
     expect(getManagedArtifactDefinition("workflow-progress").allowedModes).toEqual(["final"]);
     expect(getManagedArtifactDefinition("gate-review-report").owner).toBe("reviewer");

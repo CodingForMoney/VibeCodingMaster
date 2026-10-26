@@ -12,7 +12,7 @@ import type { ClaudeAdapter } from "../../../../src/backend/adapters/claude-adap
 import type { CodexBridgeAdapter } from "../../../../src/backend/adapters/codex-bridge-adapter.js";
 import { createAppSettingsService } from "../../../../src/backend/services/app-settings-service.js";
 import { createCodexBridgeIntegrationService } from "../../../../src/backend/services/codex-bridge-integration-service.js";
-import { createDocsSyncCheck } from "../../../../src/backend/services/docs-sync-check.js";
+import { createDocsCoverageCheck } from "../../../../src/backend/services/docs-sync-check.js";
 import { createArtifactService } from "../../../../src/backend/services/artifact-service.js";
 import { createProjectService } from "../../../../src/backend/services/project-service.js";
 import { createTaskService } from "../../../../src/backend/services/task-service.js";
@@ -115,8 +115,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     : undefined;
   const artifactService = createArtifactService(fsAdapter, {
     workflowControlService,
-    getDurableDocAssignment: (taskRepoRoot, role) => autoMemoryService.getDurableDocAssignment(taskRepoRoot, role),
-    checkDocsSync: createDocsSyncCheck(runner)
+    getDurableDocAssignment: (taskRepoRoot, role) => autoMemoryService.getDurableDocAssignment(taskRepoRoot, role)
   });
   const projectService = createProjectService({ fs: fsAdapter, git, appSettings });
   const taskService = createTaskService({ fs: fsAdapter, git, artifactService, projectService });
@@ -241,6 +240,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     sessionService,
     roundService,
     workflowControlService,
+    checkDocsCoverage: createDocsCoverageCheck(runner),
     onArchitecturePlanDisposition: ({ repoRoot, taskSlug, accepted }) =>
       architectRestartService.recordArchitectureGateDisposition(repoRoot, taskSlug, accepted),
     reportPollIntervalMs: 10

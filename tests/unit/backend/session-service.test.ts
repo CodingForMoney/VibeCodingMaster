@@ -1664,7 +1664,6 @@ function createTestSessionService(
           architecturePlanPath: ".ai/vcm/handoffs/architecture-plan.md",
           knownIssuesPath: ".ai/vcm/handoffs/known-issues.md",
           testReportPath: ".ai/vcm/handoffs/test-report.md",
-          docsSyncReportPath: ".ai/vcm/handoffs/docs-sync-report.md",
           finalAcceptancePath: ".ai/vcm/handoffs/final-acceptance.md"
         };
       }

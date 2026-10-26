@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import { createArtifactService } from "../../../src/backend/services/artifact-service.js";
-import { renderArchitectDebugTemplate, renderDocsSyncReportTemplate, renderDocsUpdateReportTemplate } from "../../../src/backend/templates/handoff.js";
+import { renderArchitectDebugTemplate, renderDocsUpdateReportTemplate } from "../../../src/backend/templates/handoff.js";
 import type { DurableDocAssignmentState } from "../../../src/shared/types/memory.js";
 import {
   GATE_ANALYSIS_FIELDS,
@@ -68,7 +68,7 @@ describe("createArtifactService", () => {
     });
 
     expect(created).toContain(".ai/vcm/handoffs/docs-update-report.md");
-    expect(created).toContain(".ai/vcm/handoffs/docs-sync-report.md");
+    expect(created).not.toContain(".ai/vcm/handoffs/docs-sync-report.md");
     expect(created).toContain(".ai/vcm/handoffs/final-acceptance.md");
     expect(created).toContain(".ai/vcm/handoffs/known-issues.md");
     expect(created).toContain(".ai/vcm/handoffs/coder-completion.md");
@@ -76,7 +76,6 @@ describe("createArtifactService", () => {
     expect(created).toContain(".ai/vcm/handoffs/architecture-brief.md");
     expect(summary.paths.architectureBriefPath).toBe(".ai/vcm/handoffs/architecture-brief.md");
     expect(summary.paths.docsUpdateReportPath).toBe(".ai/vcm/handoffs/docs-update-report.md");
-    expect(summary.paths.docsSyncReportPath).toBe(".ai/vcm/handoffs/docs-sync-report.md");
     expect(summary.paths.finalAcceptancePath).toBe(".ai/vcm/handoffs/final-acceptance.md");
     expect(summary.paths.knownIssuesPath).toBe(".ai/vcm/handoffs/known-issues.md");
     await expect(fs.readText("/repo/.ai/vcm/handoffs/role-commands/coder.md"))
@@ -112,10 +111,6 @@ describe("createArtifactService", () => {
     await expect(fs.readText("/repo/.ai/vcm/handoffs/architect-debug.md"))
       .resolves.toContain("## Final Disposition");
     expect(summary.checks.find((check) => check.kind === "docs-update-report")).toMatchObject({
-      status: "incomplete",
-      hasPlaceholder: true
-    });
-    expect(summary.checks.find((check) => check.kind === "docs-sync-report")).toMatchObject({
       status: "incomplete",
       hasPlaceholder: true
     });
@@ -553,40 +548,6 @@ describe("createArtifactService", () => {
     })).rejects.toMatchObject({ code: "ARTIFACT_OWNER_MISMATCH" });
   });
 
-  it("rejects a synced or unchanged docs-sync report that fails the docs sync check", async () => {
-    const fs = createMemoryFs();
-    const checked: string[] = [];
-    let findings = ["DS_MODULE_NOT_COVERED packages/api: missing from Module Coverage."];
-    const service = createArtifactService(fs, {
-      checkDocsSync: async (taskRepoRoot, content) => {
-        checked.push(`${taskRepoRoot}:${content.includes("## Decision\n\nblocked") ? "blocked" : "final"}`);
-        return findings;
-      }
-    });
-    const report = (decision: string) => renderDocsSyncReportTemplate("demo-task")
-      .replace(/## Module Coverage\n[\s\S]*?\n(?=## )/, "## Module Coverage\n\nNone.\n\n")
-      .replace(/(## Reconciliation Commits\n\n(?:<!--[^\n]*-->\n)?)TBD/, "$1None.")
-      .replaceAll("TBD", "Verified docs")
-      .replace("synced|unchanged|blocked", decision)
-      .replace("none|architect|coder|tester", decision === "blocked" ? "coder" : "none")
-      .replace("## Correction Evidence\n\nNone.", decision === "blocked" ? "## Correction Evidence\n\nThe code contradicts the plan." : "## Correction Evidence\n\nNone.");
-    const request = (decision: string) => ({
-      repoRoot: "/repo", baseRepoRoot: "/repo", handoffDir: ".ai/vcm/handoffs", taskSlug: "demo-task",
-      kind: "docs-sync-report", mode: "final" as const, role: "architect" as const, content: report(decision)
-    });
-
-    await expect(service.submitArtifact(request("synced"))).rejects.toMatchObject({
-      code: "ARTIFACT_VALIDATION_FAILED",
-      message: expect.stringContaining("DS_MODULE_NOT_COVERED packages/api")
-    });
-    await expect(fs.pathExists("/repo/.ai/vcm/handoffs/docs-sync-report.md")).resolves.toBe(false);
-
-    // A blocked report names the correction owner; it is not checked for coverage.
-    await expect(service.submitArtifact(request("blocked"))).resolves.toMatchObject({ status: "ok" });
-    findings = [];
-    await expect(service.submitArtifact(request("unchanged"))).resolves.toMatchObject({ status: "ok" });
-    expect(checked).toEqual(["/repo:final", "/repo:final"]);
-  });
 });
 
 function validCoderCompletion(): string {

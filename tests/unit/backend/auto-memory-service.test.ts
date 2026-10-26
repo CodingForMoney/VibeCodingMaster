@@ -107,7 +107,7 @@ describe("auto-memory-service", () => {
       renderFinalAcceptanceTemplate("demo")
         .replaceAll("TBD", "None.")
         .replace(
-          "accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|needs-docs-sync|blocked-by-user-decision",
+          "accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|blocked-by-user-decision",
           "accepted"
         ),
       "utf8"
@@ -945,7 +945,7 @@ describe("auto-memory-service", () => {
       renderFinalAcceptanceTemplate("demo")
         .replaceAll("TBD", "None.")
         .replace(
-          "accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|needs-docs-sync|blocked-by-user-decision",
+          "accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|blocked-by-user-decision",
           "accepted"
         ),
       "utf8"
@@ -1275,7 +1275,7 @@ function acceptedFinalAcceptance(taskSlug: string): string {
   return renderFinalAcceptanceTemplate(taskSlug)
     .replaceAll("TBD", "None.")
     .replace(
-      "accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|needs-docs-sync|blocked-by-user-decision",
+      "accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|blocked-by-user-decision",
       "accepted"
     );
 }

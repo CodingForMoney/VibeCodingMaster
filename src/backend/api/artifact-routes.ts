@@ -183,9 +183,6 @@ function artifactNameToPath(paths: ReturnType<ArtifactService["getHandoffPaths"]
   if (artifactName === "docs-update-report.md") {
     return paths.docsUpdateReportPath;
   }
-  if (artifactName === "docs-sync-report.md") {
-    return paths.docsSyncReportPath;
-  }
   if (artifactName === "workflow-progress.md") {
     return paths.workflowProgressPath;
   }

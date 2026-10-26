@@ -252,13 +252,13 @@ The project runtime, not VCM, owns installation of
 ## Durable Documentation Ownership
 
 The fixed installer ships `.ai/tools/check-durable-docs`. Harness Bootstrap,
-Architect Docs Sync, and Tester testing-doc updates run it after changing
+Architect doc changes, and Tester testing-doc updates run it after changing
 durable docs. The tool detects high-confidence contract violations such as
 resolved issue history, terminal plans left under `docs/plans/`, task history in
 architecture/testing docs, missing module architecture docs, and generated
 module-count drift.
 
-Semantic consistency remains role-owned: Architect reconciles changed facts
+Semantic consistency remains role-owned: Architect keeps changed facts consistent
 across architecture docs, active plans, known issues, code, and generated
 context; Tester owns `docs/TESTING.md`. Final Acceptance requires the relevant
 evidence to record a passing audit after durable-doc changes.
@@ -273,7 +273,7 @@ history.
 Role-authored workflow Markdown is accepted only through
 `.ai/tools/vcm-artifact`. The role writes a candidate outside `.ai/vcm`; the
 tool submits its content, artifact kind, draft/final mode, role identity, and
-runtime Session token to the backend. All 13 fixed handoffs and five dynamic
+runtime Session token to the backend. All 12 fixed handoffs and five dynamic
 artifacts use the managed-artifact registry in
 `src/shared/validation/artifact-registry.ts`. The registry owns the artifact
 kind, owner, allowed submission modes, storage class, and required headings.
@@ -301,40 +301,40 @@ Most fixed artifacts have one owner. `docs-update-report.md` is shared by
 Architect, Coder, and Tester because Docs-Only Flow assigns documentation to
 the role that owns the relevant project evidence. Auto Memory durable-document
 assignments also use this report with an exact backend-assigned Assignment ID;
-they do not enter Docs-Only Flow. `docs-sync-report.md` is the Architect-owned
-docs reconciliation report for code-producing flows. Architect writes the task's
-architecture doc changes during planning, where the architecture-plan Gate
-reviews them with the plan, then reconciles them with the validated code after
-the validation-adequacy Gate and before the code-diff Gate. The code-diff Gate
-reviews the reconciliation commits together with the code, so no doc change
-lands after the last review. The report carries a Module Coverage table for
-every touched module and the list of reconciliation commits. Its terminal
-contract is strict: `synced` and `unchanged` require no correction owner, while
-`blocked` names exactly one Architect, Coder, or Tester owner and records the
-correction evidence. Workflow Control routes that owner and requires the
-affected validation and Gate evidence to be produced again before docs
-reconciliation can complete.
+they do not enter Docs-Only Flow.
 
-Artifact Service runs the task worktree's `.ai/tools/check-docs-sync` on a final
-`synced` or `unchanged` report and rejects it when a touched module is missing
-from Module Coverage, a module marked updated did not change its owning doc, a
-reconciliation commit changes anything other than architecture docs, active
-plans, known issues, or generated context, or a doc that Docs Impact says the
-plan changed was not changed. A repository without
+Code-producing flows have no separate documentation report. Architect writes
+the task's architecture doc changes during planning, where the
+architecture-plan Gate reviews them with the plan, and updates the owning docs
+in the same commits as any later Replan, Debug fix, or Diagnosis fix that
+changes a durable architecture fact. The code-diff Gate reviews those doc
+commits with the code and judges Documentation Fit against the final code. A
+`docs-only` code-diff finding returns to Architect, whose correction commits the
+rerun code-diff Gate reviews incrementally; a Final Acceptance
+`needs-architect-follow-up` covers documentation and known-issues follow-up the
+same way. The validation-adequacy input hash excludes `docs/**`, every
+`ARCHITECTURE.md`, and `.ai/generated/**`, so a doc correction does not
+invalidate an approved validation, while any code or test change after the
+approval makes the code-diff request fail until validation-adequacy runs again.
+
+Before starting a code-diff review, Gate Review Service runs the task
+worktree's `.ai/tools/check-docs-sync`. When the task has a complete
+architecture plan, the check fails if a module touched by the task's commits
+neither changed its owning doc nor has a Docs Impact row with a no-change
+reason, a no-change row omits its reason, or a doc that Docs Impact records as
+changed was not changed. The request then reports `failed_to_start` with an
+error that starts with `Docs coverage check failed:`, and Workflow Control
+allows the active flow's Architect to correct the docs. A repository without
 `.ai/generated/module-index.json` is checked as one module, `.`, owned by
-`docs/ARCHITECTURE.md`. The validation-adequacy input hash excludes
-`docs/**`, every `ARCHITECTURE.md`, and `.ai/generated/**`, so reconciliation does
-not invalidate an approved validation.
+`docs/ARCHITECTURE.md`. Architect Debug Flow and Architecture Diagnosis Flow
+have no architecture plan and are not checked.
 
-Before writing either documentation report, Artifact Service asks Workflow
-Control to check the confirmed dispatch. Docs-Only requires `docs-update-report`;
-docs reconciliation in a complete delivery flow requires `docs-sync-report`.
-Wrong-kind submissions leave the existing artifact unchanged. Memory-owned
-documentation assignments and completed flows are outside this stage check.
-Completion still requires a fresh docs-sync report after the final Architect
-dispatch and identifies any newer, wrong-kind docs-update report in the error.
-It also requires a code-diff approval recorded after that dispatch, so every
-reconciliation or follow-up commit is reviewed before acceptance.
+Completion of a delivery flow requires a passed code-diff Gate for the latest
+dispatch: a Tester dispatch with a passing Test Report and validation-adequacy
+approval, or a post-validation Architect dispatch. It also requires an
+accepted Final Acceptance produced after that dispatch and no pending
+follow-up transition, so every doc correction or follow-up commit is reviewed
+before acceptance.
 
 The shared PreToolUse guard blocks workflow-role attempts to write managed
 workflow Markdown directly through Bash, Write, or Edit. Route messages, Coder
@@ -380,12 +380,14 @@ after a fresh passing Test Report and successful validation-adequacy and
 code-diff Gates. It is consumed by the matching Tester dispatch, invalidates
 the prior validation evidence, and is not recorded as a workflow override. The runtime record also
 identifies the current root flow, active Debug or Diagnosis branch, branch
-return, and the first dispatch of the active flow run. A branch return retains
-the parent implementation history even when the authorized return dispatch
-adds another Tester round before docs reconciliation. Those fields isolate repeated and
-switched flows from older history. Completion requires evidence produced after
-the current role dispatch; an active branch cannot consume parent Final
-Acceptance or complete independently. Artifact freshness includes both content
+return, and the first dispatch of the active flow run. A Debug or Diagnosis
+Branch that passes its own code-diff Gate has returned to its root flow: the
+root flow's Final Acceptance follows directly, and its follow-up dispatches
+continue in the root flow with the parent implementation history retained.
+Those fields isolate repeated and switched flows from older history.
+Completion requires evidence produced after the current role dispatch; a
+branch completes only through its root flow's Final Acceptance after its
+code-diff Gate passes. Artifact freshness includes both content
 and the concrete file version, so a role may intentionally reproduce identical
 accepted content after a new dispatch. Disabled Gates remain global; skipped,
 overridden, and not-required Gate states must be produced after the active

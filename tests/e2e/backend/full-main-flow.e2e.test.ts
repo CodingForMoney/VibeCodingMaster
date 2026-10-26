@@ -281,7 +281,7 @@ function acceptedFinalAcceptance(taskSlug: string): string {
   return renderFinalAcceptanceTemplate(taskSlug)
     .replaceAll("TBD", "Complete main flow evidence verified.")
     .replace(
-      "accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|needs-docs-sync|blocked-by-user-decision",
+      "accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|blocked-by-user-decision",
       "accepted"
     );
 }
