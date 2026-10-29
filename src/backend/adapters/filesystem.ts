@@ -97,12 +97,15 @@ export function createNodeFileSystemAdapter(): FileSystemAdapter {
     async readJson<T>(targetPath: string) {
       let attempt = 0;
       for (;;) {
-        const content = await runFileOperation(() => fs.readFile(targetPath, "utf8"));
         try {
+          const content = await runFileOperation(() => fs.readFile(targetPath, "utf8"));
           return JSON.parse(content) as T;
         } catch (error) {
+          // A concurrent rename-over can leave the target briefly missing on
+          // some shared mounts, so ENOENT gets the same short retry as a
+          // partially written file. A file that stays missing still throws.
           const delayMs = JSON_READ_RETRY_DELAYS_MS[attempt];
-          if (!(error instanceof SyntaxError) || delayMs === undefined) {
+          if (!(error instanceof SyntaxError || getErrorCode(error) === "ENOENT") || delayMs === undefined) {
             throw error;
           }
           attempt += 1;

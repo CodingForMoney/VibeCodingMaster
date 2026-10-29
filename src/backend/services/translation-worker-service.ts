@@ -103,6 +103,7 @@ const MEMORY_TOTAL_LIMIT_BYTES = 80 * 1024;
 const MEMORY_INITIALIZED_MIN_FILES = 2;
 const MEMORY_FILE_NAMES = ["glossary.md", "style-guide.md", "project-context.md", "decisions.md"] as const;
 const TRANSLATOR_ROLE = "translator";
+const QUEUE_HOOK_EVENTS = new Set<ClaudeHookEventName>(["UserPromptSubmit", "Stop", "StopFailure"]);
 const FILE_BROWSER_DEFAULT_LIMIT = 200;
 const FILE_BROWSER_MAX_LIMIT = 500;
 const FILE_BROWSER_SEARCH_MAX_DEPTH = 6;
@@ -181,6 +182,28 @@ const BINARY_LIKE_EXTENSIONS = new Set([
 export function createTranslationWorkerService(deps: TranslationWorkerServiceDeps): TranslationWorkerService {
   const now = deps.now ?? (() => new Date().toISOString());
   const createId = deps.id ?? (() => randomUUID());
+  const queueLocks = new Map<string, Promise<void>>();
+
+  // Every queue and index access happens in this process. Serializing them per
+  // repository keeps concurrent load-modify-save cycles from dropping each
+  // other's updates and keeps readers out of an in-flight rename.
+  function withQueueLock<T>(repoRoot: string, operation: () => Promise<T>): Promise<T> {
+    const key = path.resolve(repoRoot);
+    const previous = queueLocks.get(key) ?? Promise.resolve();
+    const result = previous.then(operation);
+    const settled = result.then(() => undefined, () => undefined);
+    queueLocks.set(key, settled);
+    void settled.then(() => {
+      if (queueLocks.get(key) === settled) {
+        queueLocks.delete(key);
+      }
+    });
+    return result;
+  }
+
+  function scheduleDispatch(repoRoot: string): void {
+    void withQueueLock(repoRoot, () => dispatchNext(repoRoot)).catch(() => undefined);
+  }
 
   async function ensureLayout(repoRoot: string): Promise<void> {
     await Promise.all([
@@ -1108,7 +1131,7 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
     await saveQueue(repoRoot, queue);
   }
 
-  return {
+  const service: TranslationWorkerService = {
     async cleanupStartupRuntime(repoRoot) {
       await removeRepoPath(repoRoot, TRANSLATIONS_RUNTIME_DIR, true);
       await cleanupStartupFileIndex(repoRoot);
@@ -1203,7 +1226,7 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
         isActiveFileTranslationJobStatus(job.status)
       );
       if (activeExisting) {
-        void dispatchNext(repoRoot);
+        scheduleDispatch(repoRoot);
         return activeExisting;
       }
 
@@ -1305,7 +1328,7 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
         lastUpdatedAt: timestamp
       });
       await deps.fs.writeText(resolveRepoPath(repoRoot, job.reportPath), `# Translation Report\n\nStatus: queued\nJob: ${jobId}\n`);
-      void dispatchNext(repoRoot);
+      scheduleDispatch(repoRoot);
       return job;
     },
 
@@ -1366,7 +1389,7 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
       index.runs = [run, ...index.runs];
       index.updatedAt = timestamp;
       await saveBootstrapIndex(repoRoot, index);
-      void dispatchNext(repoRoot);
+      scheduleDispatch(repoRoot);
       return run;
     },
 
@@ -1425,7 +1448,7 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
           "Delete or merge stale, duplicate, temporary, and task-local content."
         ]
       });
-      void dispatchNext(repoRoot);
+      scheduleDispatch(repoRoot);
       return queueItem;
     },
 
@@ -1501,7 +1524,7 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
       });
       job.queueItemId = queueItem.id;
       if (!input.deferDispatch) {
-        void dispatchNext(repoRoot);
+        scheduleDispatch(repoRoot);
       }
       return job;
     },
@@ -1621,6 +1644,34 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
         statusCode: 409
       });
     }
+  };
+
+  return {
+    ...service,
+    cleanupStartupRuntime: (repoRoot) =>
+      withQueueLock(repoRoot, () => service.cleanupStartupRuntime(repoRoot)),
+    getState: (repoRoot, options) =>
+      withQueueLock(repoRoot, () => service.getState(repoRoot, options)),
+    createFileJob: (repoRoot, input) =>
+      withQueueLock(repoRoot, () => service.createFileJob(repoRoot, input)),
+    readFileJobOutput: (repoRoot, jobId) =>
+      withQueueLock(repoRoot, () => service.readFileJobOutput(repoRoot, jobId)),
+    createBootstrapRun: (repoRoot, input) =>
+      withQueueLock(repoRoot, () => service.createBootstrapRun(repoRoot, input)),
+    createMemoryUpdate: (repoRoot, input) =>
+      withQueueLock(repoRoot, () => service.createMemoryUpdate(repoRoot, input)),
+    createConversationJob: (repoRoot, input) =>
+      withQueueLock(repoRoot, () => service.createConversationJob(repoRoot, input)),
+    validateConversationResult: (repoRoot, input) =>
+      withQueueLock(repoRoot, () => service.validateConversationResult(repoRoot, input)),
+    promoteFileJob: (repoRoot, jobId, targetPath) =>
+      withQueueLock(repoRoot, () => service.promoteFileJob(repoRoot, jobId, targetPath)),
+    // Only the events that touch the queue wait for the lock, so a SessionStart
+    // hook fired while a dispatch is starting the Translator never waits on it.
+    handleTranslatorHook: (repoRoot, eventName, taskSlug) =>
+      QUEUE_HOOK_EVENTS.has(eventName)
+        ? withQueueLock(repoRoot, () => service.handleTranslatorHook(repoRoot, eventName, taskSlug))
+        : service.handleTranslatorHook(repoRoot, eventName, taskSlug)
   };
 }
 

@@ -337,7 +337,7 @@ describe("translator-translation-service", () => {
       targetLanguage: "en",
       contextText: "The user is asking a coding agent to inspect a failing test."
     });
-    await waitForDispatcher();
+    await waitForCondition(() => writes.some((entry) => entry.includes("Translate each <VCM_TEXT> item")));
 
     const prompt = writes.find((entry) => entry.includes("Translate each <VCM_TEXT> item"));
     expect(prompt).toContain("Translate each <VCM_TEXT> item from auto to en.");
@@ -356,10 +356,11 @@ describe("translator-translation-service", () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-conversation-dispatching-"));
     const fs = createNodeFileSystemAdapter();
     const writes: string[] = [];
+    const sessionService = createTranslatorSessionService([], { initialStatus: "idle" });
     const service = createTranslationWorkerService({
       fs,
       runtime: createRuntimeStub(writes),
-      sessionService: createTranslatorSessionService([], { initialStatus: "idle" })
+      sessionService
     });
 
     const job = await service.createConversationJob(tmpRepo, {
@@ -375,10 +376,15 @@ describe("translator-translation-service", () => {
       return queue.items.find((item) => item.id === job.queueItemId)?.status === "dispatching";
     });
 
-    const stateDuringSubmit = await service.getState(tmpRepo);
+    // A state read issued mid-dispatch waits for the dispatch instead of
+    // reconciling the item against the not-yet-running Translator.
+    const stateRead = service.getState(tmpRepo);
+    const translator = await sessionService.getRoleSession(tmpRepo, "demo-task", "translator");
+    translator!.status = "running";
+    const stateDuringSubmit = await stateRead;
     expect(stateDuringSubmit.queue.activeItemId).toBe(job.queueItemId);
     const itemDuringSubmit = stateDuringSubmit.queue.items.find((item) => item.id === job.queueItemId);
-    expect(itemDuringSubmit?.status).toBe("dispatching");
+    expect(itemDuringSubmit?.status).toBe("running");
     expect(itemDuringSubmit?.error).toBeUndefined();
 
     await waitForDispatcher();
@@ -451,6 +457,27 @@ describe("translator-translation-service", () => {
       targetLanguage: "zh-CN"
     })).resolves.toMatchObject({ translatedText: "第二段译文" });
     expect(await fs.pathExists(path.join(tmpRepo, firstItem!.batchResultPath!))).toBe(false);
+  });
+
+  it("keeps every concurrently enqueued conversation translation", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-conversation-concurrent-"));
+    const fs = createNodeFileSystemAdapter();
+    const service = createTranslationWorkerService({ fs });
+
+    const jobs = await Promise.all(Array.from({ length: 8 }, (_, index) =>
+      service.createConversationJob(tmpRepo!, {
+        taskSlug: "demo-task",
+        direction: "cc-output-to-user",
+        sourceText: `Output ${index}.`,
+        sourceLanguage: "en",
+        targetLanguage: "zh-CN",
+        deferDispatch: true
+      })
+    ));
+
+    const state = await service.getState(tmpRepo);
+    expect(state.queue.items.map((item) => item.id).sort())
+      .toEqual(jobs.map((job) => job.queueItemId).sort());
   });
 
   it("accepts conversation plain text results containing JSON-sensitive characters", async () => {
