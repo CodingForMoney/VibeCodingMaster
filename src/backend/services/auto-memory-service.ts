@@ -48,6 +48,8 @@ import {
 } from "./memory-proposal-validation.js";
 import type { SessionService } from "./session-service.js";
 
+const MEMORY_REVIEW_STOP_BLOCK_LIMIT = 3;
+
 const MEMORY_FILE_DEFINITIONS = [
   { path: "CLAUDE.md", title: "Shared Memory" },
   { path: ".claude/agents/project-manager.md", title: "Project Manager Memory", role: "project-manager" },
@@ -92,6 +94,7 @@ interface StoredMemoryReviewState {
   reviewPromptDispatchedAt?: string;
   retrospectiveReportPath?: string;
   reviewBaseCommit?: string;
+  stopBlockCount?: number;
   error?: string;
 }
 
@@ -194,7 +197,7 @@ export interface AutoMemoryService {
   isRoleMemoryTurn(taskRepoRoot: string, role: RoleName): Promise<boolean>;
   getDurableDocAssignment(taskRepoRoot: string, role: RoleName): Promise<DurableDocAssignmentState | undefined>;
   handleRoleHook(input: AutoMemoryRoleHookInput): Promise<boolean>;
-  handleHarnessEngineerHook(input: AutoMemoryHarnessHookInput): Promise<boolean>;
+  handleHarnessEngineerHook(input: AutoMemoryHarnessHookInput): Promise<AutoMemoryHarnessHookResult>;
   assertHarnessEngineerAvailable(taskRepoRoot: string): Promise<void>;
 }
 
@@ -222,6 +225,13 @@ export interface AutoMemoryHarnessHookInput {
   taskRepoRoot: string;
   taskSlug: string;
   eventName: ClaudeHookEventName;
+  // True only when the hook response can still keep the turn alive.
+  allowStopBlock?: boolean;
+}
+
+export interface AutoMemoryHarnessHookResult {
+  handled: boolean;
+  stopBlockReason?: string;
 }
 
 export interface AutoMemoryServiceDeps {
@@ -708,27 +718,27 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     return true;
   }
 
-  async function handleHarnessEngineerHook(input: AutoMemoryHarnessHookInput): Promise<boolean> {
+  async function handleHarnessEngineerHook(input: AutoMemoryHarnessHookInput): Promise<AutoMemoryHarnessHookResult> {
     const state = await loadActiveState(input.taskRepoRoot);
     if (!(await deps.appSettings.getPreferences()).autoMemoryEnabled && !preserveDisabledReview(state)) {
       if (state) {
         await discardActiveReview(input.taskRepoRoot, state);
-        return true;
+        return { handled: true };
       }
-      return false;
+      return { handled: false };
     }
     if (state?.status === "reviewing" && !state.reviewPromptDispatchedAt) {
-      return false;
+      return { handled: false };
     }
     if (!state || state.status !== "reviewing") {
-      return false;
+      return { handled: false };
     }
     if (input.eventName === "UserPromptSubmit" || input.eventName === "PostCompact") {
-      return true;
+      return { handled: true };
     }
     if (input.eventName === "StopFailure") {
       await failReview(input.taskRepoRoot, state, "Task Harness Retrospective memory review turn failed.");
-      return true;
+      return { handled: true };
     }
     if (input.eventName === "Stop") {
       if (
@@ -736,29 +746,65 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
         || !(await deps.fs.pathExists(state.retrospectiveReportPath))
         || !(await deps.fs.readText(state.retrospectiveReportPath)).trim()
       ) {
-        await failReview(
-          input.taskRepoRoot,
+        return rejectHarnessEngineerStop(
+          input,
           state,
           "Task Harness Retrospective did not write the required retrospective report."
         );
-        return true;
       }
       try {
         await recordHarnessEngineerMemoryResult(input.taskRepoRoot, state);
-        if (state.assignments.length > 0) {
-          await dispatchCurrentDurableDocAssignment(input.baseRepoRoot, input.taskRepoRoot, state);
-        }
       } catch (error) {
-        await failReview(
-          input.taskRepoRoot,
-          state,
-          `Harness Engineer memory result could not be recorded: ${errorMessage(error)}`
-        );
-        return true;
+        const message = `Harness Engineer memory result could not be recorded: ${errorMessage(error)}`;
+        if (!isFixableMemoryResultError(error)) {
+          await failReview(input.taskRepoRoot, state, message);
+          return { handled: true };
+        }
+        const hint = error instanceof VcmError && error.hint ? ` ${error.hint}` : "";
+        return rejectHarnessEngineerStop(input, state, `${message}${hint}`);
       }
-      return true;
+      if (state.assignments.length > 0) {
+        try {
+          await dispatchCurrentDurableDocAssignment(input.baseRepoRoot, input.taskRepoRoot, state);
+        } catch (error) {
+          await failReview(
+            input.taskRepoRoot,
+            state,
+            `Durable-document assignment could not be dispatched: ${errorMessage(error)}`
+          );
+        }
+      }
+      return { handled: true };
     }
-    return true;
+    return { handled: true };
+  }
+
+  // A correctable retrospective result keeps the Harness Engineer turn alive
+  // with the validation error, a bounded number of times, so the role can fix
+  // review-result.json or the memory commit instead of the review failing
+  // silently after the turn has ended.
+  async function rejectHarnessEngineerStop(
+    input: AutoMemoryHarnessHookInput,
+    state: StoredMemoryReviewState,
+    message: string
+  ): Promise<AutoMemoryHarnessHookResult> {
+    const blocks = state.stopBlockCount ?? 0;
+    if (!input.allowStopBlock || blocks >= MEMORY_REVIEW_STOP_BLOCK_LIMIT) {
+      await failReview(input.taskRepoRoot, state, message);
+      return { handled: true };
+    }
+    state.stopBlockCount = blocks + 1;
+    state.error = message;
+    state.updatedAt = now();
+    await persistActiveState(input.taskRepoRoot, state);
+    return {
+      handled: true,
+      stopBlockReason: [
+        message,
+        `Fix the retrospective report, ${resolveRepoPath(input.taskRepoRoot, reviewResultRelativePath(state.runId))}, or the memory commit, then end the turn again.`,
+        `Attempt ${state.stopBlockCount} of ${MEMORY_REVIEW_STOP_BLOCK_LIMIT}; after that the memory review fails.`
+      ].join(" ")
+    };
   }
 
   async function getFile(_baseRepoRoot: string, taskRepoRoot: string, filePath: string): Promise<MemoryFileContent> {
@@ -845,8 +891,50 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
         statusCode: 409
       });
     }
+    if (await harnessEngineerResultWritten(taskRepoRoot, state)) {
+      // The Harness Engineer finished its turn, so re-validate the current
+      // result file and memory commit before discarding anything.
+      try {
+        await recordHarnessEngineerMemoryResult(taskRepoRoot, state);
+      } catch (error) {
+        if (await memoryChangedSinceReview(taskRepoRoot, state)) {
+          // Reviewed memory is already committed; restarting would lose the
+          // durable-document moves recorded only in this run's result file.
+          const message = `Harness Engineer memory result could not be recorded: ${errorMessage(error)}`;
+          await failReview(taskRepoRoot, state, message);
+          throw new VcmError({
+            code: "MEMORY_REVIEW_RESULT_STILL_INVALID",
+            message,
+            statusCode: 409,
+            hint: `Correct ${resolveRepoPath(taskRepoRoot, reviewResultRelativePath(state.runId))} or the memory commit, then retry.`
+          });
+        }
+        await clearActiveState(taskRepoRoot);
+        return getState(baseRepoRoot, taskRepoRoot);
+      }
+      if (state.assignments.length > 0) {
+        await dispatchCurrentDurableDocAssignment(baseRepoRoot, taskRepoRoot, state);
+      }
+      return getState(baseRepoRoot, taskRepoRoot);
+    }
     await clearActiveState(taskRepoRoot);
     return getState(baseRepoRoot, taskRepoRoot);
+  }
+
+  async function harnessEngineerResultWritten(
+    taskRepoRoot: string,
+    state: StoredMemoryReviewState
+  ): Promise<boolean> {
+    if (!state.reviewBaseCommit || !state.reviewPromptDispatchedAt) {
+      return false;
+    }
+    return deps.fs.pathExists(resolveRepoPath(taskRepoRoot, reviewResultRelativePath(state.runId)));
+  }
+
+  async function memoryChangedSinceReview(taskRepoRoot: string, state: StoredMemoryReviewState): Promise<boolean> {
+    const before = await readRunMemorySet(taskRepoRoot, state.runId, "before");
+    const after = await readMemorySet(taskRepoRoot);
+    return MEMORY_FILE_DEFINITIONS.some((definition) => before[definition.path] !== after[definition.path]);
   }
 
   async function retryDurableDocAssignment(
@@ -1381,7 +1469,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
   ): Promise<HarnessMemoryReviewResult> {
     const resultPath = resolveRepoPath(
       taskRepoRoot,
-      `${MEMORY_REVIEW_RUNS_ROOT}/${state.runId}/review-result.json`
+      reviewResultRelativePath(state.runId)
     );
     if (!(await deps.fs.pathExists(resultPath))) {
       throw new VcmError({
@@ -2301,6 +2389,22 @@ function ensureTrailingNewline(content: string): string {
 
 function sha256(content: string): string {
   return createHash("sha256").update(content).digest("hex");
+}
+
+function reviewResultRelativePath(runId: string): string {
+  return `${MEMORY_REVIEW_RUNS_ROOT}/${runId}/review-result.json`;
+}
+
+// Errors the Harness Engineer can correct in its own output: the result file,
+// the memory edit, or the memory commit. A malformed result file surfaces as a
+// JSON SyntaxError.
+function isFixableMemoryResultError(error: unknown): boolean {
+  if (error instanceof SyntaxError) {
+    return true;
+  }
+  return error instanceof VcmError
+    && error.code.startsWith("MEMORY_")
+    && error.code !== "MEMORY_REVIEW_BASE_MISSING";
 }
 
 function errorMessage(error: unknown): string {

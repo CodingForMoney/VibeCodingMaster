@@ -200,29 +200,33 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     };
   }
 
-  async function processHarnessEngineerHook(input: ClaudeHookRequest): Promise<ClaudeHookResult> {
+  async function processHarnessEngineerHook(
+    input: ClaudeHookRequest,
+    options: { allowBlock: boolean }
+  ): Promise<ClaudeHookResult> {
     const eventName = parseBusinessHookEvent(input.event.hook_event_name);
     const context = await getProjectToolHookContext("Harness Engineer");
     const projectScoped = input.taskSlug === "__project_harness_engineer__";
-    const session = projectScoped
-      ? await deps.sessionService.recordProjectHarnessEngineerHookEvent(context.project.repoRoot, {
-          eventName,
+    const recordSessionEvent = (recordedEventName: typeof eventName) => projectScoped
+      ? deps.sessionService.recordProjectHarnessEngineerHookEvent(context.project.repoRoot, {
+          eventName: recordedEventName,
           sessionId: stringOrUndefined(input.event.session_id),
           transcriptPath: stringOrUndefined(input.event.transcript_path),
           cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd),
           runtimeSessionId: stringOrUndefined(input.event.vcm_runtime_session_id),
           runtimeSessionToken: input.runtimeSessionToken
         })
-      : await deps.sessionService.recordRoleHookEvent(context.project.repoRoot, {
+      : deps.sessionService.recordRoleHookEvent(context.project.repoRoot, {
           taskSlug: input.taskSlug,
           role: input.role,
-          eventName,
+          eventName: recordedEventName,
           sessionId: stringOrUndefined(input.event.session_id),
           transcriptPath: stringOrUndefined(input.event.transcript_path),
           cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd),
           runtimeSessionId: stringOrUndefined(input.event.vcm_runtime_session_id),
           runtimeSessionToken: input.runtimeSessionToken
         });
+    const session = await recordSessionEvent(eventName);
     if (!session) {
       return completedHookResult(input, eventName);
     }
@@ -230,14 +234,32 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       ? (await deps.taskService.listTasks(context.project.repoRoot))
           .find((task) => task.cleanupStatus !== "cleaned" && (projectScoped || task.taskSlug === input.taskSlug))
       : undefined;
-    const memoryHandled = activeTask
+    const memoryResult = activeTask
       ? await deps.autoMemoryService?.handleHarnessEngineerHook({
           baseRepoRoot: context.project.repoRoot,
           taskRepoRoot: getTaskRuntimeRepoRoot(activeTask),
           taskSlug: activeTask.taskSlug,
-          eventName
+          eventName,
+          allowStopBlock: options.allowBlock && eventName === "Stop"
         })
-      : false;
+      : undefined;
+    if (memoryResult?.stopBlockReason) {
+      // The memory review result is still correctable: keep the Harness
+      // Engineer turn alive and skip retrospective completion until it passes.
+      // The turn continues, so the session must not stay recorded as idle and
+      // receive queued input meanwhile.
+      await recordSessionEvent("UserPromptSubmit");
+      return {
+        ok: true,
+        eventName,
+        taskSlug: activeTask?.taskSlug ?? input.taskSlug,
+        role: input.role,
+        sessionUpdated: Boolean(session),
+        dispatchedCount: 0,
+        stopDecision: { behavior: "block", reason: memoryResult.stopBlockReason }
+      };
+    }
+    const memoryHandled = memoryResult?.handled ?? false;
     const memoryState = activeTask && deps.autoMemoryService
       ? await deps.autoMemoryService.getState(
           context.project.repoRoot,
@@ -802,7 +824,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       await deps.harnessFeedbackService?.completeWaitingTaskRetrospective(
         context.project.repoRoot,
         context.taskSlug,
-        memoryState.status
+        memoryState
       );
     }
     return {
@@ -1160,7 +1182,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
           return processTranslatorHook(input);
         }
         if (isHarnessEngineerToolRoleName(input.role)) {
-          return processHarnessEngineerHook(input);
+          return processHarnessEngineerHook(input, { allowBlock: false });
         }
         if (eventName === "UserPromptSubmit") {
           return handleUserPromptSubmitHook(input);
@@ -1182,7 +1204,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
           return processTranslatorHook(input);
         }
         if (isHarnessEngineerToolRoleName(input.role)) {
-          return processHarnessEngineerHook(input);
+          return processHarnessEngineerHook(input, { allowBlock: true });
         }
         return processStopHook(input, { allowBlock: true });
       });

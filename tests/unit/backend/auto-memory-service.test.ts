@@ -332,7 +332,7 @@ describe("auto-memory-service", () => {
       taskRepoRoot: context.taskRepoRoot,
       taskSlug: "demo",
       eventName: "Stop"
-    })).resolves.toBe(false);
+    })).resolves.toEqual({ handled: false });
 
     const state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
     expect(state.runs).toHaveLength(0);
@@ -715,6 +715,83 @@ describe("auto-memory-service", () => {
 
     expect(await readText(context.taskRepoRoot, "CLAUDE.md")).not.toContain("New memory must not be applied");
     expect(context.gitCommits).toHaveLength(0);
+  });
+
+  it("rejects the Harness Engineer Stop with a fixable result error and records the corrected result", async () => {
+    const context = await createContext(true);
+    const move = await prepareCommittedMemoryMove(context);
+    await move.writeResult("");
+    const stopHook = {
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      eventName: "Stop" as const,
+      allowStopBlock: true
+    };
+
+    const blocked = await context.service.handleHarnessEngineerHook(stopHook);
+    expect(blocked.handled).toBe(true);
+    expect(blocked.stopBlockReason).toContain("complete review-result decision schema");
+    expect(blocked.stopBlockReason).toContain(move.review.reviewResultPath);
+    expect(blocked.stopBlockReason).toContain("Attempt 1 of 3");
+    let state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.status).toBe("reviewing");
+
+    await move.writeResult("none");
+    await expect(context.service.handleHarnessEngineerHook(stopHook)).resolves.toEqual({ handled: true });
+    state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.status).toBe("documenting");
+    expect(state.active?.assignments[0]).toMatchObject({ targetPath: "docs/ARCHITECTURE.md", status: "running" });
+    expect(state.runs[0].status).toBe("applied");
+  });
+
+  it("fails the memory review once the Stop rejection limit is spent", async () => {
+    const context = await createContext(true);
+    const move = await prepareCommittedMemoryMove(context);
+    await move.writeResult("");
+    const stopHook = {
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      eventName: "Stop" as const,
+      allowStopBlock: true
+    };
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const result = await context.service.handleHarnessEngineerHook(stopHook);
+      expect(result.stopBlockReason).toContain(`Attempt ${attempt} of 3`);
+    }
+    await expect(context.service.handleHarnessEngineerHook(stopHook)).resolves.toEqual({ handled: true });
+    const state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.status).toBe("failed");
+    expect(state.active?.error).toContain("complete review-result decision schema");
+  });
+
+  it("re-validates a corrected review result on retry instead of discarding committed memory moves", async () => {
+    const context = await createContext(true);
+    const move = await prepareCommittedMemoryMove(context);
+    await move.writeResult("");
+    await context.service.handleHarnessEngineerHook({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      eventName: "Stop"
+    });
+    let state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.status).toBe("failed");
+
+    await expect(context.service.retryFailedReview(context.baseRepoRoot, context.taskRepoRoot))
+      .rejects.toMatchObject({ code: "MEMORY_REVIEW_RESULT_STILL_INVALID" });
+    state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.status).toBe("failed");
+    expect(state.active?.runId).toBe(move.review.runId);
+
+    await move.writeResult("none");
+    state = await context.service.retryFailedReview(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.status).toBe("documenting");
+    expect(state.active?.runId).toBe(move.review.runId);
+    expect(state.active?.assignments[0]).toMatchObject({ targetPath: "docs/ARCHITECTURE.md", status: "running" });
+    expect(context.terminalWrites.join("\n")).toContain("[VCM Durable Documentation Assignment]");
   });
 
   it("rejects reviewed memory that Harness Engineer did not commit", async () => {
@@ -1226,6 +1303,45 @@ describe("auto-memory-service", () => {
       "utf8"
     );
     return review!;
+  }
+
+  // Commits a reviewed memory move and lets the caller write its result with a
+  // chosen finalContent for the move decision; an empty string is invalid.
+  async function prepareCommittedMemoryMove(context: Awaited<ReturnType<typeof createContext>>) {
+    const sourceEntry = "Lifecycle ownership must be documented for maintainers.";
+    const review = await prepareHarnessMemoryReview(context, sourceEntry);
+    const sharedPath = path.join(context.taskRepoRoot, "CLAUDE.md");
+    await writeFile(
+      sharedPath,
+      replaceVcmMemoryBlock(await readFile(sharedPath, "utf8"), "No accumulated project memory yet.\n"),
+      "utf8"
+    );
+    context.recordHarnessCommit(["CLAUDE.md"], "fade000");
+    return {
+      review,
+      async writeResult(moveFinalContent: string) {
+        await writeFile(review.reviewResultPath, `${JSON.stringify({
+          version: 1,
+          runId: review.runId,
+          memoryCommit: "fade000",
+          decisions: [
+            {
+              ...existingDecision("shared", sourceEntry, "move-to-durable-doc", moveFinalContent),
+              durableDocPath: "docs/ARCHITECTURE.md"
+            },
+            ...defaultRoleMemoryDecisions()
+          ],
+          durableDocAssignments: [{
+            sourceMemoryPath: "CLAUDE.md",
+            sourceEntry,
+            targetPath: "docs/ARCHITECTURE.md",
+            content: "Document lifecycle ownership in the architecture overview.",
+            reason: "The architecture document is the durable source for maintainers.",
+            evidence: ["src/backend/services/claude-hook-service.ts"]
+          }]
+        }, null, 2)}\n`, "utf8");
+      }
+    };
   }
 });
 

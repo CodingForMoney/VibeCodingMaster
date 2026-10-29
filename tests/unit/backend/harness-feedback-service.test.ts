@@ -570,6 +570,26 @@ None.
       queuedCount: 0,
       warnings: [expect.stringContaining("review-result.json is missing existing memory item")]
     });
+
+    const markerPath = path.join(tmpRepo, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.json");
+    const memoryRun = (status: "failed" | "applied") => [{
+      runId: "memory-run",
+      taskSlug: "demo-task",
+      source: "auto" as const,
+      status,
+      createdAt: "2026-06-01T00:00:00.000Z"
+    }];
+    await expect(service.completeWaitingTaskRetrospective(tmpRepo, "demo-task", {
+      status: "idle",
+      runs: memoryRun("failed")
+    })).resolves.toBe(false);
+    expect(JSON.parse(await readFile(markerPath, "utf8")).status).toBe("failed");
+
+    await expect(service.completeWaitingTaskRetrospective(tmpRepo, "demo-task", {
+      status: "idle",
+      runs: memoryRun("applied")
+    })).resolves.toBe(true);
+    expect(JSON.parse(await readFile(markerPath, "utf8"))).toMatchObject({ status: "completed" });
   });
 
   it("does not start a task harness retrospective for a follow-up final-acceptance decision", async () => {

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import type { ClaudeHookEventName } from "../../shared/types/claude-hook.js";
-import type { AutoMemoryReviewStatus } from "../../shared/types/memory.js";
+import type { AutoMemoryReviewStatus, AutoMemoryStateReport } from "../../shared/types/memory.js";
 import type {
   HarnessFeedbackQueueItem,
   HarnessFeedbackStateReport,
@@ -28,7 +28,7 @@ export interface HarnessFeedbackService {
   completeWaitingTaskRetrospective(
     repoRoot: string,
     taskSlug: string,
-    memoryStatus: AutoMemoryReviewStatus
+    memory: Pick<AutoMemoryStateReport, "status" | "runs">
   ): Promise<boolean>;
   assertHarnessEngineerAvailable(repoRoot: string): Promise<void>;
 }
@@ -82,6 +82,7 @@ interface TaskRetrospectiveMarker {
   pendingFeedbackPaths: string[];
   memoryRunId?: string;
   durableDocFailure?: boolean;
+  memoryReviewFailure?: boolean;
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
@@ -286,6 +287,7 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
         ...processedMarker,
         status: "failed",
         durableDocFailure: input.memoryReviewHasAssignments,
+        memoryReviewFailure: true,
         failedAt: timestamp,
         updatedAt: timestamp,
         error: input.memoryReviewError
@@ -309,16 +311,33 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
   async function completeWaitingTaskRetrospective(
     repoRoot: string,
     taskSlug: string,
-    memoryStatus: AutoMemoryReviewStatus
+    memory: Pick<AutoMemoryStateReport, "status" | "runs">
   ): Promise<boolean> {
     const marker = await loadTaskRetrospectiveMarker(repoRoot, taskSlug);
-    if (!marker || (marker.status !== "waiting-docs" && !(marker.status === "failed" && marker.durableDocFailure))) {
+    // A memory review that failed validation recovers only when a retry
+    // re-validated and applied that same run; a discarded run never does.
+    const memoryReviewRecovered = Boolean(
+      marker?.memoryReviewFailure
+      && marker.memoryRunId
+      && memory.runs.some((run) => run.runId === marker.memoryRunId && run.status === "applied")
+    );
+    if (
+      !marker
+      || (marker.status !== "waiting-docs"
+        && !(marker.status === "failed" && (marker.durableDocFailure || memoryReviewRecovered)))
+    ) {
       return false;
     }
+    const memoryStatus = memory.status;
     if (memoryStatus === "documenting") {
       if (marker.status === "failed") {
         await persistTaskRetrospectiveMarker(repoRoot, {
-          ...marker, status: "waiting-docs", updatedAt: now(), error: undefined, failedAt: undefined
+          ...marker,
+          status: "waiting-docs",
+          memoryReviewFailure: undefined,
+          updatedAt: now(),
+          error: undefined,
+          failedAt: undefined
         });
       }
       return true;
@@ -352,6 +371,7 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
       ...processedMarker,
       status: "completed",
       durableDocFailure: undefined,
+      memoryReviewFailure: undefined,
       error: undefined,
       failedAt: undefined,
       completedAt: timestamp,
@@ -539,8 +559,11 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
             `Write the complete machine-readable review to: ${memoryReview.reviewResultPath}`,
             "The JSON root must be: {\"version\":1,\"runId\":\"<assigned run id>\",\"memoryCommit\":\"<full commit or none>\",\"decisions\":[],\"durableDocAssignments\":[]}.",
             "Each decision must contain itemId, source (existing|proposal), target, entry, decision, reason, impactIfAbsent, evidence (non-empty array), finalContent, and durableDocPath.",
+            "Every decision field is a non-empty string except evidence. Use \"none\" for finalContent when the decision keeps no memory text (remove, reject, move-to-durable-doc), and for durableDocPath unless the decision is move-to-durable-doc, where it must equal the assignment targetPath.",
+            "For retain, update, keep-in-memory, and keep-memory-reference, finalContent must be the exact memory text now present in the <VCM-memory> block; an update's finalContent must be one complete semantic entry as it now appears.",
             "Existing decisions use retain|update|remove|move-to-durable-doc. Add or Update proposal decisions use keep-in-memory|keep-memory-reference|move-to-durable-doc|reject; Remove proposal decisions use remove|retain. Proposal itemId must equal the assigned candidate ID.",
             "Each durableDocAssignment must contain sourceMemoryPath, sourceEntry, targetPath, content, reason, and evidence (non-empty array). Use a project-relative Markdown target outside .ai/vcm.",
+            "VCM validates review-result.json and the memory commit when you end the turn. If validation fails, the Stop is rejected with the error; correct the result file or the memory commit and end the turn again.",
             "In the retrospective report, include only this memory summary:",
             "",
             "## Memory Review",

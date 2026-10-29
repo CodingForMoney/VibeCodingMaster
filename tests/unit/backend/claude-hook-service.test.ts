@@ -1579,6 +1579,67 @@ describe("createClaudeHookService", () => {
     ]);
   });
 
+  it("keeps a Harness Engineer turn alive when its memory review result is still correctable", async () => {
+    const calls: string[] = [];
+    const task = await createTaskServiceStub().loadTask();
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: {
+        async listTasks() {
+          return [task];
+        }
+      } as never,
+      sessionService: {
+        async recordProjectHarnessEngineerHookEvent(_repoRoot, input) {
+          calls.push(`session:${input.eventName}`);
+          return {
+            id: "runtime_harness_engineer",
+            claudeSessionId: input.sessionId ?? "harness_engineer_session",
+            taskSlug: "__project_harness_engineer__",
+            role: "harness-engineer",
+            status: "running",
+            activityStatus: input.eventName === "Stop" ? "idle" : "running",
+            command: "claude --agent harness-engineer",
+            permissionMode: "default",
+            cwd: input.cwd ?? "/repo",
+            terminalBackend: "node-pty",
+            updatedAt: "2026-06-01T00:00:00.000Z"
+          };
+        }
+      } as SessionService,
+      autoMemoryService: {
+        async handleHarnessEngineerHook(input) {
+          calls.push(`memory:${input.eventName}:${input.allowStopBlock}`);
+          return { handled: true, stopBlockReason: "review-result.json is invalid." };
+        }
+      } as never,
+      harnessFeedbackService: {
+        async handleTaskRetrospectiveHook() {
+          calls.push("retrospective");
+          return true;
+        }
+      } as never,
+      appSettings: createAppSettingsStub()
+    });
+
+    const result = await service.handleStopHook({
+      taskSlug: "__project_harness_engineer__",
+      role: "harness-engineer",
+      event: {
+        hook_event_name: "Stop",
+        session_id: "harness_engineer_session",
+        cwd: "/repo"
+      }
+    });
+
+    expect(result.stopDecision).toEqual({ behavior: "block", reason: "review-result.json is invalid." });
+    expect(calls).toEqual([
+      "session:Stop",
+      "memory:Stop:true",
+      "session:UserPromptSubmit"
+    ]);
+  });
+
   it("ignores stale VCM role hooks before workflow side effects", async () => {
     const calls: string[] = [];
     const current = await boundRoleSession("/repo", "demo-task", "coder");

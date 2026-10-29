@@ -140,7 +140,7 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
       await deps.harnessFeedbackService.completeWaitingTaskRetrospective(
         repoRoot,
         activeTask.taskSlug,
-        memoryState.status
+        memoryState
       );
       const memoryReadiness = await getTaskRetrospectiveMemoryReadiness(repoRoot, activeTask);
       if ((preferences.autoTaskHarnessReviewEnabled || memoryReadiness.trigger) && memoryReadiness.ready) {
