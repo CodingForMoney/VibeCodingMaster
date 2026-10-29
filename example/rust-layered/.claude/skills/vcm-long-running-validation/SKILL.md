@@ -15,11 +15,11 @@ The only sanctioned long-running mechanism is `.ai/tools/run-long-check` plus `.
 
 Each run-long-check or watch-job invocation must be the only top-level command in its Bash tool call. Do not pipe it, append or prepend another command, place it in a conditional chain or subshell, capture it with command substitution, or invoke it through a shell command string. Ordinary redirection is allowed. A directly passed script such as `-- bash /tmp/check.sh` is allowed; `-- bash -c '...'` is not.
 
-The hard ceiling is 60 minutes per job, enforced by the job worker itself. No approval can raise this ceiling; split larger operations into jobs that each fit within it.
+The hard ceiling is 100 minutes per job, enforced by the job worker itself. No approval can raise this ceiling; split larger operations into jobs that each fit within it.
 
 ## Protocol
 
-1. Start the command with an explicit ceiling: `.ai/tools/run-long-check --timeout <duration> -- <command>`. Pass the validation executable and its arguments directly. Do not use a shell command-string wrapper, pipeline its output, or append another command: run-long-check already captures stdout/stderr, and shell wrappers can hide the validation exit code. Pick the ceiling from `docs/TESTING.md` guidance or a realistic estimate, never above 60m. The tool prints the job id and creates job state under `.ai/vcm/jobs/<job-id>/`.
+1. Start the command with an explicit ceiling: `.ai/tools/run-long-check --timeout <duration> -- <command>`. Pass the validation executable and its arguments directly. Do not use a shell command-string wrapper, pipeline its output, or append another command: run-long-check already captures stdout/stderr, and shell wrappers can hide the validation exit code. Pick the ceiling from `docs/TESTING.md` guidance or a realistic estimate, never above 100m. The tool prints the job id and creates job state under `.ai/vcm/jobs/<job-id>/`.
 2. In the same turn, run `.ai/tools/watch-job <job-id>` as its own Bash tool call. The default watch window is 8 minutes.
 3. If watch-job exits 125, the job is still running and a bounded handoff is active for the next watcher: run `.ai/tools/watch-job <job-id>` again immediately. Do not end the turn between windows.
 4. Repeat until watch-job reports a terminal result.

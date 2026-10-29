@@ -9,7 +9,7 @@
 // wrappers are rejected because they can hide the validation command's exit code.
 //
 // The command runs in a detached worker process group. The worker itself
-// enforces the job ceiling (--timeout, max 60m) and a supervision lease: when
+// enforces the job ceiling (--timeout, max 100m) and a supervision lease: when
 // no foreground watcher renews .ai/vcm/jobs/<job-id>/lease, the worker kills
 // the command process group and records the job as orphaned. Watch the job
 // with .ai/tools/watch-job in the same turn.
@@ -22,7 +22,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const MAX_TIMEOUT_SECONDS = 60 * 60;
+const MAX_TIMEOUT_SECONDS = 100 * 60;
 const DEFAULT_TIMEOUT_SECONDS = MAX_TIMEOUT_SECONDS;
 const QUEUED_STALE_SECONDS = 60;
 const ACTIVE_STATUSES = new Set(["queued", "starting", "running"]);
@@ -584,7 +584,7 @@ async function main(argv) {
     return 2;
   }
   if (timeoutSeconds > MAX_TIMEOUT_SECONDS) {
-    process.stderr.write("error: timeout exceeds maximum 60m; split the work or get user approval\n");
+    process.stderr.write("error: timeout exceeds maximum 100m; split the work or get user approval\n");
     return 2;
   }
 

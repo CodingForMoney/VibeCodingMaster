@@ -47,7 +47,7 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 - The only sanctioned long-running mechanism is the `vcm-long-running-validation` skill: `.ai/tools/run-long-check` plus `.ai/tools/watch-job`. Only one job may run at a time.
 - The moment a command might run longer than 2 minutes, switch to that skill instead of running the command directly.
 - While a job is running, stay in the current turn and keep calling `.ai/tools/watch-job` until it reports a terminal result; VCM blocks turn-end while a job is running, and a job without a live watcher is killed automatically.
-- Hard ceiling: 60 minutes per job, enforced by the job worker. No approval can raise this ceiling; split larger operations into jobs that each fit within it.
+- Hard ceiling: 100 minutes per job, enforced by the job worker. No approval can raise this ceiling; split larger operations into jobs that each fit within it.
 
 ## VCM Durable Project Docs
 
