@@ -340,6 +340,13 @@ Treat every production and test hunk introduced by `architect-debug` or
 review to confirming that the reported symptom disappeared or that the recorded
 root cause was addressed; apply the complete code-diff checks to every repair.
 
+When the VCM prompt captures PM route messages, they are the operative
+instructions for the reviewed flow: the dispatch that started it and every
+later PM relay of a user decision, oldest first. A later message, such as a user grant, a narrowed scope, or a
+changed acceptance target, overrides the plan or an earlier message where they
+conflict. Judge authorization and scope against them, and record under Code
+Diff Analysis any change they neither request nor permit.
+
 Before deciding:
 
 - Inspect every changed file and diff hunk. Read the complete implementation of
@@ -357,7 +364,7 @@ Before deciding:
   Do not satisfy review by repeating a generic checklist.
 
 For `coder`, compare the commits with the approved architecture plan,
-scaffold, and coder completion evidence. Verify that the complete planned
+scaffold, coder completion evidence, and the captured PM route messages. Verify that the complete planned
 behavior is implemented without changing architect-owned boundaries or
 contracts.
 
@@ -368,8 +375,8 @@ the Tester role, the repair or coverage evidence, and
 because it is not a Coder scaffold item. Verify that Tester changes remain
 test-only, preserve real behavior paths, and are committed and validated.
 
-For `architect-debug`, compare the commits with the current Architect route
-command and `.ai/vcm/handoffs/architect-debug.md`. Verify that the confirmed
+For `architect-debug`, compare the commits with the captured PM route messages
+to Architect and `.ai/vcm/handoffs/architect-debug.md`. Verify that the confirmed
 root cause is supported by the code, the implementation fixes that cause rather
 than only its surface symptom, temporary diagnostics are removed, and affected
 callers, contracts, and tests are updated. Verify that the Debug evidence records
@@ -378,7 +385,8 @@ when an applicable check was not run, did not pass, or does not exercise that
 failure path.
 
 For `architect-diagnosis`, compare the commits with
-`.ai/vcm/handoffs/architecture-diagnosis.md`, and verify that the commits implement the diagnosed
+`.ai/vcm/handoffs/architecture-diagnosis.md` and the captured PM route messages
+to Architect, and verify that the commits implement the diagnosed
 ownership, data flow, lifecycle, boundaries, invariants, and failure model.
 Request changes when the architecture problem remains, the required direction
 is contradicted, or the implementation is only a local workaround for the surface failure.

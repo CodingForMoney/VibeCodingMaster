@@ -121,10 +121,7 @@ const CODE_DIFF_SOURCE_ARTIFACTS = {
     ".ai/vcm/handoffs/architecture-plan.md",
     ".ai/vcm/handoffs/coder-completion.md"
   ],
-  "architect-debug": [
-    ".ai/vcm/handoffs/role-commands/architect.md",
-    ".ai/vcm/handoffs/architect-debug.md"
-  ],
+  "architect-debug": [".ai/vcm/handoffs/architect-debug.md"],
   "architect-diagnosis": [".ai/vcm/handoffs/architecture-diagnosis.md"]
 };
 const CORE_INPUT_ARTIFACTS = {

@@ -1448,9 +1448,34 @@ describe("gate-review-service", () => {
     expect(sessionStarts).toEqual([]);
   });
 
-  it("uses the current Architect route command for architect-debug code diffs", async () => {
+  it("captures the reviewed flow's PM route messages for architect-debug code diffs", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-debug-source-"));
     await writeHarnessFiles(tmpRepo);
+    const message = (id: string, fromRole: string, toRole: string, body: string, time: string, accepted = true) => ({
+      id,
+      taskSlug: "demo-task",
+      fromRole,
+      toRole,
+      type: fromRole === "user" ? "user-request" : "task",
+      body,
+      artifactRefs: [],
+      createdAt: time,
+      ...(accepted ? { acceptedAt: time } : {})
+    });
+    const messageLog = [
+      message("m0", "project-manager", "architect", "Earlier planning dispatch.", "2026-06-01T00:00:00.000Z"),
+      message("m1", "project-manager", "architect", "Debug the failing sync path.", "2026-06-01T01:00:00.000Z", false),
+      message("m1", "project-manager", "architect", "Debug the failing sync path.", "2026-06-01T01:00:00.000Z"),
+      message("m2", "user", "project-manager", "You may also rename the sync helper.", "2026-06-01T01:10:00.000Z"),
+      message("m3", "project-manager", "architect", "User approved renaming the sync helper.", "2026-06-01T01:20:00.000Z"),
+      message("m4", "project-manager", "tester", "Validate the fix.", "2026-06-01T01:30:00.000Z")
+    ];
+    await mkdir(path.join(taskWorktree(tmpRepo), ".ai/vcm/messages"), { recursive: true });
+    await writeFile(
+      path.join(taskWorktree(tmpRepo), ".ai/vcm/messages/demo-task.jsonl"),
+      `${messageLog.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+      "utf8"
+    );
     const runner = createRunner(tmpRepo, [], {
       "rev-parse HEAD": ({ cwd }) => cwd === tmpRepo ? "base-sha" : "head-sha",
       "merge-base --is-ancestor base-sha head-sha": "",
@@ -1469,6 +1494,22 @@ describe("gate-review-service", () => {
       appSettings: createAppSettings(["code-diff"]),
       sessionService: createSessionService(),
       roundService: createRoundService(),
+      workflowControlService: {
+        async getState() {
+          return {
+            flowRun: { rootFlow: "code-change", activeBranch: "architect-debug", startedAtSequence: 2 },
+            warnings: []
+          };
+        },
+        async getProgress() {
+          return {
+            history: [
+              { sequence: 1, flow: "code-change", targetRole: "architect", evidence: "plan", confirmedAt: "2026-06-01T00:00:00.010Z" },
+              { sequence: 2, flow: "architect-debug", targetRole: "architect", evidence: "debug", confirmedAt: "2026-06-01T01:00:00.010Z" }
+            ]
+          };
+        }
+      } as never,
       reportPollIntervalMs: 5
     });
 
@@ -1479,10 +1520,24 @@ describe("gate-review-service", () => {
     expect(result.status).toBe("started");
     await waitFor(async () => (await service.getState(tmpRepo!, "demo-task")).gates["code-diff"].status === "completed");
     const prompt = writes.find((write) => write.includes("[VCM GATE REVIEW]")) ?? "";
+    const requestId = (await service.getState(tmpRepo, "demo-task")).gates["code-diff"].requestId!;
+    const snapshotPath = `.ai/vcm/gate-reviews/requests/${requestId}.inputs/messages/route-messages.md`;
     expect(prompt).toContain("Code sources: architect-debug");
-    expect(prompt).toContain("- .ai/vcm/handoffs/role-commands/architect.md");
+    expect(prompt).not.toContain("role-commands/architect.md");
     expect(prompt).toContain("- .ai/vcm/handoffs/architect-debug.md");
+    expect(prompt).toContain("- .ai/vcm/messages/demo-task.jsonl (PM route messages for the reviewed flow)");
+    expect(prompt).toContain(`- .ai/vcm/messages/demo-task.jsonl -> ${snapshotPath}`);
     expect(prompt).not.toContain("- .ai/vcm/handoffs/coder-completion.md");
+
+    const snapshot = await readFile(path.join(taskWorktree(tmpRepo), snapshotPath), "utf8");
+    expect(snapshot).toContain("Scope: messages since the reviewed flow run started at 2026-06-01T01:00:00.000Z");
+    expect(snapshot).toContain("## 1. project-manager -> architect (task)\n\nMessage: m1");
+    expect(snapshot).toContain("## 2. user -> project-manager (user-request)");
+    expect(snapshot).toContain("## 3. project-manager -> architect (task)\n\nMessage: m3");
+    expect(snapshot).toContain("User approved renaming the sync helper.");
+    expect(snapshot).not.toContain("Earlier planning dispatch.");
+    expect(snapshot).not.toContain("Validate the fix.");
+    expect(snapshot.match(/Message: m1/g)).toHaveLength(1);
   });
 
   it("uses the diagnosis artifact for architect-diagnosis code diffs", async () => {

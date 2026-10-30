@@ -699,6 +699,12 @@ function arraysEqual(left: string[], right: string[]): boolean {
   return left.every((value, index) => value === right[index]);
 }
 
+// Reads the task's message log outside the service's task lock, for consumers
+// that only need a point-in-time view, such as Gate Review evidence capture.
+export function readTaskMessages(fs: FileSystemAdapter, input: ListMessagesInput): Promise<VcmRoleMessage[]> {
+  return readLatestMessages(fs, getMessagesPath(getStateRepoRoot(input), input.stateRoot, input.taskSlug));
+}
+
 async function readLatestMessages(fs: FileSystemAdapter, messagesPath: string): Promise<VcmRoleMessage[]> {
   if (!(await fs.pathExists(messagesPath))) {
     return [];

@@ -23,6 +23,8 @@ import {
   type GateReviewSeverity
 } from "../../shared/types/gate-review.js";
 import type { ArtifactCheckResult } from "../../shared/types/artifact.js";
+import type { VcmRoleMessage } from "../../shared/types/message.js";
+import type { VcmRoleName } from "../../shared/types/role.js";
 import { checkMarkdownArtifact, readArtifactSectionValue } from "../../shared/validation/artifact-check.js";
 import { VcmError } from "../errors.js";
 import { resolveRepoPath } from "../adapters/filesystem.js";
@@ -34,6 +36,7 @@ import type { AppGateReviewSettings, AppSettingsService } from "./app-settings-s
 import type { ProjectService } from "./project-service.js";
 import type { RoundService } from "./round-service.js";
 import type { SessionService } from "./session-service.js";
+import { readTaskMessages } from "./message-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 import type { WorkflowControlService } from "./workflow-control-service.js";
 import { parseGateReviewReportArtifact } from "./managed-artifact-validation.js";
@@ -156,10 +159,7 @@ const CODE_DIFF_SOURCE_ARTIFACTS: Record<CodeDiffSource, string[]> = {
     ".ai/vcm/handoffs/architecture-plan.md",
     ".ai/vcm/handoffs/coder-completion.md"
   ],
-  "architect-debug": [
-    ".ai/vcm/handoffs/role-commands/architect.md",
-    ".ai/vcm/handoffs/architect-debug.md"
-  ],
+  "architect-debug": [".ai/vcm/handoffs/architect-debug.md"],
   "architect-diagnosis": [
     ".ai/vcm/handoffs/architecture-diagnosis.md"
   ]
@@ -598,6 +598,9 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       requestId,
       getSourceArtifacts(gate, codeDiffSources)
     );
+    if (gate === "code-diff" && codeDiffSources) {
+      inputSnapshots.push(await captureRouteMessageSnapshot(deps, context, requestId, codeDiffSources));
+    }
     const nextRecord: GateReviewGateRecord = {
       ...record,
       status: "running",
@@ -1912,7 +1915,12 @@ function buildGatePrompt(
 ): string {
   const reportPath = reportPathForRequest(requestId);
   const absoluteReportPath = resolveRepoPath(context.taskRepoRoot, reportPath);
-  const evidence = getSourceArtifacts(gate, codeDiffSources)
+  const evidence = [
+    ...getSourceArtifacts(gate, codeDiffSources),
+    ...(gate === "code-diff"
+      ? [`${path.posix.join(context.stateRoot, "messages", `${context.taskSlug}.jsonl`)} (PM route messages for the reviewed flow)`]
+      : [])
+  ]
     .map((relativePath) => `- ${relativePath}`)
     .join("\n");
   const capturedEvidence = inputSnapshots.length > 0
@@ -1996,6 +2004,114 @@ async function captureGateInputSnapshots(
     snapshots.push({ sourcePath, snapshotPath, status: "captured" });
   }
   return snapshots;
+}
+
+// The PM route messages are the operative instructions for the reviewed flow:
+// the dispatch that started it and every later relay of a user decision. They
+// exist only in the task message log, so render the flow's slice of it.
+async function captureRouteMessageSnapshot(
+  deps: Pick<GateReviewServiceDeps, "fs" | "workflowControlService">,
+  context: ReviewContext,
+  requestId: string,
+  codeDiffSources: CodeDiffSource[]
+): Promise<GateInputSnapshot> {
+  const sourcePath = path.posix.join(context.stateRoot, "messages", `${context.taskSlug}.jsonl`);
+  const messages = await readTaskMessages(deps.fs, {
+    repoRoot: context.repoRoot,
+    stateRepoRoot: context.taskRepoRoot,
+    stateRoot: context.stateRoot,
+    taskSlug: context.taskSlug
+  });
+  const sourceRoles = new Set<VcmRoleName>(
+    codeDiffSources.map((source) => source === "coder" ? "coder" : "architect")
+  );
+  const flowRunStart = await findFlowRunStart(deps, context);
+  const acceptedPmMessages = messages
+    .filter((message) => message.fromRole === "project-manager" && message.acceptedAt)
+    .sort((left, right) => left.acceptedAt!.localeCompare(right.acceptedAt!));
+  // A PM message is accepted immediately before Workflow Progress confirms its
+  // dispatch, so the flow's starting message is the last one accepted at or
+  // before the first confirmation of the flow run.
+  const windowStart = flowRunStart
+    ? acceptedPmMessages.filter((message) => message.acceptedAt! <= flowRunStart).at(-1)?.acceptedAt ?? flowRunStart
+    : undefined;
+  const flowMessages = messages
+    .filter((message) => message.fromRole === "user"
+      ? !windowStart || message.createdAt >= windowStart
+      : message.fromRole === "project-manager"
+        && sourceRoles.has(message.toRole)
+        && Boolean(message.acceptedAt)
+        && (!windowStart || message.acceptedAt! >= windowStart))
+    .sort((left, right) => messageTime(left).localeCompare(messageTime(right)));
+  if (flowMessages.length === 0) {
+    return { sourcePath, status: "missing" };
+  }
+  const snapshotPath = inputSnapshotPathForRequest(requestId, ".ai/vcm/messages/route-messages.md");
+  await deps.fs.writeText(
+    resolveRepoPath(context.taskRepoRoot, snapshotPath),
+    renderRouteMessages(context.taskSlug, codeDiffSources, windowStart, flowMessages)
+  );
+  return { sourcePath, snapshotPath, status: "captured" };
+}
+
+async function findFlowRunStart(
+  deps: Pick<GateReviewServiceDeps, "workflowControlService">,
+  context: ReviewContext
+): Promise<string | undefined> {
+  if (!deps.workflowControlService) {
+    return undefined;
+  }
+  try {
+    const workflowContext = {
+      taskRepoRoot: context.taskRepoRoot,
+      stateRoot: context.stateRoot,
+      handoffDir: context.handoffDir,
+      taskSlug: context.taskSlug
+    };
+    const [state, progress] = await Promise.all([
+      deps.workflowControlService.getState(workflowContext),
+      deps.workflowControlService.getProgress(workflowContext)
+    ]);
+    const startedAtSequence = state.flowRun?.startedAtSequence;
+    return progress.history.find((entry) => entry.sequence === startedAtSequence)?.confirmedAt;
+  } catch {
+    return undefined;
+  }
+}
+
+function messageTime(message: VcmRoleMessage): string {
+  return message.acceptedAt ?? message.createdAt;
+}
+
+function renderRouteMessages(
+  taskSlug: string,
+  codeDiffSources: CodeDiffSource[],
+  windowStart: string | undefined,
+  messages: VcmRoleMessage[]
+): string {
+  return [
+    "# PM Route Messages",
+    "",
+    `Task: ${taskSlug}`,
+    `Code sources: ${codeDiffSources.join(" -> ")}`,
+    windowStart
+      ? `Scope: messages since the reviewed flow run started at ${windowStart}`
+      : "Scope: the whole task message log; the reviewed flow run start was unavailable",
+    "",
+    "PM route messages to the code-source roles and user messages to PM, oldest first.",
+    "A later message overrides an earlier one where they conflict.",
+    ...messages.flatMap((message, index) => [
+      "",
+      `## ${index + 1}. ${message.fromRole} -> ${message.toRole} (${message.type})`,
+      "",
+      `Message: ${message.id}`,
+      `Time: ${messageTime(message)}`,
+      ...(message.artifactRefs.length > 0 ? [`Artifacts: ${message.artifactRefs.join(", ")}`] : []),
+      "",
+      message.body.trimEnd()
+    ]),
+    ""
+  ].join("\n");
 }
 
 function isTaskEvidencePath(sourcePath: string): boolean {
