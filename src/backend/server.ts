@@ -386,7 +386,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     fs,
     projectService,
     taskService,
-    sessionService
+    sessionService,
+    workflowControlService
   });
   const messageService = createMessageService({
     fs,

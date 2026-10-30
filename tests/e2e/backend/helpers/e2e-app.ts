@@ -191,6 +191,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     projectService,
     taskService,
     sessionService,
+    workflowControlService,
     now: options.now
   });
   const messageService = createMessageService({

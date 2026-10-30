@@ -62,6 +62,47 @@ describe("backend E2E Restart With Context", () => {
     }
   });
 
+  it("hands a restarted delivery role its PM route messages instead of role-command templates", async () => {
+    const env = await createMockClaudeE2eApp();
+    cleanups.push(() => env.close());
+    const repo = await createRepo(true);
+    const task = await connectAndCreateTask(env.app, repo, "restart-with-context-messages");
+    const messagesPath = path.join(task.worktreePath, ".ai/vcm/messages", `${task.taskSlug}.jsonl`);
+    await fs.mkdir(path.dirname(messagesPath), { recursive: true });
+    await fs.appendFile(messagesPath, `${JSON.stringify({
+      id: "msg-coder-1",
+      taskSlug: task.taskSlug,
+      fromRole: "project-manager",
+      toRole: "coder",
+      type: "task",
+      body: "Implement the approved scaffold for the sync helper.",
+      artifactRefs: [],
+      createdAt: "2026-06-01T00:00:00.000Z",
+      acceptedAt: "2026-06-01T00:00:00.000Z"
+    })}\n`, "utf8");
+    await startRole(env.app, task.taskSlug, "coder");
+    env.mockRuntime.onPrompt("coder", "[VCM RESTART WITH CONTEXT]", async (ctx) => {
+      await ctx.userPromptSubmit();
+    });
+
+    const replacement = (await injectOk(env.app, {
+      method: "POST",
+      url: `/api/tasks/${task.taskSlug}/sessions/coder/restart-with-context`,
+      payload: {}
+    })).json<RoleSessionRecord>();
+    await env.mockRuntime.waitForIdle();
+
+    const systemPrompt = env.mockRuntime.getCreateInput(replacement.id).args.join("\n");
+    expect(systemPrompt).toContain("- .ai/vcm/restart-with-context/coder-route-messages.md");
+    expect(systemPrompt).not.toContain("role-commands");
+    const routeMessages = await fs.readFile(
+      path.join(task.worktreePath, ".ai/vcm/restart-with-context/coder-route-messages.md"),
+      "utf8"
+    );
+    expect(routeMessages).toContain("## 1. project-manager -> coder (task)");
+    expect(routeMessages).toContain("Implement the approved scaffold for the sync helper.");
+  });
+
   it("rejects tool Agents because they are outside the VCM workflow role set", async () => {
     const env = await createMockClaudeE2eApp();
     cleanups.push(() => env.close());

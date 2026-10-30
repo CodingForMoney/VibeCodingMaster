@@ -11,8 +11,10 @@ import type {
 import { resolveRepoPath, type FileSystemAdapter } from "../adapters/filesystem.js";
 import { toVcmError, VcmError } from "../errors.js";
 import type { ProjectService } from "./project-service.js";
+import { collectFlowRouteMessages, renderRouteMessages } from "./route-message-evidence.js";
 import type { SessionService } from "./session-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
+import type { WorkflowControlService } from "./workflow-control-service.js";
 
 const STATE_DIR = "restart-with-context";
 
@@ -61,6 +63,7 @@ export interface RoleContextRestartServiceDeps {
     SessionService,
     "getRoleSession" | "restartRoleSessionForContext" | "submitRolePrompt"
   >;
+  workflowControlService?: Pick<WorkflowControlService, "getProgress" | "getState">;
   now?: () => string;
 }
 
@@ -216,7 +219,11 @@ export function createRoleContextRestartService(
     ]);
     const handoffDir = task.handoffDir;
     const stateRoot = config.stateRoot;
-    const files = roleContextFiles(role, handoffDir, stateRoot);
+    const routeMessagesPath = await writeRouteMessages(repoRoot, task, stateRoot, role);
+    const files = [
+      ...(routeMessagesPath ? [routeMessagesPath] : []),
+      ...roleContextFiles(role, handoffDir, stateRoot)
+    ];
     return {
       system: [
         `This fresh ${role} session continues the current VCM task after Restart With Context.`,
@@ -229,6 +236,37 @@ export function createRoleContextRestartService(
       ].join("\n"),
       user: `[VCM RESTART WITH CONTEXT]\nRestore the current ${role} work from the listed task artifacts and continue the accepted assignment.`
     };
+  }
+
+  // A delivery role's assignment lives only in the PM route messages, so render
+  // the current flow run's messages to that role for the fresh session.
+  async function writeRouteMessages(
+    repoRoot: string,
+    task: Awaited<ReturnType<TaskService["loadTask"]>>,
+    stateRoot: string,
+    role: VcmRoleName
+  ): Promise<string | undefined> {
+    if (role !== "architect" && role !== "coder" && role !== "tester") {
+      return undefined;
+    }
+    const taskRepoRoot = getTaskRuntimeRepoRoot(task);
+    const context = {
+      repoRoot,
+      taskRepoRoot,
+      stateRoot,
+      handoffDir: task.handoffDir,
+      taskSlug: task.taskSlug
+    };
+    const flow = await collectFlowRouteMessages(deps.fs, deps.workflowControlService, context, new Set([role]));
+    if (flow.messages.length === 0) {
+      return undefined;
+    }
+    const relativePath = path.posix.join(stateRoot, STATE_DIR, `${role}-route-messages.md`);
+    await deps.fs.writeText(
+      resolveRepoPath(taskRepoRoot, relativePath),
+      renderRouteMessages(task.taskSlug, [`Role: ${role}`], flow)
+    );
+    return relativePath;
   }
 
   async function persist(repoRoot: string, state: PendingRoleContextRestart): Promise<void> {
@@ -318,7 +356,6 @@ function roleContextFiles(
       ];
     case "architect":
       return [
-        `${handoffDir}/role-commands/architect.md`,
         `${handoffDir}/architecture-brief.md`,
         `${handoffDir}/architecture-evidence.md`,
         `${handoffDir}/planning-progress.md`,
@@ -329,14 +366,12 @@ function roleContextFiles(
       ];
     case "coder":
       return [
-        `${handoffDir}/role-commands/coder.md`,
         `${handoffDir}/architecture-plan.md`,
         `${handoffDir}/coder-completion.md`,
         ".ai/vcm/coder-workers/"
       ];
     case "tester":
       return [
-        `${handoffDir}/role-commands/tester.md`,
         `${handoffDir}/architecture-plan.md`,
         `${handoffDir}/coder-completion.md`,
         `${handoffDir}/test-report.md`

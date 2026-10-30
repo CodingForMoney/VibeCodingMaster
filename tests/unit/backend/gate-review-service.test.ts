@@ -1530,7 +1530,7 @@ describe("gate-review-service", () => {
     expect(prompt).not.toContain("- .ai/vcm/handoffs/coder-completion.md");
 
     const snapshot = await readFile(path.join(taskWorktree(tmpRepo), snapshotPath), "utf8");
-    expect(snapshot).toContain("Scope: messages since the reviewed flow run started at 2026-06-01T01:00:00.000Z");
+    expect(snapshot).toContain("Scope: messages since the current flow run started at 2026-06-01T01:00:00.000Z");
     expect(snapshot).toContain("## 1. project-manager -> architect (task)\n\nMessage: m1");
     expect(snapshot).toContain("## 2. user -> project-manager (user-request)");
     expect(snapshot).toContain("## 3. project-manager -> architect (task)\n\nMessage: m3");
