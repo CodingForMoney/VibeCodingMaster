@@ -26,6 +26,7 @@ import type { ProjectService } from "./project-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 import type { TaskWorkflowService } from "./task-workflow-service.js";
 import type { CodexBridgeIntegrationService } from "./codex-bridge-integration-service.js";
+import { buildVcmNoProxyEnvironment } from "./no-proxy-environment.js";
 
 export interface SessionService {
   assertModelLaunchReady(model?: SessionModel): Promise<void>;
@@ -2201,10 +2202,12 @@ function withClaudeCodeRuntimeEnv(
     ...env,
     ...modelEnvironment,
     ...telemetryEnvironment,
+    ...buildVcmNoProxyEnvironment(env.VCM_API_URL, modelEnvironment),
     CLAUDE_CODE_DISABLE_AUTO_MEMORY,
     CLAUDE_CODE_DISABLE_BACKGROUND_TASKS
   };
 }
+
 
 function buildUsageTelemetryEnvironment(
   apiUrl: string | undefined,

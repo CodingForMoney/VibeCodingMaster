@@ -8,6 +8,7 @@ import type {
 import { VcmError } from "../errors.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import { renderGitIdentityWarning, type GitAdapter } from "../adapters/git-adapter.js";
+import type { EnvironmentCheck } from "./environment-check.js";
 import type { AppSettingsService } from "./app-settings-service.js";
 import type { ClaudeVersionCheck } from "./claude-version-check.js";
 
@@ -27,6 +28,7 @@ export interface ProjectService {
 
 export interface ProjectServiceDeps {
   fs: FileSystemAdapter;
+  environmentCheck?: Pick<EnvironmentCheck, "getWarnings">;
   git: GitAdapter;
   appSettings: Pick<
     AppSettingsService,
@@ -154,6 +156,11 @@ export function createProjectService(deps: ProjectServiceDeps): ProjectService {
     });
     if (claudeVersionWarning) {
       warnings.push(claudeVersionWarning);
+    }
+    try {
+      warnings.push(...await deps.environmentCheck?.getWarnings({ refresh: options.refreshClaudeVersion }) ?? []);
+    } catch (caught) {
+      warnings.push(`Unable to check the host environment. ${getErrorHint(caught)}`);
     }
     try {
       const identity = await deps.git.resolveCommitIdentity(repoRoot);

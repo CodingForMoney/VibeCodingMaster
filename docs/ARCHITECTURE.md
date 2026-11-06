@@ -53,6 +53,16 @@ layers plus supporting tools.
   identities, including repository and conditional-include ones, always win.
   VCM never writes Git config; startup logs and the Repository warnings report
   the fallback.
+- `services/environment-check`: checks the host programs VCM and role hooks run
+  (Git 2.22+, `sh`, `node` 20+ on `PATH`, `curl`), then runs the hook
+  self-test: the installed `UserPromptSubmit` hook command, with its endpoint
+  switched to `/api/hooks/probe`, runs with a role session's environment and
+  must reach VCM. Installed hooks end in `|| true`, so this is the only signal
+  that they cannot deliver. Results are cached (10 min, 30 s after a failure),
+  logged at startup, added to the Repository warnings, and re-probed when a
+  dispatch stays unconfirmed so its failure reason says whether hooks reach
+  VCM. Every role session merges the VCM API host into `NO_PROXY`/`no_proxy`
+  because curl sends loopback requests through `http_proxy`.
 - `gateway/`: mobile gateway service plus channel implementations
   (Weixin iLink, Lark) and command parsing; channel connection is gated by a
   runtime, default-off switch. Detailed sub-area design lives in

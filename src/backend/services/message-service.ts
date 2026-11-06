@@ -87,6 +87,9 @@ export interface MessageServiceDeps {
   dispatchConfirmationEnabled?: boolean;
   dispatchConfirmationRetryDelaysMs?: number[];
   dispatchConfirmationFailureDelayMs?: number;
+  // Runs the hook self-test when a dispatch stays unconfirmed, so the failure
+  // can say whether role hooks reach VCM at all.
+  probeHookDelivery?: () => Promise<string | undefined>;
   onRouteDelivered?: (input: {
     repoRoot: string;
     taskSlug: string;
@@ -436,7 +439,19 @@ export function createMessageService(deps: MessageServiceDeps): MessageService {
     if (!current || current.acceptedAt) {
       return;
     }
-    await markDispatchConfirmationFailure(input, message.id, DISPATCH_NOT_CONFIRMED_REASON);
+    await markDispatchConfirmationFailure(input, message.id, await renderDispatchNotConfirmedReason());
+  }
+
+  async function renderDispatchNotConfirmedReason(): Promise<string> {
+    let hookWarning: string | undefined;
+    try {
+      hookWarning = await deps.probeHookDelivery?.();
+    } catch {
+      hookWarning = undefined;
+    }
+    return hookWarning
+      ? `${DISPATCH_NOT_CONFIRMED_REASON} The VCM hook self-test also failed, so the role may have run without reporting: ${hookWarning}`
+      : DISPATCH_NOT_CONFIRMED_REASON;
   }
 
   async function readMessageById(input: ListMessagesInput, messageId: string): Promise<VcmRoleMessage | undefined> {

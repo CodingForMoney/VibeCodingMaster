@@ -1,12 +1,20 @@
 import type { FastifyInstance } from "fastify";
 import type { ClaudeHookRequest, ClaudeStopHookResponse } from "../../shared/types/claude-hook.js";
 import type { ClaudeHookService } from "../services/claude-hook-service.js";
+import type { EnvironmentCheck } from "../services/environment-check.js";
+import { VCM_HOOK_PROBE_PATH } from "../services/harness-service.js";
 
 export interface ClaudeHookRouteDeps {
   claudeHookService: ClaudeHookService;
+  environmentCheck?: Pick<EnvironmentCheck, "receiveHookProbe">;
 }
 
 export function registerClaudeHookRoutes(app: FastifyInstance, deps: ClaudeHookRouteDeps): void {
+  // The hook self-test posts here through the installed hook pipeline.
+  app.post<{ Body: Partial<ClaudeHookRequest> }>(VCM_HOOK_PROBE_PATH, async (request) => {
+    return { received: deps.environmentCheck?.receiveHookProbe(request.body?.runtimeSessionToken) ?? false };
+  });
+
   app.post<{ Body: ClaudeHookRequest }>("/api/hooks/claude-code", async (request) => {
     return deps.claudeHookService.handleHook(request.body);
   });

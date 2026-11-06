@@ -17,15 +17,23 @@ orchestration, translation, harness setup, and mobile gateway control.
 
 ## Requirements
 
-- Node.js 20 LTS or 22+
+- Node.js 20 LTS or 22+, with `node` on the `PATH` VCM starts with (role hooks
+  and `.ai/tools` scripts run with it)
 - npm
-- Git
+- Git 2.22 or newer
+- `sh` and `curl` (role hooks report Claude Code events to VCM through them)
 - Claude Code installed and available as `claude` (verified with 2.1.310 or
   newer; VCM shows a Repository warning when an older release is detected)
 - Claude Code authenticated in the same environment where VCM runs
 - A Git commit identity (`user.name` and `user.email`) in the same environment.
   When either is missing, VCM and its roles commit as `VCM <vcm@localhost>`
   and the Repository panel shows a warning; VCM never changes your Git config.
+
+VCM checks these programs at startup and when a repository connects, and runs a
+hook self-test that sends one request through the installed hook pipeline. Any
+problem appears in the startup log and the Repository warnings. Role sessions
+add the VCM host to `NO_PROXY`, so an `http_proxy` setting does not capture
+their hook requests.
 
 For Linux containers, make sure common native build/runtime tools are available:
 

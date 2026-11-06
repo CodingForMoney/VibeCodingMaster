@@ -32,6 +32,27 @@ describe("createSessionService", () => {
     expect(runtimeInputs[0]?.env).toMatchObject({ GIT_AUTHOR_NAME: "VCM", GIT_COMMITTER_NAME: "VCM" });
   });
 
+  it("excludes the VCM host from HTTP proxies in role sessions", async () => {
+    const previous = { NO_PROXY: process.env.NO_PROXY, no_proxy: process.env.no_proxy };
+    process.env.NO_PROXY = "corp.internal";
+    delete process.env.no_proxy;
+    try {
+      const fs = createMemoryFs();
+      const runtimeInputs: CreateTerminalSessionInput[] = [];
+      const service = createTestSessionService(fs, runtimeInputs, []);
+
+      await service.startRoleSession("/repo", "demo-task", "coder");
+
+      expect(runtimeInputs[0]?.env).toMatchObject({
+        NO_PROXY: "corp.internal,127.0.0.1",
+        no_proxy: "corp.internal,127.0.0.1"
+      });
+    } finally {
+      restoreEnv("NO_PROXY", previous.NO_PROXY);
+      restoreEnv("no_proxy", previous.no_proxy);
+    }
+  });
+
   it("offers only the four Claude model choices", () => {
     expect(CLAUDE_MODEL_OPTIONS.map((option) => [option.label, option.value])).toEqual([
       ["Default", "default"],
@@ -1808,4 +1829,12 @@ function createMemoryFs(): FileSystemAdapter {
       files.delete(targetPath);
     }
   };
+}
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
 }

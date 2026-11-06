@@ -204,6 +204,19 @@ const LEGACY_CODEX_HARNESS_PATHS = [
   ".ai/tools/request-codex-review"
 ] as const;
 const VCM_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,runtimeSessionToken:process.env.VCM_RUNTIME_SESSION_TOKEN,event}));});'"'"' | curl -fsS --retry 2 --retry-delay 1 --retry-all-errors --connect-timeout 1 --max-time 2 -X POST "\${VCM_API_URL}/api/hooks/claude-code" -H "content-type: application/json" --data-binary @- >/dev/null || true'`;
+// The hook self-test runs the installed hook pipeline unchanged except for its
+// endpoint, so a passing probe proves sh, node, curl, PATH, and proxy settings
+// let role hooks reach VCM.
+export const VCM_HOOK_PROBE_PATH = "/api/hooks/probe";
+
+export function renderVcmHookProbeCommand(): string {
+  const endpoint = '"${VCM_API_URL}/api/hooks/claude-code"';
+  if (!VCM_HOOK_COMMAND.includes(endpoint)) {
+    throw new Error("VCM hook command no longer posts to /api/hooks/claude-code.");
+  }
+  return VCM_HOOK_COMMAND.replace(endpoint, () => `"\${VCM_API_URL}${VCM_HOOK_PROBE_PATH}"`);
+}
+
 const VCM_STOP_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,runtimeSessionToken:process.env.VCM_RUNTIME_SESSION_TOKEN,event}));});'"'"' | curl -fsS --retry 2 --retry-delay 1 --retry-all-errors --connect-timeout 1 --max-time 2 -X POST "\${VCM_API_URL}/api/hooks/claude-code/stop" -H "content-type: application/json" --data-binary @- || true'`;
 const VCM_PERMISSION_REQUEST_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,runtimeSessionToken:process.env.VCM_RUNTIME_SESSION_TOKEN,event}));});'"'"' | curl -fsS --max-time 5 -X POST "\${VCM_API_URL}/api/hooks/claude-code/permission-request" -H "content-type: application/json" --data-binary @- || true'`;
 const VCM_BASH_GUARD_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ]; then exit 0; fi; guard=""; repo="$(git rev-parse --show-toplevel 2>/dev/null || true)"; if [ -n "$repo" ] && [ -f "$repo/.ai/tools/vcm-bash-guard" ]; then guard="$repo/.ai/tools/vcm-bash-guard"; else cwd="$(pwd -P 2>/dev/null || pwd)"; dir="$cwd"; while [ -n "$dir" ] && [ "$dir" != "/" ]; do if [ -f "$dir/.ai/tools/vcm-bash-guard" ]; then guard="$dir/.ai/tools/vcm-bash-guard"; break; fi; dir="$(dirname "$dir")"; done; if [ -z "$guard" ] && [ -n "\${CLAUDE_PROJECT_DIR:-}" ] && [ -f "\${CLAUDE_PROJECT_DIR}/.ai/tools/vcm-bash-guard" ]; then guard="\${CLAUDE_PROJECT_DIR}/.ai/tools/vcm-bash-guard"; fi; fi; [ -n "$guard" ] || exit 0; node "$guard" || exit 0'`;

@@ -12,6 +12,7 @@ import { createCommandRunner } from "./adapters/command-runner.js";
 import { createCommandDispatcher, type CommandDispatcher } from "./services/command-dispatcher.js";
 import { createClaudeHookService, type ClaudeHookService } from "./services/claude-hook-service.js";
 import { createClaudeVersionCheck } from "./services/claude-version-check.js";
+import { createEnvironmentCheck, type EnvironmentCheck } from "./services/environment-check.js";
 import { createGitAdapter, renderGitIdentityWarning } from "./adapters/git-adapter.js";
 import { createAppSettingsService, type AppSettingsService } from "./services/app-settings-service.js";
 import {
@@ -118,6 +119,7 @@ export interface ServerDeps {
   diagnosticsService: DiagnosticsService;
   usageAnalyticsService: UsageAnalyticsService;
   workflowControlService?: WorkflowControlService;
+  environmentCheck?: EnvironmentCheck;
 }
 
 export async function createServer(deps: ServerDeps, options: CreateServerOptions = {}): Promise<FastifyInstance> {
@@ -146,7 +148,7 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     appSettings: deps.appSettings,
     codexBridgeIntegration: deps.codexBridgeIntegration
   });
-  registerClaudeHookRoutes(app, { claudeHookService: deps.claudeHookService });
+  registerClaudeHookRoutes(app, { claudeHookService: deps.claudeHookService, environmentCheck: deps.environmentCheck });
   registerGateReviewRoutes(app, {
     projectService: deps.projectService,
     gateReviewService: deps.gateReviewService
@@ -276,6 +278,16 @@ async function cleanupRecentTranslationRuntime(deps: Pick<ServerDeps, "projectSe
   ));
 }
 
+async function warnOnEnvironmentProblems(environmentCheck: EnvironmentCheck | undefined): Promise<void> {
+  try {
+    for (const warning of await environmentCheck?.getWarnings({ refresh: true }) ?? []) {
+      console.warn(`[VCM] ${warning}`);
+    }
+  } catch {
+    // Project summaries report environment problems when a repository connects.
+  }
+}
+
 // Projects can still configure their own identity; this only reports the
 // identity VCM falls back to outside any repository-specific Git config.
 async function warnOnDefaultGitIdentity(): Promise<void> {
@@ -297,6 +309,7 @@ export async function startServer(options: CreateServerOptions = {}): Promise<{ 
   });
   const app = await createServer(deps, options);
   await app.listen({ host, port });
+  await warnOnEnvironmentProblems(deps.environmentCheck);
   await warnOnDefaultGitIdentity();
 
   return {
@@ -318,6 +331,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   const runner = createCommandRunner();
   const git = createGitAdapter(runner);
   const claude = createClaudeAdapter(runner);
+  const environmentCheck = createEnvironmentCheck({ runner, apiUrl: options.apiUrl });
   const appSettings = createAppSettingsService({ fs });
   const codexBridgeIntegration = createCodexBridgeIntegrationService({
     settings: appSettings,
@@ -333,6 +347,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   const projectService = createProjectService({
     fs,
     git,
+    environmentCheck,
     appSettings,
     claudeVersionCheck: createClaudeVersionCheck(claude)
   });
@@ -408,6 +423,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     taskService,
     taskWorkflowService,
     workflowControlService,
+    probeHookDelivery: () => environmentCheck.probeHookDelivery(),
     onRouteDelivered: ({ repoRoot, taskSlug, message }) =>
       architectRestartService.recordRouteDelivered(repoRoot, taskSlug, message)
   });
@@ -594,7 +610,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     runtime,
     diagnosticsService,
     usageAnalyticsService,
-    workflowControlService
+    workflowControlService,
+    environmentCheck
   };
 }
 

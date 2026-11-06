@@ -174,6 +174,25 @@ describe("createMessageService", () => {
     });
   });
 
+  it("adds the failed hook self-test to an unconfirmed dispatch", async () => {
+    const harness = createHarness(["coder"], {
+      workflowControl: "allow",
+      dispatchConfirmationEnabled: true,
+      dispatchConfirmationRetryDelaysMs: [1],
+      dispatchConfirmationFailureDelayMs: 1,
+      probeHookDelivery: async () => "VCM role hooks cannot reach VCM at http://127.0.0.1:4173: curl: (7) Failed to connect."
+    });
+    await harness.service.updateOrchestrationState({ ...harness.base, mode: "auto" });
+    await harness.writeRoute("project-manager-coder.md", "Handle this task.");
+    await harness.service.scanAndDispatchPendingRouteFiles({ ...harness.base, stoppedRole: "project-manager" });
+    await waitFor(() => harness.workflowControlUnconfirmed.length === 1);
+
+    expect(harness.workflowControlUnconfirmed[0]?.reason).toContain("did not confirm submission");
+    expect(harness.workflowControlUnconfirmed[0]?.reason).toContain(
+      "The VCM hook self-test also failed, so the role may have run without reporting: VCM role hooks cannot reach VCM"
+    );
+  });
+
   it("keeps same-target route files pending until the active target emits Stop", async () => {
     const harness = createHarness(["coder"]);
     await harness.service.updateOrchestrationState({
@@ -458,6 +477,7 @@ function createHarness(runningRoles: RoleName[], options: {
   dispatchConfirmationEnabled?: boolean;
   dispatchConfirmationRetryDelaysMs?: number[];
   dispatchConfirmationFailureDelayMs?: number;
+  probeHookDelivery?: () => Promise<string | undefined>;
   workflowRecordThrows?: boolean;
   workflowControl?: "allow" | "deny";
   workflowDispatching?: boolean;
@@ -531,7 +551,8 @@ function createHarness(runningRoles: RoleName[], options: {
     autoDispatchEnterDelayMs: 0,
     dispatchConfirmationEnabled: options.dispatchConfirmationEnabled ?? false,
     dispatchConfirmationRetryDelaysMs: options.dispatchConfirmationRetryDelaysMs,
-    dispatchConfirmationFailureDelayMs: options.dispatchConfirmationFailureDelayMs
+    dispatchConfirmationFailureDelayMs: options.dispatchConfirmationFailureDelayMs,
+    probeHookDelivery: options.probeHookDelivery
   });
   const taskRepoRoot = options.taskRepoRoot ?? "/repo";
 

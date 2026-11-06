@@ -65,6 +65,28 @@ describe("createProjectService", () => {
     ]);
   });
 
+  it("surfaces host environment warnings and re-checks them on connect", async () => {
+    const refreshes: Array<boolean | undefined> = [];
+    const service = createProjectService({
+      fs: createMemoryFs(new Set(["/workspace"])),
+      git: createGitAdapterStub([]),
+      appSettings: createAppSettingsStub(),
+      environmentCheck: {
+        async getWarnings(options) {
+          refreshes.push(options?.refresh);
+          return ["curl is not available: spawn curl ENOENT."];
+        }
+      }
+    });
+
+    const project = await service.connectProject({ repoPath: "/workspace" });
+    const current = await service.getCurrentProject();
+
+    expect(project.warnings).toEqual(["curl is not available: spawn curl ENOENT."]);
+    expect(current?.warnings).toEqual(["curl is not available: spawn curl ENOENT."]);
+    expect(refreshes).toEqual([true, undefined]);
+  });
+
   it("surfaces the Claude Code version warning and re-probes it on connect", async () => {
     const refreshes: Array<boolean | undefined> = [];
     const service = createProjectService({

@@ -29,10 +29,15 @@ export function createCommandRunner(): CommandRunner {
           reject: false
         });
 
+        // A command that could not start, timed out, or died from a signal has
+        // no exit code; it failed, so it must not read as a clean exit.
+        const exitCode = result.exitCode ?? (result.failed ? 1 : 0);
         return {
           stdout: result.stdout,
-          stderr: result.stderr,
-          exitCode: result.exitCode ?? 0
+          stderr: result.exitCode === undefined && result.failed
+            ? [result.stderr, result.shortMessage].filter(Boolean).join("\n")
+            : result.stderr,
+          exitCode
         };
       } catch (error) {
         if (error instanceof Error) {
