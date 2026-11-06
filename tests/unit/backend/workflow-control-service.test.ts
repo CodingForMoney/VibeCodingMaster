@@ -1011,6 +1011,35 @@ describe("workflow control service", () => {
     }
   });
 
+  it("lets PM enter the Tester Failure branch when the validation Gate rejects a genuine failure", async () => {
+    for (const [flow, failureFlow] of [
+      ["code-change", "architect-debug"],
+      ["architect-debug", "architecture-diagnosis"]
+    ] as const) {
+      const { context, fs } = await createContext(roots);
+      const service = createWorkflowControlService({ fs, now: sequenceClock() });
+
+      if (flow === "code-change") {
+        await enterCodeChangeTester(service, fs, context);
+      } else {
+        await advance(service, fs, context, "architect", flow, "accepted debug task");
+        await writeArchitectDebug(fs, context, "debug repair");
+        await advance(service, fs, context, "tester", undefined, "validate debug repair");
+      }
+      await writeTestReport(fs, context, "fail", "none", `${flow} validation failure`);
+      await writeGateIndex(fs, context, { validation: "request_changes" }, "2026-08-06T00:00:10.000Z");
+
+      await expect(propose(service, fs, context, "architect", undefined, "revise implementation"))
+        .rejects.toMatchObject({
+          code: "WORKFLOW_TRANSITION_DENIED",
+          hint: expect.stringContaining(`Allowed next dispatches: ${flow}/tester, ${failureFlow}/architect`)
+        });
+      await advance(service, fs, context, "architect", failureFlow, "Gate findings need production investigation");
+
+      expect((await readProgress(fs, context)).history.at(-1)).toMatchObject({ flow: failureFlow, targetRole: "architect" });
+    }
+  });
+
   it("still stops a standalone Architecture Diagnosis after an ordinary Tester failure", async () => {
     const { context, fs } = await createContext(roots);
     const service = createWorkflowControlService({ fs, now: sequenceClock() });

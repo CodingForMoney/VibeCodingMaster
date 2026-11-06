@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { TerminalProcessExitEvent } from "../../../src/backend/runtime/terminal-runtime.js";
 import {
-  appendTerminalReplay,
   buildPtyEnvironment,
   createNodePtyTerminalRuntime,
   createTerminalLogWriter,
-  tailTerminalReplay
+  tailTerminalReplay,
+  TerminalReplayBuffer
 } from "../../../src/backend/runtime/node-pty-runtime.js";
 
 const ptyMock = vi.hoisted(() => ({
@@ -131,14 +131,27 @@ describe("node-pty-runtime", () => {
   });
 
   it("keeps in-memory terminal replay bounded to the recent tail", () => {
-    let replay = "";
-    replay = appendTerminalReplay(replay, "old line 1\nold line 2\n", 28);
-    replay = appendTerminalReplay(replay, "recent line 1\nrecent line 2", 28);
+    const replay = new TerminalReplayBuffer(28);
+    replay.append("old line 1\nold line 2\n");
+    replay.append("recent line 1\nrecent line 2");
 
-    expect(replay).toBe([
+    expect(replay.text()).toBe([
       "recent line 1",
       "recent line 2"
     ].join("\n"));
+  });
+
+  it("keeps the recent tail across many small chunks and multibyte output", () => {
+    const replay = new TerminalReplayBuffer(64);
+    for (let index = 0; index < 5000; index += 1) {
+      replay.append(`第${index}行\n`);
+    }
+
+    const text = replay.text();
+    expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(64);
+    expect(text.endsWith("第4999行\n")).toBe(true);
+    expect(text.startsWith("第")).toBe(true);
+    expect(new TerminalReplayBuffer(64).text()).toBe("");
   });
 
   it("serializes terminal log appends for one log path", async () => {

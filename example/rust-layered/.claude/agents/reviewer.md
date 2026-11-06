@@ -372,8 +372,8 @@ contracts.
 
 When the range contains Tester-authored changes recorded in `test-report.md`,
 review those tests, fixtures, test-only helpers, and `docs/TESTING.md` against
-the Tester role, the repair or coverage evidence, and
-`docs/CODING_STANDARDS.md`. Do not reject a valid Tester-owned change merely
+the Tester role, the repair or coverage evidence, the captured PM route messages
+to Tester, and `docs/CODING_STANDARDS.md`. Do not reject a valid Tester-owned change merely
 because it is not a Coder scaffold item. Verify that Tester changes remain
 test-only, preserve real behavior paths, and are committed and validated.
 

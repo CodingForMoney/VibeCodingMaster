@@ -1185,10 +1185,16 @@ async function allowedAfterTester(
   }
   if (test.value === "incomplete" || test.infrastructure === "repair-required") return [`${currentFlow}/tester`];
   const validation = await gateState(fs, input, "validation-adequacy");
+  const unapprovedFailure = test.value === "fail" && !test.hasUserApprovedCoverageGap;
   if (freshGateDecision(state, currentFlow, "tester", "validation-adequacy", validation) === "request_changes") {
-    return [`${currentFlow}/tester`];
+    // Findings on a genuine failure may be Tester-owned (wrong tests or
+    // evidence) or need the production investigation that Tester Failure
+    // starts; PM routes by who can dispose of them.
+    return unapprovedFailure && options.testerFailureFlow
+      ? [`${currentFlow}/tester`, `${options.testerFailureFlow}/architect`]
+      : [`${currentFlow}/tester`];
   }
-  if (test.value === "fail" && !test.hasUserApprovedCoverageGap) {
+  if (unapprovedFailure) {
     return options.testerFailureFlow ? [`${options.testerFailureFlow}/architect`] : [];
   }
   if (!gatePassedForDispatch(state, currentFlow, "tester", "validation-adequacy", validation)) return [];

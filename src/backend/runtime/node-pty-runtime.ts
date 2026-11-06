@@ -16,7 +16,7 @@ interface RuntimeEntry {
   process: pty.IPty;
   listeners: Set<TerminalEventListener>;
   logWriter: TerminalLogWriter;
-  replayBuffer: string;
+  replayBuffer: TerminalReplayBuffer;
   disposed: boolean;
 }
 
@@ -88,7 +88,7 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
       process: child,
       listeners: new Set(),
       logWriter,
-      replayBuffer: "",
+      replayBuffer: new TerminalReplayBuffer(),
       disposed: false
     };
     entries.set(session.id, entry);
@@ -98,7 +98,7 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
         return;
       }
       entry.session.lastOutputAt = now();
-      entry.replayBuffer = appendTerminalReplay(entry.replayBuffer, data);
+      entry.replayBuffer.append(data);
       entry.logWriter.append(data);
       emit(entry, {
         sessionId: session.id,
@@ -197,7 +197,8 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
       const entry = getEntry(entries, sessionId);
       entry.listeners.add(listener);
 
-      if (options.replay !== false && entry.replayBuffer) {
+      const replay = options.replay !== false ? entry.replayBuffer.text() : "";
+      if (replay) {
         listener({
           id: `evt_${Date.now()}_${Math.random().toString(16).slice(2)}`,
           sessionId,
@@ -205,7 +206,7 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
           role: entry.session.role,
           type: "output",
           timestamp: now(),
-          data: entry.replayBuffer
+          data: replay
         });
       } else if (options.replay !== false && entry.input.logPath) {
         void readTerminalReplayText(deps.fs, entry.input.logPath)
@@ -326,15 +327,41 @@ export function tailTerminalReplay(
   return firstLineBreak >= 0 ? tail.slice(firstLineBreak + 1) : tail;
 }
 
-export function appendTerminalReplay(
-  current: string,
-  data: string,
-  limitBytes = TERMINAL_REPLAY_TAIL_LIMIT_BYTES
-): string {
-  if (!data) {
-    return current;
+// Keeps the recent terminal output for subscriber replay. PTY output arrives in
+// many small chunks, so appending measures only the new chunk and drops whole
+// old chunks; the exact tail is cut only when a subscriber asks for it.
+export class TerminalReplayBuffer {
+  private chunks: Array<{ data: string; bytes: number }> = [];
+  private head = 0;
+  private bytes = 0;
+
+  constructor(private readonly limitBytes = TERMINAL_REPLAY_TAIL_LIMIT_BYTES) {}
+
+  append(data: string): void {
+    if (!data) {
+      return;
+    }
+    const bytes = Buffer.byteLength(data, "utf8");
+    this.chunks.push({ data, bytes });
+    this.bytes += bytes;
+    // Drop a chunk only while the rest still covers the limit.
+    while (this.head < this.chunks.length - 1 && this.bytes - this.chunks[this.head]!.bytes >= this.limitBytes) {
+      this.bytes -= this.chunks[this.head]!.bytes;
+      this.head += 1;
+    }
+    if (this.head > 1024 && this.head * 2 > this.chunks.length) {
+      this.chunks = this.chunks.slice(this.head);
+      this.head = 0;
+    }
   }
-  return tailTerminalReplay(`${current}${data}`, limitBytes);
+
+  text(): string {
+    if (this.head >= this.chunks.length) {
+      return "";
+    }
+    const joined = this.chunks.slice(this.head).map((chunk) => chunk.data).join("");
+    return tailTerminalReplay(joined, this.limitBytes);
+  }
 }
 
 export function buildPtyEnvironment(

@@ -2006,7 +2006,8 @@ async function captureGateInputSnapshots(
 }
 
 // The reviewer judges authorization and scope against the flow's PM route
-// messages, captured like any other immutable Gate input.
+// messages, captured like any other immutable Gate input. Tester commits are
+// part of every reviewed range, so routes to Tester are always included.
 async function captureRouteMessageSnapshot(
   deps: Pick<GateReviewServiceDeps, "fs" | "workflowControlService">,
   context: ReviewContext,
@@ -2014,9 +2015,10 @@ async function captureRouteMessageSnapshot(
   codeDiffSources: CodeDiffSource[]
 ): Promise<GateInputSnapshot> {
   const sourcePath = path.posix.join(context.stateRoot, "messages", `${context.taskSlug}.jsonl`);
-  const roles = new Set<VcmRoleName>(
-    codeDiffSources.map((source) => source === "coder" ? "coder" : "architect")
-  );
+  const roles = new Set<VcmRoleName>([
+    ...codeDiffSources.map((source): VcmRoleName => source === "coder" ? "coder" : "architect"),
+    "tester"
+  ]);
   const flow = await collectFlowRouteMessages(deps.fs, deps.workflowControlService, context, roles);
   if (flow.messages.length === 0) {
     return { sourcePath, status: "missing" };

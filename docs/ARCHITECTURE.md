@@ -40,7 +40,9 @@ layers plus supporting tools.
   `command-dispatcher`.
 - `runtime/`: PTY-backed terminal runtime (`node-pty-runtime`,
   `terminal-runtime`, `session-registry`, `terminal-submit`) that supervises one
-  Claude Code process per role.
+  Claude Code process per role. Each session keeps its recent 2 MB of output for
+  subscriber replay as a chunk list with a running byte count, so a PTY chunk
+  costs only its own size; the exact tail is cut only when a subscriber attaches.
 - `adapters/`: side-effect boundaries — `claude-adapter`,
   `codex-bridge-adapter`, `git-adapter`, `command-runner`, `filesystem`.
 - `gateway/`: mobile gateway service plus channel implementations
@@ -213,7 +215,10 @@ carries the original Coder evidence and the later Architect evidence, while a
 standalone Debug or Diagnosis flow keeps only its own sources. Reviewer treats
 every repair hunk as fresh code. Changed tests remain reviewable inputs; VCM
 does not require the test tree to stay unchanged because legitimate repairs may
-strengthen or add regression coverage.
+strengthen or add regression coverage. Each code-diff request also captures the
+current flow run's PM route messages to the code-source roles and to Tester,
+plus user messages to PM, as an immutable input snapshot; Reviewer judges
+authorization and scope against them, later messages taking precedence.
 
 ## Durable Documentation Ownership
 

@@ -1536,7 +1536,8 @@ describe("gate-review-service", () => {
     expect(snapshot).toContain("## 3. project-manager -> architect (task)\n\nMessage: m3");
     expect(snapshot).toContain("User approved renaming the sync helper.");
     expect(snapshot).not.toContain("Earlier planning dispatch.");
-    expect(snapshot).not.toContain("Validate the fix.");
+    expect(snapshot).toContain("## 4. project-manager -> tester (task)\n\nMessage: m4");
+    expect(snapshot).toContain("Validate the fix.");
     expect(snapshot.match(/Message: m1/g)).toHaveLength(1);
   });
 
