@@ -25,8 +25,6 @@ import type { ProjectService } from "./project-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 import type { TaskWorkflowService } from "./task-workflow-service.js";
 import type { CodexBridgeIntegrationService } from "./codex-bridge-integration-service.js";
-import { roleUsesLsp, prepareTaskLspPlugin, renderLspNotice, VCM_LSP_PLUGIN_DIR } from "./lsp-plugin.js";
-import type { HarnessCodeIntelligenceDetector } from "./code-intelligence-service.js";
 
 export interface SessionService {
   assertModelLaunchReady(model?: SessionModel): Promise<void>;
@@ -78,7 +76,6 @@ export interface SessionServiceDeps {
     CodexBridgeIntegrationService,
     "getLaunchEnvironment" | "getLaunchSettingsOverride"
   >;
-  codeIntelligenceDetector?: HarnessCodeIntelligenceDetector;
   apiUrl?: string;
   sandboxMode?: string;
   isProcessAlive?: (pid: number) => boolean;
@@ -229,14 +226,6 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     // them from Claude Code's project-directory encoding.
     const transcriptPath = launchMode === "resume" ? persisted?.transcriptPath : undefined;
 
-    const lspStatus = roleUsesLsp(role) && deps.codeIntelligenceDetector
-      ? await deps.codeIntelligenceDetector.detect(taskRepoRoot, { refresh: true })
-      : undefined;
-    const lspPluginDirs = roleUsesLsp(role)
-      ? lspStatus ? await prepareTaskLspPlugin(deps.fs, taskRepoRoot, lspStatus) : [VCM_LSP_PLUGIN_DIR]
-      : [];
-    const appendSystemPrompt = [input.appendSystemPrompt, lspStatus && renderLspNotice(lspStatus, role)]
-      .filter(Boolean).join("\n\n") || undefined;
     const startCommand = {
       ...deps.claude.buildRoleStartCommand(
         role,
@@ -247,8 +236,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         model,
         effort,
         modelSettingsOverride,
-        appendSystemPrompt,
-        lspPluginDirs
+        input.appendSystemPrompt
       ),
       cwd: taskRepoRoot
     };
@@ -268,15 +256,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_ROLE: role,
         VCM_SESSION_ID: claudeSessionId || undefined,
         VCM_RUNTIME_SESSION_TOKEN: runtimeSessionToken
-      }, modelEnvironment, {
-        ...buildUsageTelemetryEnvironment(deps.apiUrl, role, model),
-        ...(lspPluginDirs.length > 0
-          ? {
-              ENABLE_LSP_TOOL: "true",
-              ENABLE_TOOL_SEARCH: "false"
-            }
-          : {})
-      }),
+      }, modelEnvironment, buildUsageTelemetryEnvironment(deps.apiUrl, role, model)),
       cols: input.cols,
       rows: input.rows
     });

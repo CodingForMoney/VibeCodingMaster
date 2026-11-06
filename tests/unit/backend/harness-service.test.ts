@@ -7,10 +7,6 @@ import {
   parseGitStatusPorcelainV1
 } from "../../../src/backend/services/harness-service.js";
 import {
-  createHarnessCodeIntelligenceDetector,
-  detectHarnessCodeIntelligence
-} from "../../../src/backend/services/code-intelligence-service.js";
-import {
   CODE_ROLE_DISALLOWED_TOOLS,
   REVIEWER_DISALLOWED_TOOLS
 } from "../../../src/backend/role-tool-policy.js";
@@ -99,15 +95,11 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-architecture-interview/SKILL.md")).toContain("name: vcm-architecture-interview");
     expect(await fs.readText("/repo/.claude/skills/vcm-architecture-interview/SKILL.md")).toContain("During an active Architect Interview");
     const codeNavigationSkill = await fs.readText("/repo/.claude/skills/vcm-code-navigation/SKILL.md");
-    expect(codeNavigationSkill).toContain("record that limitation and leave the relationship unresolved");
-    expect(codeNavigationSkill).toContain("If a required language server is unavailable, stop the affected work");
-    expect(codeNavigationSkill).not.toContain("ToolSearch");
-    expect(codeNavigationSkill).not.toContain("documentSymbol");
-    expect(codeNavigationSkill).toContain("Retry the same bounded workspace query at most two more times");
-    expect(codeNavigationSkill).toContain("Treat LSP results as symbol-specific");
-    expect(codeNavigationSkill).toContain("Never use one symbol's references as proof of a complete semantic class");
-    expect(codeNavigationSkill).toContain("only within the already identified owning file or module");
-    expect(codeNavigationSkill).toContain("Text matches are candidate locations, not relationship evidence");
+    expect(codeNavigationSkill).not.toContain("LSP");
+    expect(codeNavigationSkill).toContain("Find references with exact searches over the whole project source tree");
+    expect(codeNavigationSkill).toContain("Treat each search as symbol-name evidence, not semantic evidence");
+    expect(codeNavigationSkill).toContain("every search that could reach it was run and every match was read and classified");
+    expect(codeNavigationSkill).toContain("record the relationship as unresolved instead of assuming either answer");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain("name: vcm-report-harness-issue");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain(".ai/vcm/harness-feedback/pending/");
     expect(await fs.readText("/repo/.claude/agents/harness-engineer.md")).toContain("Write the complete retrospective report directly to the assigned Result Path.");
@@ -122,10 +114,10 @@ describe("createHarnessService", () => {
     expect(restartArchitectSkill).toContain("already_scheduled");
     expect(await fs.readText("/repo/.ai/tools/request-architect-restart")).toContain("/sessions/architect/restart-after-planning");
     const evidenceWorker = await fs.readText("/repo/.claude/agents/vcm-architect-evidence-worker.md");
-    // A deny list keeps the parent session's LSP tool available to the worker.
     expect(evidenceWorker).toContain("disallowedTools: Agent, Bash, Edit, NotebookEdit, WebFetch, WebSearch");
     expect(evidenceWorker).not.toMatch(/^tools:/m);
-    expect(evidenceWorker).toContain("Use LSP for every definition, reference, caller, callee, and implementation relationship");
+    expect(evidenceWorker).not.toContain("LSP");
+    expect(evidenceWorker).toContain("with exact Grep searches over the whole project source tree");
     expect(evidenceWorker).toContain("model: opus\neffort: high");
     expect(evidenceWorker).toContain("Do not design architecture");
     expect(evidenceWorker).toContain("You have no shell access");
@@ -205,12 +197,10 @@ describe("createHarnessService", () => {
     expect(frontmatterOf(architectAgent)).toContain(`disallowedTools: ${CODE_ROLE_DISALLOWED_TOOLS.join(", ")}`);
     expect(frontmatterOf(architectAgent)).not.toMatch(/^tools:/m);
     expect(architectAgent).toContain("Follow the preloaded `vcm-code-navigation` skill");
-    expect(architectAgent).toContain("Do not use the built-in `Grep` tool or shell text-search commands");
-    expect(architectAgent).toContain("LSP is mandatory for navigating project source code");
-    expect(architectAgent).toContain("report its language, command, error, and installation hint");
+    expect(architectAgent).not.toContain("LSP");
+    expect(architectAgent).toContain("Navigate project source with exact source-text search");
     expect(architectAgent).toContain("An accessor, its backing field, a trait declaration, its implementation method, a wrapper, and an alias are separate symbols");
-    expect(architectAgent).toContain("except for the bounded fallback below");
-    expect(architectAgent).toContain("Text matches identify candidates only and are not relationship evidence");
+    expect(architectAgent).toContain("Record the exact search pattern and scope behind each relationship claim");
     expect(frontmatterOf(architectAgent)).toContain("skills:\n  - vcm-code-navigation");
     expect(architectAgent).toContain("Resolution Evidence");
     expect(architectAgent).toContain("verifiable behavior, implementation boundaries within the accepted scope, behavior/contract proof points");
@@ -266,9 +256,10 @@ describe("createHarnessService", () => {
     expect(diagnosisReviewerAgent).toContain("Finding Scope: test-only|docs-only|implementation");
     expect(diagnosisReviewerAgent).toContain("L3 Trigger Assessment");
     expect(diagnosisReviewerAgent).toContain("`Test Result: incomplete` is Tester continuation state");
-    expect(diagnosisReviewerAgent).toContain("One symbol's reference result cannot");
-    expect(diagnosisReviewerAgent).toContain("prove the class complete");
-    expect(diagnosisReviewerAgent).toContain("text matches alone are not evidence");
+    expect(diagnosisReviewerAgent).toContain("One symbol's results cannot prove");
+    expect(diagnosisReviewerAgent).toContain("the class complete");
+    expect(diagnosisReviewerAgent).toContain("unread text\nmatches are not evidence");
+    expect(diagnosisReviewerAgent).not.toContain("LSP");
     expect(diagnosisReviewerAgent).toContain("as fresh code requiring independent review");
     expect(diagnosisReviewerAgent).toContain("apply the complete code-diff checks to every repair");
     expect(diagnosisReviewerAgent).toContain("check-scaffold-ledger --mode scaffold");
@@ -380,111 +371,6 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/settings.json")).toContain('"autoMemoryEnabled": false');
   });
 
-  it("reports the server runnable without claiming that a role workspace is semantically ready", async () => {
-    const fs = createMemoryFs();
-    await fs.writeJson("/repo/.ai/generated/module-index.json", {
-      modules: [{ files: { source: ["src/lib.rs", "ui/app.tsx"] } }]
-    });
-    await fs.writeText("/repo/Cargo.toml", "[workspace]\n");
-    await fs.writeText("/repo/package.json", "{}\n");
-    await fs.writeText("/tools/rust-analyzer", "");
-    await fs.writeJson("/plugins/vcm-lsp/.claude-plugin/plugin.json", {
-      lspServers: {
-        "rust-analyzer": { command: "rust-analyzer" },
-        typescript: { command: "typescript-language-server" }
-      }
-    });
-
-    const status = await detectHarnessCodeIntelligence(fs, "/repo", {
-      pluginDir: "/plugins/vcm-lsp",
-      pathEnv: "/tools",
-      platform: "linux",
-      runner: {
-        async run(command, args) {
-          expect(command).toBe("/tools/rust-analyzer");
-          expect(args).toEqual(["--version"]);
-          return { stdout: "rust-analyzer 1.0", stderr: "", exitCode: 0 };
-        }
-      }
-    });
-
-    expect(status.state).toBe("partial");
-    expect(status.languages).toEqual([
-      expect.objectContaining({
-        language: "rust",
-        serverCommand: "rust-analyzer",
-        pluginName: "vcm-lsp-bridge",
-        pluginReady: true,
-        serverFound: true,
-        serverRunnable: true,
-        state: "server_runnable"
-      }),
-      expect.objectContaining({
-        language: "typescript",
-        serverCommand: "typescript-language-server",
-        pluginName: "vcm-lsp-bridge",
-        pluginReady: true,
-        serverFound: false,
-        serverRunnable: false,
-        state: "server_missing"
-      })
-    ]);
-
-    const harnessStatus = await createHarnessService({ fs }).getHarnessStatus("/repo");
-    expect(harnessStatus.codeIntelligence?.languages.map((language) => language.language)).toEqual([
-      "rust",
-      "typescript"
-    ]);
-    expect(harnessStatus.warnings).toEqual(expect.arrayContaining([
-      expect.stringContaining("LSP for TypeScript / JavaScript is unavailable")
-    ]));
-  });
-
-  it("reports a broken language server and caches the failed startup probe", async () => {
-    const fs = createMemoryFs();
-    await fs.writeText("/repo/Cargo.toml", "[workspace]\n");
-    await fs.writeText("/tools/rust-analyzer", "rustup shim");
-    await fs.writeJson("/plugins/vcm-lsp/.claude-plugin/plugin.json", {
-      lspServers: {
-        "rust-analyzer": { command: "rust-analyzer" }
-      }
-    });
-    let probeCalls = 0;
-    let repaired = false;
-    const detector = createHarnessCodeIntelligenceDetector(fs, {
-      pluginDir: "/plugins/vcm-lsp",
-      pathEnv: "/tools",
-      platform: "linux",
-      runner: {
-        async run() {
-          probeCalls += 1;
-          if (repaired) return { stdout: "rust-analyzer 1.0", stderr: "", exitCode: 0 };
-          return {
-            stdout: "",
-            stderr: "Unknown binary 'rust-analyzer' in official toolchain",
-            exitCode: 1
-          };
-        }
-      }
-    });
-
-    const first = await detector.detect("/repo");
-    const second = await detector.detect("/repo");
-
-    expect(first.state).toBe("missing");
-    expect(first.languages[0]).toMatchObject({
-      state: "server_failed",
-      serverFound: true,
-      serverRunnable: false,
-      error: expect.stringContaining("Unknown binary 'rust-analyzer'")
-    });
-    expect(second.languages[0]?.state).toBe("server_failed");
-    expect(probeCalls).toBe(1);
-    repaired = true;
-    expect((await detector.detect("/repo", { refresh: true })).languages[0]?.state).toBe("server_runnable");
-    expect(probeCalls).toBe(2);
-  });
-
   it("inserts VCM rules into an existing file without overwriting user content", async () => {
     const fs = createMemoryFs();
     await fs.writeText("/repo/CLAUDE.md", "# Existing Rules\n\nKeep this project-specific note.\n");
@@ -509,7 +395,7 @@ describe("createHarnessService", () => {
     expect(content).toContain("## VCM Start Here");
   });
 
-  it("migrates Architect to the dynamic LSP tool policy without replacing its configuration", async () => {
+  it("migrates Architect to the deny-list tool policy without replacing its configuration", async () => {
     const fs = createMemoryFs();
     const service = createHarnessService({ fs });
     await service.applyHarness("/repo");

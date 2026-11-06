@@ -46,13 +46,4 @@ describe("Harness Studio layout", () => {
     expect(rule).toContain("height: 100%");
     expect(rule).toContain("overflow-y: auto");
   });
-
-  it("renders backend-owned code intelligence status in the scrollable Harness list", async () => {
-    const component = await readFile(new URL("../../../src/frontend/components/harness-studio-modal.tsx", import.meta.url), "utf8");
-
-    expect(component).toContain('title="Code Intelligence"');
-    expect(component).toContain("status?.codeIntelligence?.languages");
-    expect(component).toContain('language.state === "server_runnable"');
-    expect(component).toContain('language.error ?? "Server runnable; workspace readiness is checked in each role session."');
-  });
 });

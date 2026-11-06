@@ -12,19 +12,23 @@ Use this skill when Architect must establish symbol definitions, implementations
 ## Navigation Order
 
 1. Define the affected feature or module boundary and locate entry symbols with `.ai/generated/module-index.json` and `.ai/generated/public-surface.json` when available.
-2. Use LSP workspace or file symbols, definitions, implementations, references, and incoming or outgoing call hierarchy to resolve project-owned relationships. If a required language server is unavailable, stop the affected work and report its language, command, error, and installation hint through the current communication channel. Resume after the environment is fixed and Architect is restarted; do not substitute text search.
-3. Treat LSP results as symbol-specific. An accessor, backing field, trait declaration, implementation method, wrapper, and alias are separate symbols. Query every relevant symbol separately. When starting from an accessor or wrapper, read its implementation, resolve the backing field, delegate, or trait item with LSP, then query those symbols too. Never use one symbol's references as proof of a complete semantic class.
-4. If an initial workspace-symbol request is empty or reports indexing, wait and retry; startup or indexing time does not permit replacing a required semantic query with text matching. Retry the same bounded workspace query at most two more times. If it still cannot resolve, record the operation and result as unresolved.
-5. Read the complete project-owned callable unit at every resolved location.
+2. Locate each definition with an exact source-text search for its declaration form in the project language, such as `fn name`, `struct Name`, `trait Name`, `impl Trait for`, `class Name`, or `def name`. Read the complete declaration.
+3. Find references with exact searches over the whole project source tree, excluding only build output, dependency, and generated directories. Search every spelling that can reach the symbol: direct calls, method calls, path-qualified uses, imports and re-exports, renaming imports and aliases, macro invocations, and string or configuration names used for dispatch or registration.
+4. Treat each search as symbol-name evidence, not semantic evidence. An accessor, backing field, trait declaration, implementation method, wrapper, and alias are separate symbols; search each one. For a trait or interface item, search its implementations and every call through the trait, generic bound, or dynamic dispatch.
+5. Read the complete project-owned callable unit at every match and classify the match as a relationship, a same-name unrelated symbol, a comment, or a test. Common names such as `new`, `get`, or `run` need the enclosing type or module to classify each match.
 6. Expand one project-owned dependency hop at a time until the required behavior path has no unresolved symbol.
-7. If the correct LSP operation against the actual symbol is demonstrably partial for a relationship LSP does not model or expose, record the operation, result, and missing relationship. Then use an exact text search only within the already identified owning file or module to locate candidates. Read every candidate and verify its semantics against code and LSP. Text matches are candidate locations, not relationship evidence, and must not expand the search boundary or replace the initial LSP query.
-8. Use Glob, generated context, architecture documents, and runtime evidence to locate dynamic registrations, configuration or string edges, macros, documentation, and external boundaries that LSP does not model.
+7. Use Glob, generated context, architecture documents, and runtime evidence to locate dynamic registrations, configuration or string edges, macros, documentation, and external boundaries.
+
+## Completeness
+
+- A relationship set is complete only when every search that could reach it was run and every match was read and classified.
+- Search results cannot see identifiers produced by macros or code generation, code excluded by configuration such as disabled features or platform conditions, or calls through values whose concrete type is decided at runtime. When one of these can reach the symbol, read the generator, configuration, or dispatch site and record the limitation.
+- When a match cannot be classified from the code, record the relationship as unresolved instead of assuming either answer.
 
 ## Evidence
 
-- Record each resolved relationship and whether it came from LSP, runtime evidence, verified bounded source fallback, an external boundary, or a generated boundary.
-- When an empty LSP result contradicts a direct call in the code, another LSP result, or runtime evidence, treat the relationship as unresolved. Record the contradiction and use exact fallback evidence.
-- If LSP is unavailable or cannot resolve a required project-owned relationship, record that limitation and leave the relationship unresolved.
+- Record each relationship with its source: the exact search pattern and scope with every match dispositioned, runtime evidence, an external boundary, or a generated boundary.
+- If an expected relationship is missing from a search that should reach it, recheck the spellings and scope before concluding the relationship is absent.
 - Generated indexes and architecture docs locate likely code; reading current-worktree implementation establishes behavior.
 
 ## Context Boundary

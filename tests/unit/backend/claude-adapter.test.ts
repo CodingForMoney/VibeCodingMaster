@@ -26,14 +26,14 @@ describe("createClaudeAdapter", () => {
   });
 
   it("builds plan as a permission mode", () => {
-    expect(adapter.buildRoleStartCommand("architect", "claude", "plan")).toEqual({
+    expect(adapter.buildRoleStartCommand("coder", "claude", "plan")).toEqual({
       command: "claude",
-      args: ["--allowedTools", "Glob,Grep", "--agent", "architect", "--model", "default", "--permission-mode", "plan"],
-      display: "claude --allowedTools 'Glob,Grep' --agent architect --model default --permission-mode plan"
+      args: ["--allowedTools", "Glob,Grep", "--agent", "coder", "--model", "default", "--permission-mode", "plan"],
+      display: "claude --allowedTools 'Glob,Grep' --agent coder --model default --permission-mode plan"
     });
   });
 
-  it("keeps non-LSP roles on the built-in search tools", () => {
+  it("keeps roles without a runtime deny list on the built-in search tools", () => {
     expect(adapter.buildRoleStartCommand("project-manager").args.slice(0, 4)).toEqual([
       "--allowedTools",
       "Glob,Grep",
@@ -68,7 +68,7 @@ describe("createClaudeAdapter", () => {
 
   it("builds role commands with the Fable alias", () => {
     expect(adapter.buildRoleStartCommand(
-      "architect",
+      "coder",
       "claude",
       "default",
       undefined,
@@ -80,11 +80,11 @@ describe("createClaudeAdapter", () => {
         "--allowedTools",
         "Glob,Grep",
         "--agent",
-        "architect",
+        "coder",
         "--model",
         "fable"
       ],
-      display: "claude --allowedTools 'Glob,Grep' --agent architect --model fable"
+      display: "claude --allowedTools 'Glob,Grep' --agent coder --model fable"
     });
   });
 
@@ -138,7 +138,7 @@ describe("createClaudeAdapter", () => {
 
   it("adds effort when one is selected", () => {
     expect(adapter.buildRoleStartCommand(
-      "architect",
+      "coder",
       "claude",
       "default",
       "00000000-0000-4000-8000-000000000001",
@@ -151,7 +151,7 @@ describe("createClaudeAdapter", () => {
         "--allowedTools",
         "Glob,Grep",
         "--agent",
-        "architect",
+        "coder",
         "--session-id",
         "00000000-0000-4000-8000-000000000001",
         "--model",
@@ -159,13 +159,13 @@ describe("createClaudeAdapter", () => {
         "--effort",
         "xhigh"
       ],
-      display: "claude --allowedTools 'Glob,Grep' --agent architect --session-id 00000000-0000-4000-8000-000000000001 --model opus --effort xhigh"
+      display: "claude --allowedTools 'Glob,Grep' --agent coder --session-id 00000000-0000-4000-8000-000000000001 --model opus --effort xhigh"
     });
   });
 
   it("sets ultracode through session settings instead of --effort", () => {
     expect(adapter.buildRoleStartCommand(
-      "architect",
+      "coder",
       "claude",
       "default",
       "00000000-0000-4000-8000-000000000001",
@@ -178,7 +178,7 @@ describe("createClaudeAdapter", () => {
         "--allowedTools",
         "Glob,Grep",
         "--agent",
-        "architect",
+        "coder",
         "--session-id",
         "00000000-0000-4000-8000-000000000001",
         "--model",
@@ -186,13 +186,13 @@ describe("createClaudeAdapter", () => {
         "--settings",
         "{\"ultracode\":true}"
       ],
-      display: "claude --allowedTools 'Glob,Grep' --agent architect --session-id 00000000-0000-4000-8000-000000000001 --model fable --settings '{\"ultracode\":true}'"
+      display: "claude --allowedTools 'Glob,Grep' --agent coder --session-id 00000000-0000-4000-8000-000000000001 --model fable --settings '{\"ultracode\":true}'"
     });
   });
 
   it("appends a restoration system prompt for a fresh role session", () => {
     expect(adapter.buildRoleStartCommand(
-      "architect",
+      "coder",
       "claude",
       "bypassPermissions",
       undefined,
@@ -207,7 +207,7 @@ describe("createClaudeAdapter", () => {
         "--allowedTools",
         "Glob,Grep",
         "--agent",
-        "architect",
+        "coder",
         "--model",
         "fable",
         "--effort",
@@ -217,21 +217,21 @@ describe("createClaudeAdapter", () => {
         "--append-system-prompt",
         "Read the completed architecture artifacts."
       ],
-      display: "claude --allowedTools 'Glob,Grep' --agent architect --model fable --effort high --permission-mode bypassPermissions --append-system-prompt 'Read the completed architecture artifacts.'"
+      display: "claude --allowedTools 'Glob,Grep' --agent coder --model fable --effort high --permission-mode bypassPermissions --append-system-prompt 'Read the completed architecture artifacts.'"
     });
   });
 
   it("builds resume commands with the persisted Claude session id", () => {
     expect(adapter.buildRoleStartCommand(
-      "architect",
+      "coder",
       "claude",
       "default",
       "00000000-0000-4000-8000-000000000002",
       true
     )).toEqual({
       command: "claude",
-      args: ["--allowedTools", "Glob,Grep", "--agent", "architect", "--resume", "00000000-0000-4000-8000-000000000002", "--model", "default"],
-      display: "claude --allowedTools 'Glob,Grep' --agent architect --resume 00000000-0000-4000-8000-000000000002 --model default"
+      args: ["--allowedTools", "Glob,Grep", "--agent", "coder", "--resume", "00000000-0000-4000-8000-000000000002", "--model", "default"],
+      display: "claude --allowedTools 'Glob,Grep' --agent coder --resume 00000000-0000-4000-8000-000000000002 --model default"
     });
   });
 
@@ -260,7 +260,7 @@ describe("createClaudeAdapter", () => {
     });
   });
 
-  it("loads VCM-managed plugins before the selected role", () => {
+  it("removes non-VCM runtime tools from Architect", () => {
     expect(CODE_ROLE_RUNTIME_DISALLOWED_TOOLS).not.toContain("Skill");
     expect(adapter.buildRoleStartCommand(
       "architect",
@@ -269,15 +269,10 @@ describe("createClaudeAdapter", () => {
       undefined,
       false,
       "opus",
-      "medium",
-      undefined,
-      undefined,
-      ["/opt/vcm/plugins/vcm-lsp-bridge"]
+      "medium"
     )).toEqual({
       command: "claude",
       args: [
-        "--plugin-dir",
-        "/opt/vcm/plugins/vcm-lsp-bridge",
         "--disallowedTools",
         CODE_ROLE_RUNTIME_DISALLOWED_TOOLS.join(","),
         "--agent",
@@ -287,28 +282,16 @@ describe("createClaudeAdapter", () => {
         "--effort",
         "medium"
       ],
-      display: `claude --plugin-dir /opt/vcm/plugins/vcm-lsp-bridge --disallowedTools '${CODE_ROLE_RUNTIME_DISALLOWED_TOOLS.join(",")}' --agent architect --model opus --effort medium`
+      display: `claude --disallowedTools '${CODE_ROLE_RUNTIME_DISALLOWED_TOOLS.join(",")}' --agent architect --model opus --effort medium`
     });
   });
 
-  it("gives Reviewer LSP while keeping Agent and Edit disallowed", () => {
-    const command = adapter.buildRoleStartCommand(
-      "reviewer",
-      "claude",
-      "default",
-      undefined,
-      false,
-      "default",
-      "default",
-      undefined,
-      undefined,
-      ["/opt/vcm/plugins/vcm-lsp-bridge"]
-    );
+  it("keeps Agent and Edit disallowed for Reviewer", () => {
+    const command = adapter.buildRoleStartCommand("reviewer", "claude", "default", undefined, false, "default", "default");
 
-    expect(command.args).toEqual(expect.arrayContaining(["--plugin-dir", "/opt/vcm/plugins/vcm-lsp-bridge"]));
+    expect(command.args).not.toContain("--plugin-dir");
     expect(command.args).not.toContain("--allowedTools");
     const disallowed = command.args[command.args.indexOf("--disallowedTools") + 1]!.split(",");
     expect(disallowed).toEqual(expect.arrayContaining(["Agent", "Edit"]));
-    expect(disallowed).not.toContain("LSP");
   });
 });

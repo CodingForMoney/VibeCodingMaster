@@ -351,7 +351,7 @@ describe("harness templates stay in sync with the script installer", () => {
   }, 30_000);
 
   it("removes the Architect-only navigation skill from existing Coder and Reviewer agents", async () => {
-    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-lsp-role-migration-"));
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-navigation-skill-migration-"));
     await execFileAsync(process.execPath, [installerPath, tmpRepo]);
 
     for (const role of ["coder", "reviewer"]) {

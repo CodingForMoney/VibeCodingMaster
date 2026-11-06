@@ -437,7 +437,7 @@ function analysisForGate(gate: GateReviewGate): string[] {
       "- Code Reality: current implementation inspected",
       "- Invalidated Assumptions: affected assumptions inspected",
       "- Existing-Class Completeness: related class members reconstructed",
-      "- Relationship Evidence: decision-bearing relationships cite LSP evidence and were re-queried",
+      "- Relationship Evidence: decision-bearing relationships cite search evidence and were re-searched",
       "- Architecture Docs: owning docs updated with the plan and its decisions",
       "- Ownership: state owner inspected",
       "- Data Flow: producer and consumer inspected",

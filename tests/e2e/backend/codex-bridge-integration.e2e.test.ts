@@ -6,7 +6,6 @@ import {
   toCodexBridgeSessionModel
 } from "../../../src/shared/types/session.js";
 import { CODE_ROLE_RUNTIME_DISALLOWED_TOOLS, REVIEWER_RUNTIME_DISALLOWED_TOOLS } from "../../../src/backend/role-tool-policy.js";
-import { VCM_LSP_PLUGIN_DIR } from "../../../src/backend/services/lsp-plugin.js";
 import { createMockClaudeE2eApp, roleLaunchBody } from "./helpers/e2e-app.js";
 import {
   connectAndCreateTask,
@@ -137,14 +136,13 @@ describe("backend E2E Codex Bridge integration", () => {
     const nativeRuntime = env.mockRuntime.getSessionByRole(task.taskSlug, "architect");
     const nativeInput = env.mockRuntime.getCreateInput(nativeRuntime!.id);
     expect(nativeInput.args).toEqual(expect.arrayContaining(["--model", "opus"]));
-    expect(nativeInput.args).toEqual(expect.arrayContaining(["--plugin-dir", VCM_LSP_PLUGIN_DIR]));
+    expect(nativeInput.args).not.toContain("--plugin-dir");
     expect(nativeInput.args).toEqual(expect.arrayContaining([
       "--disallowedTools",
       CODE_ROLE_RUNTIME_DISALLOWED_TOOLS.join(",")
     ]));
     expect(nativeInput.args).not.toContain("--allowedTools");
-    expect(nativeInput.env.ENABLE_LSP_TOOL).toBe("true");
-    expect(nativeInput.env.ENABLE_TOOL_SEARCH).toBe("false");
+    expect(nativeInput.env.ENABLE_LSP_TOOL).toBeUndefined();
     expect(nativeInput.args).not.toContain("--settings");
     expect(nativeInput.env.ANTHROPIC_BASE_URL).toBeUndefined();
     expect(nativeInput.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
@@ -181,7 +179,7 @@ describe("backend E2E Codex Bridge integration", () => {
     expect(env.mockRuntime.getSessionByRole(task.taskSlug, "coder")).toBeUndefined();
   });
 
-  it("uses the Bridge launch path with LSP for Reviewer and without it for auxiliary sessions", async () => {
+  it("uses the Bridge launch path for Reviewer and auxiliary sessions", async () => {
     const env = await createMockClaudeE2eApp();
     cleanups.push(() => env.close());
     const repo = await createE2eRepo();
@@ -235,21 +233,17 @@ describe("backend E2E Codex Bridge integration", () => {
     }
 
     const reviewerInput = env.mockRuntime.getCreateInput(launches[0].json<{ id: string }>().id);
-    // Reviewer re-verifies relationship claims with LSP, like Architect.
-    expect(reviewerInput.args).toEqual(expect.arrayContaining(["--plugin-dir", VCM_LSP_PLUGIN_DIR]));
+    expect(reviewerInput.args).not.toContain("--plugin-dir");
     expect(reviewerInput.args).toEqual(expect.arrayContaining([
       "--disallowedTools",
       REVIEWER_RUNTIME_DISALLOWED_TOOLS.join(",")
     ]));
     expect(reviewerInput.args).not.toContain("--allowedTools");
-    expect(reviewerInput.env.ENABLE_LSP_TOOL).toBe("true");
-    expect(reviewerInput.env.ENABLE_TOOL_SEARCH).toBe("false");
+    expect(reviewerInput.env.ENABLE_LSP_TOOL).toBeUndefined();
     for (const auxiliary of launches.slice(1)) {
       const auxiliaryInput = env.mockRuntime.getCreateInput(auxiliary.json<{ id: string }>().id);
       expect(auxiliaryInput.args).not.toContain("--plugin-dir");
       expect(auxiliaryInput.args).toEqual(expect.arrayContaining(["--allowedTools", "Glob,Grep"]));
-      expect(auxiliaryInput.env.ENABLE_LSP_TOOL).toBeUndefined();
-      expect(auxiliaryInput.env.ENABLE_TOOL_SEARCH).toBeUndefined();
     }
   });
 

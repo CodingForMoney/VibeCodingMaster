@@ -35,7 +35,6 @@ import {
   type ArchitectWorkerType
 } from "../../shared/types/app-settings.js";
 import { applyArchitectWorkerSetting } from "../templates/harness/architect-worker-frontmatter.js";
-import type { CommandRunner } from "../adapters/command-runner.js";
 import type { GitAdapter } from "../adapters/git-adapter.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import { renderArchitectHarnessRules } from "../templates/harness/architect-agent.js";
@@ -95,8 +94,6 @@ import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import { VcmError } from "../errors.js";
 import { bumpHarnessRevision, readHarnessRevisionState } from "./harness-revision.js";
 import type { SessionService } from "./session-service.js";
-import { createHarnessCodeIntelligenceDetector } from "./code-intelligence-service.js";
-import { lspUnavailableWarning } from "./lsp-plugin.js";
 
 const execFileAsync = promisify(execFile);
 const BOOTSTRAP_SESSION_PATH = ".ai/vcm/bootstrap/session.json";
@@ -121,7 +118,6 @@ export interface HarnessService {
 
 export interface HarnessServiceDeps {
   fs: FileSystemAdapter;
-  commandRunner?: Pick<CommandRunner, "run">;
   git?: Pick<GitAdapter, "addPaths" | "commit" | "getStatusPorcelainV1"> &
     Partial<Pick<GitAdapter, "branchExists" | "getCommitDiff" | "getCommitInfo" | "getCommitList" | "getCurrentBranch" | "getDiff" | "getHeadCommit" | "getMergeBase" | "mergeBranchFastForward">>;
   runtime?: TerminalRuntime;
@@ -606,21 +602,15 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
       ? normalizeArchitectWorkerSettings(await deps.getArchitectWorkerSettings())
       : DEFAULT_ARCHITECT_WORKER_SETTINGS;
   }
-  const codeIntelligenceDetector = createHarnessCodeIntelligenceDetector(deps.fs, {
-    runner: deps.commandRunner
-  });
 
   return {
     async getHarnessStatus(repoRoot) {
-      const [analyses, codeIntelligence] = await Promise.all([
-        analyzeHarnessFiles(deps.fs, repoRoot, await resolveArchitectWorkerSettings()),
-        codeIntelligenceDetector.detect(repoRoot)
-      ]);
+      const analyses = await analyzeHarnessFiles(deps.fs, repoRoot, await resolveArchitectWorkerSettings());
       const legacyChanges = await analyzeLegacyCodexHarnessPaths(deps.fs, repoRoot);
       const manifestChange = deps.runFixedInstaller
         ? await analyzeHarnessManifest(deps.fs, repoRoot, vcmVersion)
         : undefined;
-      return renderHarnessStatus(await readHarnessRevisionValue(deps.fs, repoRoot), analyses, legacyChanges, manifestChange, codeIntelligence);
+      return renderHarnessStatus(await readHarnessRevisionValue(deps.fs, repoRoot), analyses, legacyChanges, manifestChange);
     },
     async getHarnessFileContent(repoRoot, filePath) {
       return readHarnessFileContent(deps.fs, repoRoot, filePath);
@@ -655,17 +645,14 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
       }
 
       const file = await readHarnessFileContent(deps.fs, repoRoot, definition.path);
-      const [analyses, codeIntelligence] = await Promise.all([
-        analyzeHarnessFiles(deps.fs, repoRoot, await resolveArchitectWorkerSettings()),
-        codeIntelligenceDetector.detect(repoRoot)
-      ]);
+      const analyses = await analyzeHarnessFiles(deps.fs, repoRoot, await resolveArchitectWorkerSettings());
       const legacyChanges = await analyzeLegacyCodexHarnessPaths(deps.fs, repoRoot);
       const manifestChange = deps.runFixedInstaller
         ? await analyzeHarnessManifest(deps.fs, repoRoot, vcmVersion)
         : undefined;
       return {
         file,
-        status: renderHarnessStatus(await readHarnessRevisionValue(deps.fs, repoRoot), analyses, legacyChanges, manifestChange, codeIntelligence),
+        status: renderHarnessStatus(await readHarnessRevisionValue(deps.fs, repoRoot), analyses, legacyChanges, manifestChange),
         harnessCommit
       };
     },
@@ -1817,8 +1804,7 @@ function renderHarnessStatus(
   harnessRevision: number,
   analyses: HarnessFileAnalysis[],
   legacyChanges: HarnessPlannedChange[] = [],
-  manifestChange?: HarnessPlannedChange,
-  codeIntelligence?: HarnessStatusReport["codeIntelligence"]
+  manifestChange?: HarnessPlannedChange
 ): HarnessStatusReport {
   const files = analyses.map((analysis) => analysis.status);
   const plannedChanges = analyses
@@ -1850,13 +1836,7 @@ function renderHarnessStatus(
     files,
     needsApply: plannedChanges.length > 0,
     plannedChanges,
-    codeIntelligence,
-    warnings: [
-      ...(plannedChanges.length > 0 ? ["Review and commit VCM Harness changes before starting long-running work."] : []),
-      ...((codeIntelligence?.languages ?? [])
-        .filter((language) => language.state !== "server_runnable")
-        .map(lspUnavailableWarning))
-    ]
+    warnings: plannedChanges.length > 0 ? ["Review and commit VCM Harness changes before starting long-running work."] : []
   };
 }
 

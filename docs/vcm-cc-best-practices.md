@@ -504,7 +504,7 @@ tree. Marker count alone never determines the lifecycle.
 
 Architect may use foreground evidence workers for bounded supporting reads that
 would otherwise add substantial raw context. The worker writes a factual report;
-Architect personally reads and LSP-verifies decision-bearing code, reviews the
+Architect personally reads and verifies decision-bearing code, reviews the
 report, and consolidates accepted facts into architecture evidence.
 
 After the plan and Scaffold Manifest are complete, Architect invokes the
@@ -799,32 +799,22 @@ Generated artifacts are derived context. Regenerate them after relevant source,
 manifest, module, or public API changes. Do not hand-edit them as durable truth.
 
 For Architect code reading, generated context locates the boundary; it does not
-replace semantic navigation or source inspection. VCM loads its bundled LSP
-bridge for Architect and Reviewer, and the project runtime must provide the
-matching language-server executable. Queries sent while a server is indexing
-wait for it or fail with an explicit "still indexing" error; that error is never
-an empty result. Launches register only runnable project servers and
-provide Architect with language availability, errors, and installation hints.
-When a required server is missing, Architect reports the environment prerequisite
-instead of substituting source search, and restarts after the environment is repaired.
-The Architect definition preloads
-`vcm-code-navigation`. The skill uses definitions, implementations, references,
-and call hierarchy when those semantic relationships are required, then requires
-every resolved callable unit to be read in full. LSP references are
-symbol-specific: query accessors, backing fields, trait declarations,
-implementation methods, wrappers, and aliases separately rather than treating
-one reference result as a complete semantic class. It does not run an
-unconditional file-symbol warm-up. A successful executable probe alone is not
-workspace readiness. Startup or indexing time does not permit replacing a
-required semantic query with text matching. When the correct symbol query is
-demonstrably partial for a relationship LSP cannot model or expose, exact source
-search may locate candidates only inside the already identified owning file or
-module; record the LSP gap, read every candidate, and verify its semantics.
-Otherwise use generated context, architecture documents, and runtime evidence
-for boundaries LSP does not model. If the relationship still cannot be resolved,
-keep it unresolved. Expand one dependency hop at a time instead of injecting an
-unrestricted repository graph. Coder and Reviewer use generated context, Glob,
-Grep, and full source reads without loading separate language servers.
+replace source inspection. VCM roles do not run language servers. The Architect
+definition preloads `vcm-code-navigation`. The skill finds definitions,
+implementations, references, and call relationships with exact source-text
+search over the whole project source tree, covering every spelling that can
+reach the symbol, including imports, re-exports, renaming aliases, macro
+invocations, and string or configuration names used for dispatch. Every match is
+read and classified before it counts as relationship evidence, and each
+relationship records its search pattern and scope. Searches are symbol-name
+evidence: search accessors, backing fields, trait declarations, implementation
+methods, wrappers, and aliases separately rather than treating one symbol's
+results as a complete semantic class. Use generated context, architecture
+documents, and runtime evidence for boundaries a search cannot see, such as
+macro-generated identifiers, configuration-excluded code, and runtime dispatch.
+If the relationship still cannot be resolved, keep it unresolved. Expand one
+dependency hop at a time instead of injecting an unrestricted repository graph.
+Coder and Reviewer use generated context, Glob, Grep, and full source reads.
 
 ## 15. Harness Bootstrap and Feedback
 

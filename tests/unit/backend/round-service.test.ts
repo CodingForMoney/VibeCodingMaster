@@ -954,7 +954,7 @@ describe("round-service", () => {
         attempt: 1,
         maxAttempts: 1,
         lastFailureAt: currentTime,
-        error: "Architect LSP recovery failed."
+        error: "Architect recovery failed."
       }
     });
 
@@ -967,7 +967,7 @@ describe("round-service", () => {
         status: "failed",
         attempt: 1,
         maxAttempts: 1,
-        error: "Architect LSP recovery failed."
+        error: "Architect recovery failed."
       },
       flowPause: {
         paused: true,

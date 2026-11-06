@@ -1721,7 +1721,7 @@ No external boundary change.
 None.
 
 ## Evidence Commands
-LSP and source reads.
+Source searches and reads.
 `;
 }
 
@@ -2009,7 +2009,7 @@ function createRuntime(
             "- Code Reality: plan was compared with current code",
             "- Invalidated Assumptions: touched assumptions were checked",
             "- Existing-Class Completeness: related class members were reconstructed",
-            "- Relationship Evidence: decision-bearing relationships cite LSP evidence and were re-queried",
+            "- Relationship Evidence: decision-bearing relationships cite search evidence and were re-searched",
             "- Architecture Docs: owning docs updated with the plan and its decisions",
             "- Ownership: state ownership was checked",
             "- Data Flow: data flow was traced",

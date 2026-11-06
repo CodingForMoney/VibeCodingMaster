@@ -511,22 +511,16 @@ Use it to:
 - merge task harness commits back to the connected repository branch when
   appropriate
 
-VCM bundles the Claude Code LSP bridge and loads it for Architect and Reviewer
-sessions, including Codex Bridge launches; Architect's evidence worker can use it
-too. While a language server is still indexing, VCM holds LSP queries until it
-is ready and fails them explicitly if indexing does not finish, instead of
-returning partial results. The project environment must still
-provide the language server for each detected language: `rust-analyzer`,
-`typescript-language-server`, `pyright-langserver`, `gopls`, `clangd`, or
-`jdtls`. Architect preloads `vcm-code-navigation` and uses LSP for semantic
-relationships. Accessors, backing fields, trait items, implementations, wrappers,
-and aliases are queried as separate symbols; a bounded source-text fallback may
-only locate candidates after the correct LSP query is demonstrably partial.
-At the architecture-plan gate, Reviewer checks that every decision-bearing
-relationship cites its evidence source and re-queries it with LSP. Other roles
-use generated context and ordinary source reads. Harness Studio
-reports whether the server executable and plugin can run; the role Session
-performs the real workspace indexing and semantic query retries.
+VCM roles navigate code without language servers, so a task does not hold a
+semantic index in memory per session. Architect preloads `vcm-code-navigation`
+and establishes relationships with exact source-text search over the whole
+project source tree, searching every spelling that can reach a symbol and
+reading every match. Accessors, backing fields, trait items, implementations,
+wrappers, and aliases are searched as separate symbols, and each relationship
+records the search that produced it. At the architecture-plan gate, Reviewer
+checks that every decision-bearing relationship cites its evidence source and
+reruns the recorded search. Other roles use generated context and ordinary
+source reads.
 
 Harness Engineer is task-scoped and runs from the active task worktree. The
 backend automatically starts a fresh Harness Engineer for each active task or

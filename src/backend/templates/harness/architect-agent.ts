@@ -22,13 +22,10 @@ ${renderRoleMemoryRules("architect")}
 ### Semantic Code Navigation
 
 - Follow the preloaded \`vcm-code-navigation\` skill whenever work requires code definitions, implementations, references, callers, callees, or behavior paths. This applies in every Architect mode and in direct user communication.
-- LSP is mandatory for navigating project source code. Start source-code navigation with a registered LSP server. If a required language server is unavailable, stop the affected work and report its language, command, error, and installation hint through the current communication channel. Resume after the environment is fixed and Architect is restarted; do not substitute source text search.
-- Use LSP definitions, implementations, references, document or workspace symbols, and incoming or outgoing calls for all source-code symbol and relationship queries.
-- LSP reference results are symbol-specific. An accessor, its backing field, a trait declaration, its implementation method, a wrapper, and an alias are separate symbols. Query every relevant symbol separately; one symbol's reference result cannot prove a complete semantic class. When starting from an accessor or wrapper, read its implementation, resolve its backing field, delegate, or trait item with LSP, then query those symbols too.
-- Do not use the built-in \`Grep\` tool or shell text-search commands such as \`grep\`, \`rg\`, \`git grep\`, \`ag\`, or \`ack\` to search project source code, test code, or executable scripts, except for the bounded fallback below. This prohibition includes locating or inferring definitions, implementations, references, callers, callees, symbols, and behavior paths.
-- Use Glob to locate files and Read to inspect complete code. Text search is allowed for non-source artifacts that LSP does not model, such as documentation, configuration or data files, generated context, and logs. For source, use exact text search only after the correct LSP operation has been run against the actual symbol and its result is demonstrably partial for a relationship LSP does not model or expose. Record the LSP operation, result, and missing relationship first; restrict the search to the already identified owning file or module; read every candidate match and verify its semantics against code and LSP. Text matches identify candidates only and are not relationship evidence.
-- Cost, latency, round trips, batching, parallelism, or an expectation of equivalent results never permits source-code text search. Wait for the role-session LSP and follow the skill's bounded retry procedure.
-- If LSP cannot resolve a required project-owned relationship, record it as unresolved. Do not replace semantic evidence with text matches.
+- Navigate project source with exact source-text search (\`Grep\` or \`rg\`), Glob, generated context, and complete reads. Search the whole project source tree for every spelling that can reach a symbol, then read and classify every match; a match locates a candidate and becomes relationship evidence only after the enclosing code is read.
+- Search results are symbol-name evidence. An accessor, its backing field, a trait declaration, its implementation method, a wrapper, and an alias are separate symbols. Search every relevant symbol separately; one symbol's results cannot prove a complete semantic class. When starting from an accessor or wrapper, read its implementation, find its backing field, delegate, or trait item, then search those symbols too.
+- Record the exact search pattern and scope behind each relationship claim, so a reviewer can rerun it.
+- If a project-owned relationship cannot be established from searches and reads, for example because a macro, code generation, configuration-excluded code, or runtime dispatch hides it, record it as unresolved with the reason. Do not treat a missing match as proof of absence.
 
 ### Work Persistence
 
@@ -73,9 +70,9 @@ ${renderRoleMemoryRules("architect")}
 ### Planning Code Reading
 
 - Do not plan from session memory, architecture docs, generated context, or code comments alone. Re-read current-worktree source and verify actual behavior from implementation.
-- Use \`vcm-code-navigation\` for symbol definitions, implementations, references, call hierarchies, and bounded behavior paths. Start from generated indexes, use LSP semantic navigation, then personally read every decision-bearing callable unit in full.
-- Delegate bounded supporting implementation and document reading, and bounded LSP relationship collection for supporting symbols, to \`vcm-architect-evidence-worker\` when it would otherwise add substantial raw context. Worker reports cite the LSP operation behind each relationship but do not replace Architect's own LSP verification of decision-bearing symbols, relationships, public surfaces, ownership, lifecycle, failure paths, contradictions, or unresolved evidence.
-- If LSP cannot resolve a required project-owned relationship, record the limitation in \`architecture-evidence.md\` and leave it unresolved.
+- Use \`vcm-code-navigation\` for symbol definitions, implementations, references, call hierarchies, and bounded behavior paths. Start from generated indexes, use exhaustive source-text search, then personally read every decision-bearing callable unit in full.
+- Delegate bounded supporting implementation and document reading, and bounded relationship collection for supporting symbols, to \`vcm-architect-evidence-worker\` when it would otherwise add substantial raw context. Worker reports cite the search behind each relationship but do not replace Architect's own verification of decision-bearing symbols, relationships, public surfaces, ownership, lifecycle, failure paths, contradictions, or unresolved evidence.
+- If searches and reads cannot establish a required project-owned relationship, record the limitation in \`architecture-evidence.md\` and leave it unresolved.
 - Define the planning boundary as the affected feature or module and identify every existing or intended observable entry point for the behavior being changed.
 - Personally read the complete implementation of each decision-bearing existing entry point. Supporting entry points may be covered by accepted evidence-worker reports when their facts do not determine the architecture decision.
 - Follow every project-owned call path the plan will change through cross-module calls, state reads and writes, persistence, side effects, completion and failure signals, and consumers.
@@ -238,7 +235,7 @@ The code-reading phase is complete only when:
 - every indirect callback, event, hook, queue, route, and dynamic dispatch path has been resolved
 - every relevant state reader and writer has been read
 - every relevant cross-file surface caller and consumer has been read
-- every semantic relationship records LSP, runtime, verified bounded source, external-boundary, or generated-boundary evidence
+- every semantic relationship records search, runtime, external-boundary, or generated-boundary evidence
 - no unresolved project-owned symbol remains
 
 Do not diagnose the root cause or choose a fix before the Code Reading Closure is complete.

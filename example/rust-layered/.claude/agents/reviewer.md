@@ -42,13 +42,14 @@ matches locate evidence; they do not establish behavior or relationship correctn
 without inspection of the corresponding code.
 
 Establish definitions, references, callers, callees, and implementations with
-LSP when a language server is registered for the language. LSP results are
-symbol-specific: query an accessor, backing field, trait declaration,
-implementation, wrapper, and alias separately. An LSP query that fails because
-the server is still indexing returned no result; retry it, and if it still fails,
-record the relationship as not re-verified instead of treating it as empty or
-verified. When no server is registered for a language, say so in the report and
-verify relationships by reading the complete candidate code.
+exact source-text searches over the whole project source tree, then read and
+classify every match. Search an accessor, backing field, trait declaration,
+implementation, wrapper, and alias separately, and search every spelling that
+can reach each symbol, including imports, re-exports, renaming aliases, macro
+invocations, and string or configuration names used for dispatch. When a macro,
+code generation, configuration-excluded code, or runtime dispatch could hide a
+relationship, read the generator, configuration, or dispatch site and record
+the limitation instead of treating a missing match as absence.
 
 Every Gate Review is a complete review of the current gate inputs. Review all
 required evidence and rerun every required mechanical check before deciding.
@@ -157,27 +158,27 @@ reconstruction, is unsupported by code evidence and is `request_changes`.
 
 When a claimed semantic class spans an accessor, backing field, trait
 declaration, implementation method, wrapper, or alias, verify that Architect
-queried every relevant symbol separately. One symbol's reference result cannot
-prove the class complete. If Architect used bounded source fallback, verify the
-evidence records the correct prior LSP operation and its missing relationship,
-limits candidate search to the identified owning file or module, and
-semantically verifies every candidate; text matches alone are not evidence.
+searched every relevant symbol separately. One symbol's results cannot prove
+the class complete. Verify that each recorded search covers every spelling that
+can reach the symbol and that every match was read and classified; unread text
+matches are not evidence.
 
 Verify relationship evidence for the plan (record it under Relationship Evidence):
 
 - Every definition, reference, caller, callee, or implementation relationship
   the design depends on must cite its source in `architecture-evidence.md` or
-  the plan: an LSP operation, runtime evidence, verified bounded source fallback,
-  an external boundary, a generated boundary, or an explicit unresolved status.
-  A decision-bearing relationship with no source, or supported only by text
-  matches, is `request_changes`.
-- Re-run the LSP query for each decision-bearing relationship (the callers of a
-  changed surface, the implementations of a changed trait or interface, the
-  producers and consumers of changed data) and compare it with the recorded
-  result. A missing caller, implementation, or consumer is `request_changes`.
-- Record each relationship checked, its recorded source, and your re-query
-  result. A relationship that LSP could not re-verify is listed as such; it does
-  not count as verified.
+  the plan: a recorded search with its pattern and scope, runtime evidence, an
+  external boundary, a generated boundary, or an explicit unresolved status.
+  A decision-bearing relationship with no source, or supported only by unread
+  text matches, is `request_changes`.
+- Re-run the recorded search, and any spelling it omitted, for each
+  decision-bearing relationship (the callers of a changed surface, the
+  implementations of a changed trait or interface, the producers and consumers
+  of changed data), read the matches, and compare them with the recorded result.
+  A missing caller, implementation, or consumer is `request_changes`.
+- Record each relationship checked, its recorded source, and your re-search
+  result. A relationship you could not re-verify is listed as such; it does not
+  count as verified.
 
 Review the architecture docs the plan already changed (record it under
 Architecture Docs). Read every doc named in Docs Impact and the diff the task
@@ -356,8 +357,9 @@ Before deciding:
   contract changes, read its project-owned callers, consumers, readers,
   writers, and adjacent completion, failure, cancellation, retry, recovery, and
   cleanup paths. Find the callers and implementations of every changed callable
-  or type with LSP references and implementations, not text search, and record
-  under Callers And Public Surface any that LSP could not resolve.
+  or type with exact searches over the whole project source tree for every
+  spelling that can reach it, read every match, and record under Callers And
+  Public Surface any relationship the searches could not establish.
 - Keep this reading bounded to behavior affected by the named commits. Do
   not expand review to unrelated code, the whole task, whole branch, or PR.
 - Derive applicable boundary and failure cases from the actual changed behavior.

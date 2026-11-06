@@ -1,5 +1,5 @@
 import type { RoleName } from "../../shared/types/role.js";
-import { roleRuntimeDisallowedTools, roleUsesLsp } from "../role-tool-policy.js";
+import { roleRuntimeDisallowedTools, roleUsesRuntimeDenyList } from "../role-tool-policy.js";
 import {
   isCodexBridgeSessionModel,
   type ClaudePermissionMode,
@@ -21,8 +21,7 @@ export interface ClaudeAdapter {
     model?: SessionModel,
     effort?: SessionEffort,
     settingsOverride?: Record<string, unknown>,
-    appendSystemPrompt?: string,
-    pluginDirs?: string[]
+    appendSystemPrompt?: string
   ): { command: string; args: string[]; display: string };
 }
 
@@ -46,10 +45,9 @@ export function createClaudeAdapter(runner: CommandRunner): ClaudeAdapter {
 
       return result.stdout.trim();
     },
-    buildRoleStartCommand(role, command = "claude", permissionMode = "default", claudeSessionId, resume = false, model = "default", effort = "default", settingsOverride, appendSystemPrompt, pluginDirs = []) {
-      const args = pluginDirs.flatMap((pluginDir) => ["--plugin-dir", pluginDir]);
-      const lspEnabled = roleUsesLsp(role) && pluginDirs.length > 0;
-      if (lspEnabled) {
+    buildRoleStartCommand(role, command = "claude", permissionMode = "default", claudeSessionId, resume = false, model = "default", effort = "default", settingsOverride, appendSystemPrompt) {
+      const args: string[] = [];
+      if (roleUsesRuntimeDenyList(role)) {
         args.push("--disallowedTools", roleRuntimeDisallowedTools(role).join(","));
       } else {
         args.push("--allowedTools", "Glob,Grep");

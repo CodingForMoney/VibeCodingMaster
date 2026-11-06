@@ -50,7 +50,7 @@ import { createJobGuardService } from "../../../../src/backend/services/job-guar
 import { createWorkflowControlService } from "../../../../src/backend/services/workflow-control-service.js";
 import { readVcmPackageVersion } from "../../../../src/backend/app-version.js";
 import type { RoleName } from "../../../../src/shared/types/role.js";
-import { roleRuntimeDisallowedTools, roleUsesLsp } from "../../../../src/backend/role-tool-policy.js";
+import { roleRuntimeDisallowedTools, roleUsesRuntimeDenyList } from "../../../../src/backend/role-tool-policy.js";
 import {
   isCodexBridgeSessionModel,
   type ClaudePermissionMode,
@@ -139,7 +139,6 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
   });
   const harnessService = createHarnessService({
     fs: fsAdapter,
-    commandRunner: runner,
     git,
     runtime: mockRuntime,
     harnessEngineerSessions: sessionService,
@@ -458,10 +457,9 @@ function createMockClaudeAdapter(): ClaudeAdapter {
     async getVersion() {
       return "mock-claude-code/0.0.0";
     },
-    buildRoleStartCommand(role, command = "claude", permissionMode = "default", claudeSessionId, resume = false, model = "default", effort = "default", settingsOverride, appendSystemPrompt, pluginDirs = []) {
-      const args = pluginDirs.flatMap((pluginDir) => ["--plugin-dir", pluginDir]);
-      const lspEnabled = roleUsesLsp(role) && pluginDirs.length > 0;
-      if (lspEnabled) {
+    buildRoleStartCommand(role, command = "claude", permissionMode = "default", claudeSessionId, resume = false, model = "default", effort = "default", settingsOverride, appendSystemPrompt) {
+      const args: string[] = [];
+      if (roleUsesRuntimeDenyList(role)) {
         args.push("--disallowedTools", roleRuntimeDisallowedTools(role).join(","));
       } else {
         args.push("--allowedTools", "Glob,Grep");

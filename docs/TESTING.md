@@ -101,18 +101,18 @@ Notes:
 - `src/backend/templates/harness/**` change: L0 + `npm test` (harness template
   sync and harness service/route tests guard these), because output ships into
   downstream repos.
-- Code-navigation or Harness code-intelligence changes: run
+- Code-navigation or role tool-policy changes: run
   `claude-adapter.test.ts`, `session-service.test.ts`,
-  `harness-service.test.ts`, `harness-templates-sync.test.ts`,
-  `harness-studio-layout.test.ts`, and `codex-bridge-integration.e2e.test.ts`. Verify the
-  bundled plugin loads only for Architect on native and Bridge launches; Coder and
-  Reviewer do not load the plugin or preload `vcm-code-navigation`; Architect
-  frontmatter preloads the skill; Architect queries accessors, backing fields,
-  trait items, implementations, wrappers, and aliases as separate symbols and
-  may use bounded source search only after recording a demonstrably partial LSP
-  query; Reviewer rejects a complete-class claim based on one symbol alone; the
-  shared PreToolUse guard permits text search while continuing to reject
-  background and unsupervised Bash execution;
+  `harness-service.test.ts`, `harness-templates-sync.test.ts`, and
+  `codex-bridge-integration.e2e.test.ts`. Verify that no role launch loads a
+  plugin or language server; Architect and Reviewer keep their runtime tool deny
+  list on native and Bridge launches; Coder and Reviewer do not preload
+  `vcm-code-navigation`; Architect frontmatter preloads the skill; Architect
+  searches accessors, backing fields, trait items, implementations, wrappers,
+  and aliases as separate symbols and records each search; Reviewer reruns the
+  recorded searches and rejects a complete-class claim based on one symbol
+  alone; the shared PreToolUse guard permits text search while continuing to
+  reject background and unsupervised Bash execution;
   Architect semantic-navigation rules stay in all installed copies;
   language detection uses task-worktree indexes and manifests; bounded probes
   distinguish missing, broken, and runnable servers without claiming workspace
@@ -268,13 +268,7 @@ services with controlled runtime doubles:
   all-Harness ranges, review-input hashes, and HEAD checkpoint advancement.
 - Gate Git unit regressions cover multi-second retries for status, HEAD, log,
   show, and ancestor queries, command-scoped repository trust, persistent errors,
-  and expected negative results that must not hide execution failures. Architect
-  launch regressions cover LSP notices on start/resume, repaired-server detection
-  on restart, and preservation of the caller's system context. LSP proxy
-  regressions drive a fake language server through `vcm-lsp-proxy.mjs` to cover
-  holding queries during indexing, the explicit not-ready error, cancellation,
-  progress handling for clients that do not request it, and exiting with the
-  server.
+  and expected negative results that must not hide execution failures.
 - Gate Review cancellation, Reviewer restart, exact request ownership, and
   protection against cancelled-request reports overwriting replacement state.
 - Tester `incomplete` report validation and backend refusal to start

@@ -43,7 +43,6 @@ import { createJobGuardService } from "./services/job-guard-service.js";
 import { createProjectService, type ProjectService } from "./services/project-service.js";
 import { createSessionRegistry } from "./runtime/session-registry.js";
 import { createSessionService, type SessionService } from "./services/session-service.js";
-import { createHarnessCodeIntelligenceDetector } from "./services/code-intelligence-service.js";
 import { createMessageService, type MessageService } from "./services/message-service.js";
 import { createRoundService, type RoundService } from "./services/round-service.js";
 import { createRuntimeCoordinatorService, type RuntimeCoordinatorService } from "./services/runtime-coordinator-service.js";
@@ -324,7 +323,6 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   });
   const taskService = createTaskService({ fs, git, artifactService, projectService });
   const taskWorkflowService = createTaskWorkflowService({ fs });
-  const codeIntelligenceDetector = createHarnessCodeIntelligenceDetector(fs, { runner });
   const sessionService = createSessionService({
     fs,
     runtime,
@@ -334,13 +332,11 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     projectService,
     taskService,
     taskWorkflowService,
-    codeIntelligenceDetector,
     codexBridgeIntegration,
     apiUrl: options.apiUrl
   });
   const harnessService = createHarnessService({
     fs,
-    commandRunner: runner,
     git,
     runtime,
     harnessEngineerSessions: sessionService,

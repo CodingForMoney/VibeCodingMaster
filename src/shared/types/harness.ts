@@ -58,34 +58,6 @@ export interface HarnessPlannedChange {
   reason: string;
 }
 
-export type HarnessCodeIntelligenceLanguage = "rust" | "typescript" | "python" | "go" | "cpp" | "java";
-export type HarnessCodeIntelligenceState = "available" | "partial" | "missing" | "not_detected";
-export type HarnessCodeIntelligenceLanguageState =
-  | "server_runnable"
-  | "plugin_missing"
-  | "server_missing"
-  | "server_failed"
-  | "server_unverified";
-
-export interface HarnessCodeIntelligenceLanguageStatus {
-  language: HarnessCodeIntelligenceLanguage;
-  label: string;
-  serverCommand: string;
-  pluginName: string;
-  detected: true;
-  pluginReady: boolean;
-  serverFound: boolean;
-  serverRunnable: boolean;
-  state: HarnessCodeIntelligenceLanguageState;
-  error?: string;
-  detectedBy: string[];
-}
-
-export interface HarnessCodeIntelligenceStatus {
-  state: HarnessCodeIntelligenceState;
-  languages: HarnessCodeIntelligenceLanguageStatus[];
-}
-
 export interface HarnessTaskRequest {
   taskSlug: string;
 }
@@ -112,7 +84,6 @@ export interface HarnessStatusReport {
   needsApply: boolean;
   plannedChanges: HarnessPlannedChange[];
   warnings: string[];
-  codeIntelligence?: HarnessCodeIntelligenceStatus;
 }
 
 export type RepositoryDiffFileStatus = "added" | "copied" | "deleted" | "modified" | "renamed" | "untracked" | "unknown";

@@ -180,44 +180,24 @@ to project languages and conventions, and subsequent VCM updates preserve them:
   externally consumed surfaces. Treat it as the full public-surface listing;
   module docs explain meaning and design intent rather than duplicating it.
 
-VCM ships the local `vcm-lsp-bridge` Claude Code plugin. Session Service passes
-it through `--plugin-dir` and enables the LSP tool for Architect and Reviewer
-sessions on both native Claude and Codex Bridge launches: Architect makes
-semantic code claims and Reviewer re-verifies them at Gate Review. Architect's
-evidence worker inherits the tool through a deny-list tool policy. Only runnable
-project language servers are registered. Launches re-probe the environment and
-append language availability, missing-server errors, and installation hints to
-the role's system context without replacing its existing restart context.
-Missing required servers are environment prerequisites: the role reports the
-affected work instead of substituting source-text search, then restarts after
-environment repair. Other roles do not load the plugin.
-
-Each registered server runs behind `vcm-lsp-proxy.mjs`, which the per-task plugin
-manifest names as the server command. The proxy enables work-done progress and
-rust-analyzer quiescence reporting, answers those notifications for the client,
-and holds navigation queries (definitions, references, implementations, symbols,
-call hierarchy, hover) while the server reports loading or indexing. A query
-still waiting after 180 seconds fails with an explicit "still indexing" error, so
-an incomplete index never reads as an empty result. All other traffic passes
-through unchanged. The proxy exits with its server, so Claude Code's crash
-restart still applies.
-Each bundled language server may restart up to three times after a crash. The
-Rust server disables its redundant check-on-save run because VCM roles execute
-the required validation explicitly. Server restart recovers a terminated LSP
-process.
+VCM roles navigate code without a language server: one per Architect and
+Reviewer session would hold a full semantic index in memory for the whole task,
+several gigabytes per session on a large Rust workspace, while most of the task
+runs in other roles.
 Architect preloads the `vcm-code-navigation` skill through Agent frontmatter.
 
-Architect uses LSP semantic navigation for definitions, references,
-implementations, and call relationships, then Read the resolved code. Reference
-results are symbol-specific, so accessors, backing fields, trait declarations,
-implementation methods, wrappers, and aliases are queried separately before a
-semantic class is treated as complete. When the correct LSP operation is
-demonstrably partial for a relationship it cannot model or expose, Architect may
-use exact source-text search only inside the already identified owning file or
-module to locate candidates; every candidate is read and semantically verified,
-and the text match is not relationship evidence. Unresolved project-owned
-relationships remain unresolved. Coder and Reviewer use generated context, Glob,
-Grep, and complete source reads without starting separate language servers. The
+Architect locates definitions, references, implementations, and call
+relationships with exact source-text search over the whole project source tree,
+then reads and classifies every match. A search covers every spelling that can
+reach the symbol: direct and method calls, path-qualified uses, imports and
+re-exports, renaming aliases, macro invocations, and string or configuration
+names used for dispatch. Accessors, backing fields, trait declarations,
+implementation methods, wrappers, and aliases are searched separately before a
+semantic class is treated as complete, and every relationship records its
+search pattern and scope so Reviewer can rerun it. Relationships that a macro,
+code generation, configuration-excluded code, or runtime dispatch hides from
+search remain unresolved with their reason. Coder and Reviewer use the same
+generated context, Glob, Grep, and complete source reads. The
 shared Bash PreToolUse guard supervises Bash execution but does not prohibit text
 search. A separate Agent PreToolUse guard permits Architect to invoke only
 `vcm-architect-evidence-worker`, `vcm-architect-scaffold-worker`, and
@@ -234,20 +214,6 @@ standalone Debug or Diagnosis flow keeps only its own sources. Reviewer treats
 every repair hunk as fresh code. Changed tests remain reviewable inputs; VCM
 does not require the test tree to stay unchanged because legitimate repairs may
 strengthen or add regression coverage.
-
-`code-intelligence-service` derives project languages from the active task
-worktree's root manifests and `module-index.json`. It validates the bundled
-plugin declaration, resolves the matching language-server executable from the
-backend `PATH`, and runs a bounded version probe. Probe results are cached for
-the backend process; detection does not start a persistent language server or
-scan the repository recursively. A successful probe means the server is
-runnable, not that a role workspace is indexed or semantically ready. Architect
-uses bounded workspace-query retries through `vcm-code-navigation`; the skill
-does not issue an unconditional warm-up query. Harness Studio renders server
-availability and the exact backend diagnostic.
-The project runtime, not VCM, owns installation of
-`rust-analyzer`, `typescript-language-server`, `pyright-langserver`, `gopls`,
-`clangd`, or `jdtls`.
 
 ## Durable Documentation Ownership
 
@@ -582,7 +548,7 @@ installed definitions differ. Defaults keep workers cheaper than the Architect:
 evidence `opus`/`high`, scaffold `sonnet`/`medium`, validation `sonnet`/`low`.
 Evidence workers
 perform bounded supporting reads and write factual reports; Architect personally
-reads and LSP-verifies decision-bearing code before accepting those facts.
+reads and verifies decision-bearing code before accepting those facts.
 Scaffold workers execute the complete plan's exact scaffold and mechanical
 text/configuration changes. Validation workers execute only commands already
 selected by Architect and preserve their raw results. Architect owns every
