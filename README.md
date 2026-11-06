@@ -23,6 +23,9 @@ orchestration, translation, harness setup, and mobile gateway control.
 - Claude Code installed and available as `claude` (verified with 2.1.310 or
   newer; VCM shows a Repository warning when an older release is detected)
 - Claude Code authenticated in the same environment where VCM runs
+- A Git commit identity (`user.name` and `user.email`) in the same environment.
+  When either is missing, VCM and its roles commit as `VCM <vcm@localhost>`
+  and the Repository panel shows a warning; VCM never changes your Git config.
 
 For Linux containers, make sure common native build/runtime tools are available:
 

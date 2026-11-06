@@ -20,6 +20,18 @@ import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem
 const TASK_WORKTREE = "/repo/.claude/worktrees/demo-task";
 
 describe("createSessionService", () => {
+  it("gives role sessions the default Git identity when the worktree has none", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const service = createTestSessionService(fs, runtimeInputs, [], {
+      gitIdentityEnv: { GIT_AUTHOR_NAME: "VCM", GIT_COMMITTER_NAME: "VCM" }
+    });
+
+    await service.startRoleSession("/repo", "demo-task", "coder");
+
+    expect(runtimeInputs[0]?.env).toMatchObject({ GIT_AUTHOR_NAME: "VCM", GIT_COMMITTER_NAME: "VCM" });
+  });
+
   it("offers only the four Claude model choices", () => {
     expect(CLAUDE_MODEL_OPTIONS.map((option) => [option.label, option.value])).toEqual([
       ["Default", "default"],
@@ -1544,6 +1556,7 @@ function createTestSessionService(
     deadProcessCalls?: number[];
     dropBeforeWriteCalls?: number[];
     workflowContext?: string;
+    gitIdentityEnv?: NodeJS.ProcessEnv;
     onRuntimeStop?: (sessionId: string) => Promise<void> | void;
   } = {}
 ) {
@@ -1665,6 +1678,12 @@ function createTestSessionService(
       }
     } : undefined,
     apiUrl: "http://127.0.0.1:4173",
+    gitIdentity: options.gitIdentityEnv ? {
+      async resolveCommitIdentity(repoRoot) {
+        expect(repoRoot).toBe(worktreePath);
+        return { name: "VCM", email: "vcm@localhost", defaulted: ["name", "email"], env: options.gitIdentityEnv! };
+      }
+    } : undefined,
     sandboxMode: options.sandboxMode,
     isProcessAlive: (pid) => !deadProcessPids.has(pid),
     now: () => "2026-05-29T00:00:00.000Z"

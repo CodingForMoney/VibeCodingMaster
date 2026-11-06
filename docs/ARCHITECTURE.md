@@ -45,6 +45,14 @@ layers plus supporting tools.
   costs only its own size; the exact tail is cut only when a subscriber attaches.
 - `adapters/`: side-effect boundaries — `claude-adapter`,
   `codex-bridge-adapter`, `git-adapter`, `command-runner`, `filesystem`.
+  `git-adapter` resolves the commit identity per repository. When Git config and
+  the environment leave `user.name` or `user.email` unset, VCM fills only that
+  part with `VCM <vcm@localhost>` through `GIT_AUTHOR_*` and `GIT_COMMITTER_*`
+  for its own commits and every role session, so Git neither refuses to commit
+  nor invents an identity from the OS account and hostname. Configured
+  identities, including repository and conditional-include ones, always win.
+  VCM never writes Git config; startup logs and the Repository warnings report
+  the fallback.
 - `gateway/`: mobile gateway service plus channel implementations
   (Weixin iLink, Lark) and command parsing; channel connection is gated by a
   runtime, default-off switch. Detailed sub-area design lives in

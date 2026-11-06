@@ -7,7 +7,7 @@ import type {
 } from "../../shared/types/project.js";
 import { VcmError } from "../errors.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
-import type { GitAdapter } from "../adapters/git-adapter.js";
+import { renderGitIdentityWarning, type GitAdapter } from "../adapters/git-adapter.js";
 import type { AppSettingsService } from "./app-settings-service.js";
 import type { ClaudeVersionCheck } from "./claude-version-check.js";
 
@@ -154,6 +154,14 @@ export function createProjectService(deps: ProjectServiceDeps): ProjectService {
     });
     if (claudeVersionWarning) {
       warnings.push(claudeVersionWarning);
+    }
+    try {
+      const identity = await deps.git.resolveCommitIdentity(repoRoot);
+      if (identity.defaulted.length > 0) {
+        warnings.push(renderGitIdentityWarning("this repository", identity));
+      }
+    } catch (caught) {
+      warnings.push(`Unable to read the Git commit identity. ${getErrorHint(caught)}`);
     }
     let branch = "unknown";
     let isDirty = false;

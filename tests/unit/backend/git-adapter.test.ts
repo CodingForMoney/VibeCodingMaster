@@ -3,11 +3,76 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createGitAdapter } from "../../../src/backend/adapters/git-adapter.js";
-import type {
-  CommandResult,
-  CommandRunner,
-  CommandRunnerOptions
+import {
+  createCommandRunner,
+  type CommandResult,
+  type CommandRunner,
+  type CommandRunnerOptions
 } from "../../../src/backend/adapters/command-runner.js";
+
+describe("createGitAdapter commit identity", () => {
+  const tempDirs: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(tempDirs.map((tempDir) => fs.rm(tempDir, { recursive: true, force: true })));
+    tempDirs.length = 0;
+  });
+
+  // Runs real Git with no global or system config so only the repository's own
+  // config can supply an identity.
+  async function createIsolatedRepo(localConfig: Record<string, string> = {}) {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "vcm-git-identity-"));
+    tempDirs.push(root);
+    const isolation = { GIT_CONFIG_GLOBAL: path.join(root, "empty-gitconfig"), GIT_CONFIG_NOSYSTEM: "1" };
+    await fs.writeFile(isolation.GIT_CONFIG_GLOBAL, "");
+    const real = createCommandRunner();
+    const runner: CommandRunner = {
+      run: (command, args, options = {}) => real.run(command, args, { ...options, env: { ...options.env, ...isolation } })
+    };
+    const repoRoot = path.join(root, "repo");
+    await fs.mkdir(repoRoot);
+    await runner.run("git", ["init", "-q"], { cwd: repoRoot });
+    for (const [key, value] of Object.entries(localConfig)) {
+      await runner.run("git", ["config", key, value], { cwd: repoRoot });
+    }
+    await fs.writeFile(path.join(repoRoot, "file.txt"), "content\n");
+    await runner.run("git", ["add", "file.txt"], { cwd: repoRoot });
+    return { adapter: createGitAdapter(runner), runner, repoRoot };
+  }
+
+  it("commits with the default identity when Git has none configured", async () => {
+    const { adapter, runner, repoRoot } = await createIsolatedRepo();
+
+    const identity = await adapter.resolveCommitIdentity(repoRoot);
+    expect(identity).toMatchObject({ name: "VCM", email: "vcm@localhost", defaulted: ["name", "email"] });
+    expect(identity.env).toEqual({
+      GIT_AUTHOR_NAME: "VCM",
+      GIT_COMMITTER_NAME: "VCM",
+      GIT_AUTHOR_EMAIL: "vcm@localhost",
+      GIT_COMMITTER_EMAIL: "vcm@localhost"
+    });
+    await adapter.commit(repoRoot, "initial");
+    const author = await runner.run("git", ["log", "-1", "--format=%an <%ae> | %cn <%ce>"], { cwd: repoRoot });
+    expect(author.stdout.trim()).toBe("VCM <vcm@localhost> | VCM <vcm@localhost>");
+  });
+
+  it("keeps a configured repository identity and fills only the missing part", async () => {
+    const configured = await createIsolatedRepo({ "user.name": "Dev", "user.email": "dev@example.com" });
+    await expect(configured.adapter.resolveCommitIdentity(configured.repoRoot))
+      .resolves.toEqual({ name: "Dev", email: "dev@example.com", defaulted: [], env: {} });
+    await configured.adapter.commit(configured.repoRoot, "initial");
+    const author = await configured.runner.run("git", ["log", "-1", "--format=%an <%ae>"], { cwd: configured.repoRoot });
+    expect(author.stdout.trim()).toBe("Dev <dev@example.com>");
+
+    const partial = await createIsolatedRepo({ "user.name": "Dev" });
+    await expect(partial.adapter.resolveCommitIdentity(partial.repoRoot)).resolves.toEqual({
+      name: "Dev",
+      email: "vcm@localhost",
+      defaulted: ["email"],
+      env: { GIT_AUTHOR_EMAIL: "vcm@localhost", GIT_COMMITTER_EMAIL: "vcm@localhost" }
+    });
+  });
+});
 
 describe("createGitAdapter", () => {
   const tempDirs: string[] = [];
@@ -98,8 +163,11 @@ describe("createGitAdapter", () => {
 
     expect(calls[0]).toMatchObject({ command: "git", options: { cwd: "/workspace" } });
     expect(calls[0]?.args.slice(-4)).toEqual(["add", "--", "CLAUDE.md", ".claude/settings.json"]);
-    expect(calls[1]?.args.slice(-3)).toEqual(["commit", "-m", "chore: update VCM harness"]);
-    expect(calls[2]?.args.slice(-2)).toEqual(["rev-parse", "HEAD"]);
+    const commitIndex = calls.findIndex((call) => call.args.includes("commit"));
+    expect(calls[commitIndex]?.args.slice(-3)).toEqual(["commit", "-m", "chore: update VCM harness"]);
+    // The stub reports no configured identity, so the commit carries the default.
+    expect(calls[commitIndex]?.options.env).toMatchObject({ GIT_AUTHOR_NAME: "VCM", GIT_COMMITTER_EMAIL: "vcm@localhost" });
+    expect(calls[commitIndex + 1]?.args.slice(-2)).toEqual(["rev-parse", "HEAD"]);
   });
 
   it("commits only the requested memory host files", async () => {
@@ -120,7 +188,7 @@ describe("createGitAdapter", () => {
       ["CLAUDE.md", ".claude/agents/coder.md"]
     )).resolves.toBe("memory123");
 
-    expect(calls[0]?.args.slice(-7)).toEqual([
+    expect(calls.find((call) => call.args.includes("commit"))?.args.slice(-7)).toEqual([
       "commit",
       "--only",
       "-m",

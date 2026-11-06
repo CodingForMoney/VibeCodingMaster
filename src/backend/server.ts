@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyInstance } from "fastify";
@@ -11,7 +12,7 @@ import { createCommandRunner } from "./adapters/command-runner.js";
 import { createCommandDispatcher, type CommandDispatcher } from "./services/command-dispatcher.js";
 import { createClaudeHookService, type ClaudeHookService } from "./services/claude-hook-service.js";
 import { createClaudeVersionCheck } from "./services/claude-version-check.js";
-import { createGitAdapter } from "./adapters/git-adapter.js";
+import { createGitAdapter, renderGitIdentityWarning } from "./adapters/git-adapter.js";
 import { createAppSettingsService, type AppSettingsService } from "./services/app-settings-service.js";
 import {
   createCodexBridgeIntegrationService,
@@ -275,6 +276,19 @@ async function cleanupRecentTranslationRuntime(deps: Pick<ServerDeps, "projectSe
   ));
 }
 
+// Projects can still configure their own identity; this only reports the
+// identity VCM falls back to outside any repository-specific Git config.
+async function warnOnDefaultGitIdentity(): Promise<void> {
+  try {
+    const identity = await createGitAdapter(createCommandRunner()).resolveCommitIdentity(os.homedir());
+    if (identity.defaulted.length > 0) {
+      console.warn(`[VCM] ${renderGitIdentityWarning("the VCM user", identity)}`);
+    }
+  } catch {
+    // Project summaries report identity problems per repository.
+  }
+}
+
 export async function startServer(options: CreateServerOptions = {}): Promise<{ url: string; close(): Promise<void> }> {
   const host = options.host ?? "127.0.0.1";
   const port = options.port ?? 4173;
@@ -283,6 +297,7 @@ export async function startServer(options: CreateServerOptions = {}): Promise<{ 
   });
   const app = await createServer(deps, options);
   await app.listen({ host, port });
+  await warnOnDefaultGitIdentity();
 
   return {
     url: `http://${host}:${port}`,
@@ -324,6 +339,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   const taskService = createTaskService({ fs, git, artifactService, projectService });
   const taskWorkflowService = createTaskWorkflowService({ fs });
   const sessionService = createSessionService({
+    gitIdentity: git,
     fs,
     runtime,
     registry,

@@ -51,6 +51,20 @@ describe("createProjectService", () => {
     ]);
   });
 
+  it("warns when commits fall back to the default Git identity", async () => {
+    const service = createProjectService({
+      fs: createMemoryFs(new Set(["/workspace"])),
+      git: createGitAdapterStub([], { defaultedIdentity: true }),
+      appSettings: createAppSettingsStub()
+    });
+
+    const project = await service.connectProject({ repoPath: "/workspace" });
+
+    expect(project.warnings).toEqual([
+      expect.stringContaining("Git user.name and user.email is not configured for this repository, so VCM and role commits use VCM <vcm@localhost>.")
+    ]);
+  });
+
   it("surfaces the Claude Code version warning and re-probes it on connect", async () => {
     const refreshes: Array<boolean | undefined> = [];
     const service = createProjectService({
@@ -175,11 +189,16 @@ function createMemoryFs(existingPaths: Set<string>, files = new Map<string, stri
 
 function createGitAdapterStub(
   checkedRepos: string[],
-  options: { failMetadata?: boolean } = {}
+  options: { failMetadata?: boolean; defaultedIdentity?: boolean } = {}
 ): GitAdapter & { pullCalls: string[] } {
   const pullCalls: string[] = [];
   return {
     pullCalls,
+    async resolveCommitIdentity() {
+      return options.defaultedIdentity
+        ? { name: "VCM", email: "vcm@localhost", defaulted: ["name", "email"], env: {} }
+        : { name: "Dev", email: "dev@example.com", defaulted: [], env: {} };
+    },
     async checkRepo(repoRoot) {
       checkedRepos.push(repoRoot);
       return { isRepo: true };

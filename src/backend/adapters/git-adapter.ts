@@ -32,10 +32,35 @@ export interface GitAdapter {
   addPaths(repoRoot: string, paths: string[]): Promise<void>;
   commit(repoRoot: string, message: string): Promise<string>;
   commitPaths(repoRoot: string, message: string, paths: string[]): Promise<string>;
+  resolveCommitIdentity(repoRoot: string): Promise<GitCommitIdentity>;
   createWorktree(input: CreateGitWorktreeInput): Promise<void>;
   removeWorktree(repoRoot: string, worktreePath: string, options?: { force?: boolean }): Promise<void>;
   deleteBranch(repoRoot: string, branch: string, options?: { force?: boolean }): Promise<void>;
   pullFastForward(repoRoot: string): Promise<GitPullResult>;
+}
+
+// Commit identity used when neither Git config nor the environment provides one.
+// Without it, Git either refuses to commit or invents an identity from the OS
+// account and hostname, which silently attributes commits to a machine name.
+export const DEFAULT_GIT_IDENTITY = { name: "VCM", email: "vcm@localhost" } as const;
+
+const GIT_IDENTITY_CACHE_TTL_MS = 30 * 1000;
+
+export interface GitCommitIdentity {
+  name: string;
+  email: string;
+  // Identity parts filled from DEFAULT_GIT_IDENTITY.
+  defaulted: Array<"name" | "email">;
+  // GIT_AUTHOR_* and GIT_COMMITTER_* values for the defaulted parts only, so
+  // configured identities, including repository and includeIf ones, still win.
+  env: NodeJS.ProcessEnv;
+}
+
+export function renderGitIdentityWarning(location: string, identity: GitCommitIdentity): string {
+  const missing = identity.defaulted.map((part) => `user.${part}`).join(" and ");
+  return `Git ${missing} is not configured for ${location}, so VCM and role commits use ${identity.name} <${identity.email}>. `
+    + "Set your own identity in the environment that runs VCM: "
+    + "git config --global user.name \"<name>\" and git config --global user.email \"<email>\".";
 }
 
 export interface GitAheadBehind {
@@ -67,6 +92,8 @@ export interface CreateGitWorktreeInput {
 }
 
 export function createGitAdapter(runner: CommandRunner): GitAdapter {
+  const identityCache = new Map<string, { checkedAt: number; identity: GitCommitIdentity }>();
+
   return {
     async checkRepo(repoRoot) {
       return checkGitMarker(repoRoot);
@@ -382,7 +409,7 @@ export function createGitAdapter(runner: CommandRunner): GitAdapter {
       }
     },
     async commit(repoRoot, message) {
-      const result = await runGit(runner, repoRoot, ["commit", "-m", message]);
+      const result = await runGit(runner, repoRoot, ["commit", "-m", message], (await this.resolveCommitIdentity(repoRoot)).env);
       if (result.exitCode !== 0) {
         throw new VcmError({
           code: "GIT_COMMIT_FAILED",
@@ -398,7 +425,12 @@ export function createGitAdapter(runner: CommandRunner): GitAdapter {
       if (paths.length === 0) {
         return this.getHeadCommit(repoRoot);
       }
-      const result = await runGit(runner, repoRoot, ["commit", "--only", "-m", message, "--", ...paths]);
+      const result = await runGit(
+        runner,
+        repoRoot,
+        ["commit", "--only", "-m", message, "--", ...paths],
+        (await this.resolveCommitIdentity(repoRoot)).env
+      );
       if (result.exitCode !== 0) {
         throw new VcmError({
           code: "GIT_COMMIT_FAILED",
@@ -409,6 +441,29 @@ export function createGitAdapter(runner: CommandRunner): GitAdapter {
       }
 
       return this.getHeadCommit(repoRoot);
+    },
+    async resolveCommitIdentity(repoRoot) {
+      const cached = identityCache.get(repoRoot);
+      if (cached && Date.now() - cached.checkedAt < GIT_IDENTITY_CACHE_TTL_MS) {
+        return cached.identity;
+      }
+      const identity: GitCommitIdentity = { name: "", email: "", defaulted: [], env: {} };
+      for (const part of ["name", "email"] as const) {
+        const result = await runGit(runner, repoRoot, ["config", "--get", `user.${part}`]);
+        const configured = result.exitCode === 0 ? result.stdout.trim() : "";
+        const variables = [`GIT_AUTHOR_${part.toUpperCase()}`, `GIT_COMMITTER_${part.toUpperCase()}`];
+        for (const variable of variables) {
+          if (!configured && !process.env[variable]) {
+            identity.env[variable] = DEFAULT_GIT_IDENTITY[part];
+          }
+        }
+        if (variables.some((variable) => identity.env[variable])) {
+          identity.defaulted.push(part);
+        }
+        identity[part] = process.env[variables[0]!] || configured || DEFAULT_GIT_IDENTITY[part];
+      }
+      identityCache.set(repoRoot, { checkedAt: Date.now(), identity });
+      return identity;
     },
     async createWorktree(input) {
       const result = await runGit(runner, input.repoRoot, [
@@ -539,8 +594,8 @@ async function pathExists(targetPath: string): Promise<boolean> {
   }
 }
 
-async function runGit(runner: CommandRunner, repoRoot: string, args: string[]) {
-  return runner.run("git", [...await buildSafeDirectoryArgs(repoRoot), ...args], { cwd: repoRoot });
+async function runGit(runner: CommandRunner, repoRoot: string, args: string[], env?: NodeJS.ProcessEnv) {
+  return runner.run("git", [...await buildSafeDirectoryArgs(repoRoot), ...args], { cwd: repoRoot, env });
 }
 
 function parseWorktreePaths(output: string): string[] {

@@ -16,6 +16,7 @@ import { VcmError } from "../errors.js";
 import { resolveRepoPath } from "../adapters/filesystem.js";
 import type { ClaudeAdapter } from "../adapters/claude-adapter.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
+import type { GitAdapter } from "../adapters/git-adapter.js";
 import type { SessionRegistry } from "../runtime/session-registry.js";
 import type { TerminalRuntime, TerminalSession } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
@@ -76,6 +77,8 @@ export interface SessionServiceDeps {
     CodexBridgeIntegrationService,
     "getLaunchEnvironment" | "getLaunchSettingsOverride"
   >;
+  // Fills a missing commit identity for the role's Git commits.
+  gitIdentity?: Pick<GitAdapter, "resolveCommitIdentity">;
   apiUrl?: string;
   sandboxMode?: string;
   isProcessAlive?: (pid: number) => boolean;
@@ -251,6 +254,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       env: withClaudeCodeRuntimeEnv({
         VCM_API_URL: deps.apiUrl,
         VCM_BASE_REPO_ROOT: repoRoot,
+        ...await gitIdentityEnvironment(taskRepoRoot),
         VCM_TASK_REPO_ROOT: taskRepoRoot,
         VCM_TASK_SLUG: taskSlug,
         VCM_ROLE: role,
@@ -404,6 +408,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       env: withClaudeCodeRuntimeEnv({
         VCM_API_URL: deps.apiUrl,
         VCM_BASE_REPO_ROOT: repoRoot,
+        ...await gitIdentityEnvironment(taskContext.taskRepoRoot),
         VCM_TASK_REPO_ROOT: taskContext.taskRepoRoot,
         // Project-scoped sessions report their project sentinel as VCM_TASK_SLUG so
         // hook payloads match this session's record and cannot be attributed to the
@@ -550,6 +555,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       env: withClaudeCodeRuntimeEnv({
         VCM_API_URL: deps.apiUrl,
         VCM_BASE_REPO_ROOT: repoRoot,
+        ...await gitIdentityEnvironment(taskContext.taskRepoRoot),
         VCM_TASK_REPO_ROOT: taskContext.taskRepoRoot,
         // Project-scoped sessions report their project sentinel as VCM_TASK_SLUG so
         // hook payloads match this session's record and cannot be attributed to the
@@ -647,6 +653,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
   // silent) session still proceeds best-effort. Returns "exited" if the runtime
   // session is gone or no longer running, which a resume launch treats as a
   // resume-by-id failure.
+  async function gitIdentityEnvironment(repoRoot: string): Promise<NodeJS.ProcessEnv> {
+    return deps.gitIdentity ? (await deps.gitIdentity.resolveCommitIdentity(repoRoot)).env : {};
+  }
+
   async function waitForSessionInputReady(sessionId: string): Promise<"ready" | "exited"> {
     let sawOutput = false;
     let lastOutputAt: string | undefined;
@@ -793,6 +803,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       env: withClaudeCodeRuntimeEnv({
         VCM_API_URL: deps.apiUrl,
         VCM_BASE_REPO_ROOT: repoRoot,
+        ...await gitIdentityEnvironment(targetCwd),
         VCM_TASK_REPO_ROOT: targetCwd,
         VCM_TASK_SLUG: normalizeProjectScopedRecordForPersistence(session).taskSlug,
         VCM_ROLE: session.role,
