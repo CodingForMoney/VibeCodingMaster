@@ -269,6 +269,7 @@ export function ProjectDashboard({
 
       <SidebarSection
         title="Repository"
+        warningCount={project?.warnings.length}
         open={openSidebarSection === "repository"}
         onOpenChange={(open) => {
           handleSidebarSectionChange("repository", open);
@@ -1366,21 +1367,26 @@ function MessageDialog({
   );
 }
 
-function SidebarSection({
+export function SidebarSection({
   children,
   onOpenChange,
   open,
-  title
+  title,
+  warningCount = 0
 }: {
   children: ReactNode;
   onOpenChange?(open: boolean): void;
   open: boolean;
   title: string;
+  // Shown on the header so warnings inside a collapsed section stay visible.
+  warningCount?: number;
 }) {
+  const warningLabel = warningCount === 1 ? "1 warning" : `${warningCount} warnings`;
   return (
     <section className="sidebar-section">
       <button
         aria-expanded={open}
+        aria-label={warningCount > 0 ? `${title}, ${warningLabel}` : undefined}
         className="sidebar-section-toggle"
         type="button"
         onClick={() => {
@@ -1388,6 +1394,11 @@ function SidebarSection({
         }}
       >
         <span>{title}</span>
+        {warningCount > 0 ? (
+          <span aria-hidden="true" className="sidebar-section-badge" title={warningLabel}>
+            {warningCount}
+          </span>
+        ) : null}
         <span aria-hidden="true" className="sidebar-section-chevron" />
       </button>
       {open ? <div className="sidebar-section-content">{children}</div> : null}

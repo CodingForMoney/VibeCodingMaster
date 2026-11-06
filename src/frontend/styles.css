@@ -232,6 +232,24 @@ h2 {
   text-align: left;
 }
 
+.sidebar-section-toggle:has(.sidebar-section-badge) {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.sidebar-section-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid #c87b54;
+  border-radius: 9px;
+  background: #fff4ed;
+  color: #6f3218;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 16px;
+  text-align: center;
+}
+
 .sidebar-section-toggle:hover {
   background: #f5f1e8;
 }
@@ -3695,6 +3713,12 @@ h2 {
 :root[data-theme="dark"] .session-option-field small,
 :root[data-theme="dark"] .task-create-preview small {
   color: #8b949e;
+}
+
+:root[data-theme="dark"] .sidebar-section-badge {
+  border-color: #da7b72;
+  background: #2d1518;
+  color: #ffdcd7;
 }
 
 :root[data-theme="dark"] .warnings {

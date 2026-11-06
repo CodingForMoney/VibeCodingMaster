@@ -37,7 +37,8 @@ orchestration, translation, harness setup, and mobile gateway control.
 VCM checks these programs at startup, runs a hook self-test that sends one
 request through the installed hook pipeline, and checks access to the upstream
 remote when a repository connects. Any problem appears in the startup log and
-the Repository warnings; none of them stops VCM from running. Role sessions
+the Repository warnings, and the Repository header shows how many there are
+while the section is collapsed; none of them stops VCM from running. Role sessions
 add the VCM host to `NO_PROXY`, so an `http_proxy` setting does not capture
 their hook requests.
 
