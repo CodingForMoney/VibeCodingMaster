@@ -65,7 +65,7 @@ describe("createProjectService", () => {
     ]);
   });
 
-  it("surfaces host environment warnings and re-checks them on connect", async () => {
+  it("surfaces host environment warnings and re-checks the Git remote on connect", async () => {
     const refreshes: Array<boolean | undefined> = [];
     const service = createProjectService({
       fs: createMemoryFs(new Set(["/workspace"])),
@@ -75,6 +75,10 @@ describe("createProjectService", () => {
         async getWarnings(options) {
           refreshes.push(options?.refresh);
           return ["curl is not available: spawn curl ENOENT."];
+        },
+        async getRepositoryWarnings(repoRoot, options) {
+          refreshes.push(options?.refresh);
+          return [`Git cannot reach remote "origin" for ${repoRoot}.`];
         }
       }
     });
@@ -82,9 +86,31 @@ describe("createProjectService", () => {
     const project = await service.connectProject({ repoPath: "/workspace" });
     const current = await service.getCurrentProject();
 
-    expect(project.warnings).toEqual(["curl is not available: spawn curl ENOENT."]);
-    expect(current?.warnings).toEqual(["curl is not available: spawn curl ENOENT."]);
-    expect(refreshes).toEqual([true, undefined]);
+    const expected = ["curl is not available: spawn curl ENOENT.", "Git cannot reach remote \"origin\" for /workspace."];
+    expect(project.warnings).toEqual(expected);
+    expect(current?.warnings).toEqual(expected);
+    expect(refreshes).toEqual([undefined, true, undefined, undefined]);
+  });
+
+  it("does not wait for environment checks longer than the configured wait", async () => {
+    const service = createProjectService({
+      fs: createMemoryFs(new Set(["/workspace"])),
+      git: createGitAdapterStub([]),
+      appSettings: createAppSettingsStub(),
+      environmentCheckWaitMs: 10,
+      environmentCheck: {
+        getWarnings: () => new Promise<string[]>(() => {}),
+        async getRepositoryWarnings() {
+          return [];
+        }
+      }
+    });
+
+    const project = await service.connectProject({ repoPath: "/workspace" });
+
+    expect(project.warnings).toEqual([
+      "VCM is still checking the host environment and Git remote access. Refresh the Repository panel to see the result."
+    ]);
   });
 
   it("surfaces the Claude Code version warning and re-probes it on connect", async () => {

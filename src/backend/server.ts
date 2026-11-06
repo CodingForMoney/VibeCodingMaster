@@ -331,7 +331,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   const runner = createCommandRunner();
   const git = createGitAdapter(runner);
   const claude = createClaudeAdapter(runner);
-  const environmentCheck = createEnvironmentCheck({ runner, apiUrl: options.apiUrl });
+  const environmentCheck = createEnvironmentCheck({ runner, git, apiUrl: options.apiUrl });
   const appSettings = createAppSettingsService({ fs });
   const codexBridgeIntegration = createCodexBridgeIntegrationService({
     settings: appSettings,

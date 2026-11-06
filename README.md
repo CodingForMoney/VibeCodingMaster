@@ -22,6 +22,11 @@ orchestration, translation, harness setup, and mobile gateway control.
 - npm
 - Git 2.22 or newer
 - `sh` and `curl` (role hooks report Claude Code events to VCM through them)
+- Non-interactive credentials for the repository's upstream remote (an SSH key
+  in ssh-agent or a Git credential helper). Creating a task pulls the upstream
+  branch, and VCM runs Git without credential prompts.
+- Optional: GitHub CLI (`gh`). VCM never runs it, but when it is installed and
+  logged out VCM warns, because roles that use it will fail.
 - Claude Code installed and available as `claude` (verified with 2.1.310 or
   newer; VCM shows a Repository warning when an older release is detected)
 - Claude Code authenticated in the same environment where VCM runs
@@ -29,9 +34,10 @@ orchestration, translation, harness setup, and mobile gateway control.
   When either is missing, VCM and its roles commit as `VCM <vcm@localhost>`
   and the Repository panel shows a warning; VCM never changes your Git config.
 
-VCM checks these programs at startup and when a repository connects, and runs a
-hook self-test that sends one request through the installed hook pipeline. Any
-problem appears in the startup log and the Repository warnings. Role sessions
+VCM checks these programs at startup, runs a hook self-test that sends one
+request through the installed hook pipeline, and checks access to the upstream
+remote when a repository connects. Any problem appears in the startup log and
+the Repository warnings; none of them stops VCM from running. Role sessions
 add the VCM host to `NO_PROXY`, so an `http_proxy` setting does not capture
 their hook requests.
 

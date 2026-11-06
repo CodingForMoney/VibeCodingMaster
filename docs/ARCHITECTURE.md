@@ -54,7 +54,8 @@ layers plus supporting tools.
   VCM never writes Git config; startup logs and the Repository warnings report
   the fallback.
 - `services/environment-check`: checks the host programs VCM and role hooks run
-  (Git 2.22+, `sh`, `node` 20+ on `PATH`, `curl`), then runs the hook
+  (Git 2.22+, `sh`, `node` 20+ on `PATH`, `curl`, and `gh auth status` when
+  `gh` is installed, since VCM never runs `gh` but roles may), then runs the hook
   self-test: the installed `UserPromptSubmit` hook command, with its endpoint
   switched to `/api/hooks/probe`, runs with a role session's environment and
   must reach VCM. Installed hooks end in `|| true`, so this is the only signal
@@ -62,7 +63,14 @@ layers plus supporting tools.
   logged at startup, added to the Repository warnings, and re-probed when a
   dispatch stays unconfirmed so its failure reason says whether hooks reach
   VCM. Every role session merges the VCM API host into `NO_PROXY`/`no_proxy`
-  because curl sends loopback requests through `http_proxy`.
+  because curl sends loopback requests through `http_proxy`. Per repository it
+  runs `git ls-remote` against the current branch's upstream remote, cached
+  like the host checks and refreshed on connect; the Repository summary waits
+  at most 5 s for these checks and otherwise shows the result on its next
+  refresh. Network Git commands (this check and `pull --ff-only`) run with
+  `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`, a batch-mode SSH command
+  unless one is configured, and a timeout, so missing credentials fail with an
+  error instead of hanging on a prompt in the terminal that started VCM.
 - `gateway/`: mobile gateway service plus channel implementations
   (Weixin iLink, Lark) and command parsing; channel connection is gated by a
   runtime, default-off switch. Detailed sub-area design lives in

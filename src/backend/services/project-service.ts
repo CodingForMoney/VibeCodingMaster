@@ -28,7 +28,8 @@ export interface ProjectService {
 
 export interface ProjectServiceDeps {
   fs: FileSystemAdapter;
-  environmentCheck?: Pick<EnvironmentCheck, "getWarnings">;
+  environmentCheck?: Pick<EnvironmentCheck, "getWarnings" | "getRepositoryWarnings">;
+  environmentCheckWaitMs?: number;
   git: GitAdapter;
   appSettings: Pick<
     AppSettingsService,
@@ -41,7 +42,15 @@ export interface ProjectServiceDeps {
   claudeVersionCheck?: ClaudeVersionCheck;
 }
 
+interface EnvironmentWarnings {
+  host: string[];
+  repository: string[];
+}
+
+const DEFAULT_ENVIRONMENT_CHECK_WAIT_MS = 5 * 1000;
+
 export function createProjectService(deps: ProjectServiceDeps): ProjectService {
+  const environmentCheckWaitMs = deps.environmentCheckWaitMs ?? DEFAULT_ENVIRONMENT_CHECK_WAIT_MS;
   let currentProject: ProjectSummary | null = null;
 
   return {
@@ -76,7 +85,7 @@ export function createProjectService(deps: ProjectServiceDeps): ProjectService {
       await deps.fs.ensureDir(path.join(repoRoot, ".claude", "worktrees"));
       await this.saveConfig(config, true);
 
-      currentProject = await readConnectedProjectSummary(repoRoot, config, { refreshClaudeVersion: true });
+      currentProject = await readConnectedProjectSummary(repoRoot, config, { refreshChecks: true });
 
       await deps.appSettings.recordRecentRepositoryPath(repoRoot);
       return currentProject;
@@ -145,23 +154,54 @@ export function createProjectService(deps: ProjectServiceDeps): ProjectService {
     }
   };
 
+  async function readEnvironmentWarnings(repoRoot: string, refresh?: boolean): Promise<EnvironmentWarnings> {
+    const [host, repository] = await Promise.all([
+      // Startup already ran the host checks; their cache retries failures
+      // after 30 s, so a connect only refreshes the repository's own checks.
+      (deps.environmentCheck?.getWarnings() ?? Promise.resolve([])).catch((caught: unknown) => [
+        `Unable to check the host environment. ${getErrorHint(caught)}`
+      ]),
+      (deps.environmentCheck?.getRepositoryWarnings(repoRoot, { refresh }) ?? Promise.resolve([])).catch((caught: unknown) => [
+        `Unable to check access to the Git remote. ${getErrorHint(caught)}`
+      ])
+    ]);
+    return { host, repository };
+  }
+
+  // A slow network must not stall the Repository panel: checks that outlast the
+  // wait keep running and fill the cache for the next refresh.
+  async function waitForChecks(checks: Promise<EnvironmentWarnings>): Promise<EnvironmentWarnings> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const pending = new Promise<EnvironmentWarnings>((resolve) => {
+      timer = setTimeout(() => resolve({
+        host: ["VCM is still checking the host environment and Git remote access. Refresh the Repository panel to see the result."],
+        repository: []
+      }), environmentCheckWaitMs);
+    });
+    try {
+      return await Promise.race([checks, pending]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async function readConnectedProjectSummary(
     repoRoot: string,
     config: ProjectConfig,
-    options: { refreshClaudeVersion?: boolean } = {}
+    options: { refreshChecks?: boolean } = {}
   ): Promise<ProjectSummary> {
     const warnings: string[] = [];
+    // Environment and remote checks reach the network (gh auth status, git
+    // ls-remote), so they run alongside the local Git reads below.
+    const environmentChecks = readEnvironmentWarnings(repoRoot, options.refreshChecks);
     const claudeVersionWarning = await deps.claudeVersionCheck?.getWarning(config.claudeCommand, {
-      refresh: options.refreshClaudeVersion
+      refresh: options.refreshChecks
     });
     if (claudeVersionWarning) {
       warnings.push(claudeVersionWarning);
     }
-    try {
-      warnings.push(...await deps.environmentCheck?.getWarnings({ refresh: options.refreshClaudeVersion }) ?? []);
-    } catch (caught) {
-      warnings.push(`Unable to check the host environment. ${getErrorHint(caught)}`);
-    }
+    const environmentWarnings = await waitForChecks(environmentChecks);
+    warnings.push(...environmentWarnings.host);
     try {
       const identity = await deps.git.resolveCommitIdentity(repoRoot);
       if (identity.defaulted.length > 0) {
@@ -210,6 +250,8 @@ export function createProjectService(deps: ProjectServiceDeps): ProjectService {
         warnings.push(`Unable to read Git ahead/behind status. ${getErrorHint(caught)}`);
       }
     }
+
+    warnings.push(...environmentWarnings.repository);
 
     const pullDisabledReason = getPullDisabledReason({ isDirty, upstreamBranch });
 

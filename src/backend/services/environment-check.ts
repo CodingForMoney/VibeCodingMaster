@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { CommandRunner } from "../adapters/command-runner.js";
+import type { GitAdapter } from "../adapters/git-adapter.js";
 import { renderVcmHookProbeCommand } from "./harness-service.js";
 import { buildVcmNoProxyEnvironment } from "./no-proxy-environment.js";
 
@@ -25,6 +26,9 @@ export interface EnvironmentCheck {
   // A cached result is returned immediately and refreshed in the background
   // once stale; refresh waits for new checks.
   getWarnings(options?: { refresh?: boolean }): Promise<string[]>;
+  // Warnings for one repository: whether Git can reach the current branch's
+  // upstream remote without prompting. Cached per repository like getWarnings.
+  getRepositoryWarnings(repoRoot: string, options?: { refresh?: boolean }): Promise<string[]>;
   // Runs only the hook self-test, without the cache, for a dispatch whose
   // UserPromptSubmit hook never arrived.
   probeHookDelivery(): Promise<string | undefined>;
@@ -34,6 +38,7 @@ export interface EnvironmentCheck {
 
 export interface EnvironmentCheckDeps {
   runner: CommandRunner;
+  git?: Pick<GitAdapter, "checkRemoteAccess">;
   // The URL role sessions receive as VCM_API_URL; without it the hook
   // self-test is skipped.
   apiUrl?: string;
@@ -54,6 +59,8 @@ export function createEnvironmentCheck(deps: EnvironmentCheckDeps): EnvironmentC
   const pendingProbes = new Map<string, () => void>();
   let cached: CachedChecks | undefined;
   let inFlight: Promise<string[]> | undefined;
+  const repositoryCache = new Map<string, CachedChecks>();
+  const repositoryInFlight = new Map<string, Promise<string[]>>();
 
   return {
     async getWarnings(options = {}) {
@@ -65,6 +72,17 @@ export function createEnvironmentCheck(deps: EnvironmentCheckDeps): EnvironmentC
         void runOnce();
       }
       return cached.warnings;
+    },
+    async getRepositoryWarnings(repoRoot, options = {}) {
+      const current = repositoryCache.get(repoRoot);
+      if (!current || options.refresh) {
+        return runRepositoryOnce(repoRoot);
+      }
+      const ttl = current.warnings.length > 0 ? FAILED_CHECK_TTL_MS : CHECK_CACHE_TTL_MS;
+      if (now() - current.checkedAt >= ttl) {
+        void runRepositoryOnce(repoRoot);
+      }
+      return current.warnings;
     },
     probeHookDelivery,
     receiveHookProbe(probeToken) {
@@ -97,9 +115,40 @@ export function createEnvironmentCheck(deps: EnvironmentCheckDeps): EnvironmentC
     return inFlight;
   }
 
+  function runRepositoryOnce(repoRoot: string): Promise<string[]> {
+    const running = repositoryInFlight.get(repoRoot);
+    if (running) {
+      return running;
+    }
+    const check = (async () => {
+      try {
+        const warnings = await runRepositoryChecks(repoRoot);
+        repositoryCache.set(repoRoot, { warnings, checkedAt: now() });
+        return warnings;
+      } finally {
+        repositoryInFlight.delete(repoRoot);
+      }
+    })();
+    repositoryInFlight.set(repoRoot, check);
+    return check;
+  }
+
+  async function runRepositoryChecks(repoRoot: string): Promise<string[]> {
+    if (!deps.git) {
+      return [];
+    }
+    const access = await deps.git.checkRemoteAccess(repoRoot);
+    if (access.status !== "failed") {
+      return [];
+    }
+    return [
+      `Git cannot reach remote "${access.remote}": ${trimPeriod(access.detail)}. Creating a task and Pull fetch the upstream branch first, so both will fail. VCM runs Git without credential prompts; check the remote URL and set up credentials for it in the environment that runs VCM, such as an SSH key loaded in ssh-agent or a Git credential helper.`
+    ];
+  }
+
   async function runChecks(): Promise<string[]> {
-    const [git, sh, node, curl] = await Promise.all([checkGit(), checkSh(), checkNode(), checkCurl()]);
-    const warnings = [git, sh, node, curl].filter((warning): warning is string => Boolean(warning));
+    const [git, sh, node, curl, gh] = await Promise.all([checkGit(), checkSh(), checkNode(), checkCurl(), checkGh()]);
+    const warnings = [git, sh, node, curl, gh].filter((warning): warning is string => Boolean(warning));
     // A missing program already explains a failed probe; only probe when the
     // pipeline's programs are present, to catch PATH, proxy, or network faults.
     if (!sh && !node && !curl) {
@@ -150,6 +199,24 @@ export function createEnvironmentCheck(deps: EnvironmentCheckDeps): EnvironmentC
     return result.exitCode === 0
       ? undefined
       : `curl is not available: ${firstLine(result.stderr)}. VCM role hooks use curl to report Claude Code events; without it VCM cannot see role turns start or finish. Install curl.`;
+  }
+
+  // VCM never runs gh, so a missing gh is not a problem; an installed but
+  // logged-out gh breaks roles that use it for pull requests or issues.
+  async function checkGh(): Promise<string | undefined> {
+    const version = await runCommand("gh", ["--version"]);
+    if (version.exitCode !== 0) {
+      return undefined;
+    }
+    const status = await deps.runner.run("gh", ["auth", "status"], {
+      env: { ...baseEnv, GH_PROMPT_DISABLED: "1", NO_COLOR: "1" },
+      timeoutMs: COMMAND_TIMEOUT_MS
+    });
+    if (status.exitCode === 0) {
+      return undefined;
+    }
+    const detail = firstLine(status.stderr) || firstLine(status.stdout) || `gh auth status exited with ${status.exitCode}`;
+    return `GitHub CLI (gh) is installed but not logged in: ${detail}. VCM does not run gh itself, but roles that use gh for pull requests or issues will fail. Run gh auth login in the environment that runs VCM.`;
   }
 
   async function probeHookDelivery(): Promise<string | undefined> {
@@ -213,8 +280,13 @@ function formatVersion(version: Version): string {
   return version.join(".");
 }
 
+// Error details end the sentence they are quoted in.
 function firstLine(value: string): string {
-  return value.trim().split(/\r?\n/)[0]?.trim() ?? "";
+  return trimPeriod(value.trim().split(/\r?\n/)[0]?.trim() ?? "");
+}
+
+function trimPeriod(value: string): string {
+  return value.replace(/\.+$/, "");
 }
 
 function readHostname(url: string): string {

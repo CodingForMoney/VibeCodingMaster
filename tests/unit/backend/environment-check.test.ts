@@ -89,6 +89,50 @@ describe("createEnvironmentCheck", () => {
     expect(runner.calls.filter((call) => call.command === "curl")).toHaveLength(2);
   });
 
+  it("reports an installed gh that is not logged in", async () => {
+    const runner = fakeRunner({
+      gh: (args) => args[0] === "--version"
+        ? { ...OK, stdout: "gh version 2.103.2" }
+        : { stdout: "", stderr: "You are not logged into any GitHub hosts. To log in, run: gh auth login\n", exitCode: 1 }
+    });
+    const check = createEnvironmentCheck({ runner, baseEnv: {} });
+
+    await expect(check.getWarnings()).resolves.toEqual([
+      "GitHub CLI (gh) is installed but not logged in: You are not logged into any GitHub hosts. To log in, run: gh auth login. VCM does not run gh itself, but roles that use gh for pull requests or issues will fail. Run gh auth login in the environment that runs VCM."
+    ]);
+  });
+
+  it("does not require gh when it is not installed", async () => {
+    const runner = fakeRunner({ gh: () => MISSING("gh --version") });
+    const check = createEnvironmentCheck({ runner, baseEnv: {} });
+
+    await expect(check.getWarnings()).resolves.toEqual([]);
+    expect(runner.calls.filter((call) => call.command === "gh")).toEqual([{ command: "gh", args: ["--version"] }]);
+  });
+
+  it("reports a Git remote that cannot be reached without prompting and caches it per repository", async () => {
+    const checked: string[] = [];
+    const check = createEnvironmentCheck({
+      runner: fakeRunner({}),
+      baseEnv: {},
+      git: {
+        async checkRemoteAccess(repoRoot) {
+          checked.push(repoRoot);
+          return repoRoot === "/broken"
+            ? { status: "failed", remote: "origin", detail: "fatal: could not read Username for 'https://github.com': terminal prompts disabled" }
+            : { status: "ok", remote: "origin" };
+        }
+      }
+    });
+
+    await expect(check.getRepositoryWarnings("/broken")).resolves.toEqual([
+      "Git cannot reach remote \"origin\": fatal: could not read Username for 'https://github.com': terminal prompts disabled. Creating a task and Pull fetch the upstream branch first, so both will fail. VCM runs Git without credential prompts; check the remote URL and set up credentials for it in the environment that runs VCM, such as an SSH key loaded in ssh-agent or a Git credential helper."
+    ]);
+    await expect(check.getRepositoryWarnings("/ok")).resolves.toEqual([]);
+    await check.getRepositoryWarnings("/broken");
+    expect(checked).toEqual(["/broken", "/ok"]);
+  });
+
   it("ignores probe tokens it did not issue", () => {
     const check = createEnvironmentCheck({ runner: fakeRunner({}), baseEnv: {} });
 
@@ -177,7 +221,7 @@ describe("buildVcmNoProxyEnvironment", () => {
 
 type Handler = (args: string[], options?: CommandRunnerOptions) => CommandResult;
 
-function fakeRunner(handlers: Partial<Record<"git" | "sh" | "node" | "curl", Handler>>): CommandRunner & {
+function fakeRunner(handlers: Partial<Record<"git" | "sh" | "node" | "curl" | "gh", Handler>>): CommandRunner & {
   calls: Array<{ command: string; args: string[] }>;
 } {
   const calls: Array<{ command: string; args: string[] }> = [];
@@ -185,6 +229,7 @@ function fakeRunner(handlers: Partial<Record<"git" | "sh" | "node" | "curl", Han
     git: { ...OK, stdout: "git version 2.50.1 (Apple Git-155)" },
     node: { ...OK, stdout: "v22.12.0" },
     curl: { ...OK, stdout: "curl 8.7.1" },
+    gh: { ...OK, stdout: "gh version 2.103.2" },
     sh: OK
   };
   return {

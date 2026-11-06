@@ -74,6 +74,72 @@ describe("createGitAdapter commit identity", () => {
   });
 });
 
+describe("createGitAdapter remote access", () => {
+  const tempDirs: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(tempDirs.map((tempDir) => fs.rm(tempDir, { recursive: true, force: true })));
+    tempDirs.length = 0;
+  });
+
+  async function createRepoTrackingRemote(remoteUrl?: (root: string) => string) {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "vcm-git-remote-"));
+    tempDirs.push(root);
+    const isolation = { GIT_CONFIG_GLOBAL: path.join(root, "empty-gitconfig"), GIT_CONFIG_NOSYSTEM: "1" };
+    await fs.writeFile(isolation.GIT_CONFIG_GLOBAL, "");
+    const calls: Array<{ args: string[]; env?: NodeJS.ProcessEnv; timeoutMs?: number }> = [];
+    const real = createCommandRunner();
+    const runner: CommandRunner = {
+      run: (command, args = [], options = {}) => {
+        calls.push({ args, env: options.env, timeoutMs: options.timeoutMs });
+        return real.run(command, args, { ...options, env: { ...options.env, ...isolation } });
+      }
+    };
+    const remotePath = path.join(root, "remote.git");
+    const repoRoot = path.join(root, "repo");
+    await real.run("git", ["init", "-q", "--bare", remotePath], { env: isolation });
+    await real.run("git", ["init", "-q", "-b", "main", repoRoot], { env: isolation });
+    await real.run("git", ["remote", "add", "origin", remoteUrl ? remoteUrl(root) : remotePath], { cwd: repoRoot, env: isolation });
+    await real.run("git", ["config", "branch.main.remote", "origin"], { cwd: repoRoot, env: isolation });
+    await real.run("git", ["config", "branch.main.merge", "refs/heads/main"], { cwd: repoRoot, env: isolation });
+    return { adapter: createGitAdapter(runner), repoRoot, calls };
+  }
+
+  it("reaches the upstream remote without prompting", async () => {
+    const { adapter, repoRoot, calls } = await createRepoTrackingRemote();
+
+    await expect(adapter.checkRemoteAccess(repoRoot)).resolves.toEqual({ status: "ok", remote: "origin" });
+    const lsRemote = calls.find((call) => call.args.includes("ls-remote"));
+    expect(lsRemote?.env).toMatchObject({ GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" });
+    expect(lsRemote?.timeoutMs).toBeGreaterThan(0);
+  });
+
+  it("reports a remote Git cannot reach with Git's error", async () => {
+    const { adapter, repoRoot } = await createRepoTrackingRemote((root) => path.join(root, "missing.git"));
+
+    const access = await adapter.checkRemoteAccess(repoRoot);
+
+    expect(access).toMatchObject({ status: "failed", remote: "origin" });
+    expect(access.status === "failed" ? access.detail : "").toMatch(/missing\.git|does not appear to be a git repository/);
+  });
+
+  it("skips a branch without an upstream remote", async () => {
+    const { adapter, repoRoot } = await createRepoTrackingRemote();
+    await createCommandRunner().run("git", ["config", "--unset", "branch.main.remote"], { cwd: repoRoot });
+
+    await expect(adapter.checkRemoteAccess(repoRoot)).resolves.toEqual({ status: "skipped" });
+  });
+
+  it("pulls without prompting for credentials", async () => {
+    const { adapter, repoRoot, calls } = await createRepoTrackingRemote();
+
+    await adapter.pullFastForward(repoRoot).catch(() => undefined);
+
+    const pull = calls.find((call) => call.args.includes("pull"));
+    expect(pull?.env).toMatchObject({ GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: "ssh -o BatchMode=yes" });
+  });
+});
+
 describe("createGitAdapter", () => {
   const tempDirs: string[] = [];
 

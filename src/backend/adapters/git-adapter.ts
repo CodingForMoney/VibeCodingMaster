@@ -37,7 +37,21 @@ export interface GitAdapter {
   removeWorktree(repoRoot: string, worktreePath: string, options?: { force?: boolean }): Promise<void>;
   deleteBranch(repoRoot: string, branch: string, options?: { force?: boolean }): Promise<void>;
   pullFastForward(repoRoot: string): Promise<GitPullResult>;
+  // Contacts the current branch's upstream remote the way a pull would, but
+  // without prompting, to tell whether its credentials work.
+  checkRemoteAccess(repoRoot: string): Promise<GitRemoteAccess>;
 }
+
+export type GitRemoteAccess =
+  | { status: "ok"; remote: string }
+  | { status: "skipped" }
+  | { status: "failed"; remote: string; detail: string };
+
+// Network Git commands run without a terminal prompt: VCM is driven from the
+// browser, so a credential prompt would hang the request on the terminal that
+// started VCM instead of failing with an error the UI can show.
+const REMOTE_COMMAND_TIMEOUT_MS = 20 * 1000;
+const PULL_TIMEOUT_MS = 5 * 60 * 1000;
 
 // Commit identity used when neither Git config nor the environment provides one.
 // Without it, Git either refuses to commit or invents an identity from the OS
@@ -511,7 +525,7 @@ export function createGitAdapter(runner: CommandRunner): GitAdapter {
       }
     },
     async pullFastForward(repoRoot) {
-      const result = await runGit(runner, repoRoot, ["pull", "--ff-only"]);
+      const result = await runGit(runner, repoRoot, ["pull", "--ff-only"], await buildNonInteractiveGitEnv(runner, repoRoot), PULL_TIMEOUT_MS);
       if (result.exitCode !== 0) {
         throw new VcmError({
           code: "GIT_PULL_FAILED",
@@ -525,8 +539,54 @@ export function createGitAdapter(runner: CommandRunner): GitAdapter {
         stdout: result.stdout,
         stderr: result.stderr
       };
+    },
+    async checkRemoteAccess(repoRoot) {
+      const branch = (await runGit(runner, repoRoot, ["branch", "--show-current"])).stdout.trim();
+      if (!branch) {
+        return { status: "skipped" };
+      }
+      const remoteResult = await runGit(runner, repoRoot, ["config", "--get", `branch.${branch}.remote`]);
+      const remote = remoteResult.stdout.trim();
+      if (remoteResult.exitCode !== 0 || !remote || remote === ".") {
+        return { status: "skipped" };
+      }
+      const result = await runGit(
+        runner,
+        repoRoot,
+        ["ls-remote", remote, "HEAD"],
+        await buildNonInteractiveGitEnv(runner, repoRoot),
+        REMOTE_COMMAND_TIMEOUT_MS
+      );
+      if (result.exitCode === 0) {
+        return { status: "ok", remote };
+      }
+      return {
+        status: "failed",
+        remote,
+        detail: firstMeaningfulLine(result.stderr) || firstMeaningfulLine(result.stdout) || `git ls-remote exited with ${result.exitCode}`
+      };
     }
   };
+}
+
+async function buildNonInteractiveGitEnv(runner: CommandRunner, repoRoot: string): Promise<NodeJS.ProcessEnv> {
+  const env: NodeJS.ProcessEnv = {
+    GIT_TERMINAL_PROMPT: "0",
+    GCM_INTERACTIVE: "never"
+  };
+  // Keep a configured SSH command; otherwise make ssh fail instead of asking
+  // for a passphrase or host-key confirmation.
+  if (!process.env.GIT_SSH_COMMAND && !process.env.GIT_SSH) {
+    const configured = await runGit(runner, repoRoot, ["config", "--get", "core.sshCommand"]);
+    if (configured.exitCode !== 0 || !configured.stdout.trim()) {
+      env.GIT_SSH_COMMAND = "ssh -o BatchMode=yes";
+    }
+  }
+  return { ...process.env, ...env };
+}
+
+function firstMeaningfulLine(value: string): string {
+  return value.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? "";
 }
 
 async function checkGitMarker(repoRoot: string): Promise<GitRepoCheck> {
@@ -594,8 +654,8 @@ async function pathExists(targetPath: string): Promise<boolean> {
   }
 }
 
-async function runGit(runner: CommandRunner, repoRoot: string, args: string[], env?: NodeJS.ProcessEnv) {
-  return runner.run("git", [...await buildSafeDirectoryArgs(repoRoot), ...args], { cwd: repoRoot, env });
+async function runGit(runner: CommandRunner, repoRoot: string, args: string[], env?: NodeJS.ProcessEnv, timeoutMs?: number) {
+  return runner.run("git", [...await buildSafeDirectoryArgs(repoRoot), ...args], { cwd: repoRoot, env, timeoutMs });
 }
 
 function parseWorktreePaths(output: string): string[] {
