@@ -77,6 +77,8 @@ export interface GateReviewServiceDeps {
     accepted: boolean;
   }) => Promise<void> | void;
   reportPollIntervalMs?: number;
+  // How long a gate prompt waits for the Reviewer's running turn to end.
+  reviewerIdleWaitMs?: number;
   now?: () => string;
 }
 
@@ -121,6 +123,9 @@ const GATE_REVIEW_VERSION = 1;
 const HARNESS_COMMIT_PREFIX = "[VCM Harness] ";
 const REVIEWER_ROLE = "reviewer";
 const DEFAULT_REPORT_POLL_INTERVAL_MS = 1000;
+// A Reviewer that just submitted a report usually ends its turn within
+// seconds; a missed Stop hook leaves the activity stale, so the wait is capped.
+const DEFAULT_REVIEWER_IDLE_WAIT_MS = 5 * 60 * 1000;
 interface ActiveGateRun {
   controller: AbortController;
   taskSlug: string;
@@ -175,6 +180,7 @@ const VALID_CODE_DIFF_FINDING_SCOPES = new Set<CodeDiffFindingScope>(CODE_DIFF_F
 export function createGateReviewService(deps: GateReviewServiceDeps): GateReviewService {
   const now = deps.now ?? (() => new Date().toISOString());
   const reportPollIntervalMs = deps.reportPollIntervalMs ?? DEFAULT_REPORT_POLL_INTERVAL_MS;
+  const reviewerIdleWaitMs = deps.reviewerIdleWaitMs ?? DEFAULT_REVIEWER_IDLE_WAIT_MS;
 
   async function getContext(repoRoot: string, taskSlug: string): Promise<ReviewContext> {
     const projectConfig = await deps.projectService.loadConfig(repoRoot);
@@ -703,6 +709,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       }
 
       const session = await ensureReviewerSession(context);
+      await waitForReviewerIdle(context, controller.signal);
       throwIfGateRunCancelled(controller.signal);
       await submitTerminalInput(deps.runtime, session.id, prompt);
       await deps.sessionService.markRoleActivityRunning(
@@ -875,6 +882,21 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       await saveIndex(deps.fs, context.taskRepoRoot, next);
       return next.gates[gate];
     });
+  }
+
+  // Claude Code queues a prompt typed into a running turn but sends its
+  // UserPromptSubmit hook at once, so the running turn's Stop would look like
+  // the end of this request's turn and fail it. Wait for that turn to end.
+  async function waitForReviewerIdle(context: ReviewContext, signal: AbortSignal): Promise<void> {
+    const deadline = Date.now() + reviewerIdleWaitMs;
+    while (true) {
+      throwIfGateRunCancelled(signal);
+      const session = await deps.sessionService.getRoleSession(context.repoRoot, context.taskSlug, REVIEWER_ROLE);
+      if (session?.activityStatus !== "running" || Date.now() >= deadline) {
+        return;
+      }
+      await delay(reportPollIntervalMs);
+    }
   }
 
   async function ensureReviewerSession(context: ReviewContext) {

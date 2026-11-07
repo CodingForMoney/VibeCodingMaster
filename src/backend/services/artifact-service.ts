@@ -117,6 +117,9 @@ const ARTIFACT_PATH_KEYS: Array<[ArtifactKind, keyof HandoffPaths]> = [
   ["workflow-progress", "workflowProgressPath"],
   ["final-acceptance", "finalAcceptancePath"]
 ];
+// Gate requests whose report VCM still waits for; any other status means the
+// run already ended and a report would be ignored.
+const OPEN_GATE_REQUEST_STATUSES = new Set(["requested", "running"]);
 const ROLE_COMMAND_PLACEHOLDER_PATTERN = /(^|\n)\s*(TBD|status:\s*draft)\s*(\n|$)/i;
 const DEFAULT_MESSAGE_ROUTES: Array<[RoleName, RoleName]> = [
   ["project-manager", "architect"],
@@ -445,10 +448,17 @@ async function validateDynamicArtifact(
     if (!(await fs.pathExists(absoluteRequestPath))) {
       throw artifactRejected(input.kind, [`Gate request does not exist: ${requestPath}.`]);
     }
-    const request = await fs.readJson<{ requestId?: string; gate?: string; reportPath?: string }>(absoluteRequestPath);
+    const request = await fs.readJson<{ requestId?: string; gate?: string; reportPath?: string; status?: string }>(
+      absoluteRequestPath
+    );
     if (request.reportPath !== artifactPath) {
       throw artifactRejected(input.kind, [
         `Report path must match the assigned request path ${request.reportPath ?? "<missing>"}.`
+      ]);
+    }
+    if (request.status && !OPEN_GATE_REQUEST_STATUSES.has(request.status)) {
+      throw artifactRejected(input.kind, [
+        `Gate request ${request.requestId ?? requestId} is already ${request.status}, so VCM will not use this report. Stop this review; VCM sends a new request if the gate runs again.`
       ]);
     }
     assertManagedArtifactContent(input.kind, content, artifactPath, input.mode, {

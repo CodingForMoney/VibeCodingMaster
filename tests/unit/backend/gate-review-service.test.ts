@@ -238,6 +238,64 @@ describe("gate-review-service", () => {
       .toContain("Reviewer process exited before completing the review.");
   });
 
+  it("waits for the Reviewer's running turn to end before sending a gate prompt", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-busy-"));
+    await writeHarnessFiles(tmpRepo);
+    let reviewerActivity: "running" | "idle" = "running";
+    const sessions = createSessionService();
+    const createBusyService = (writes: string[], reviewerIdleWaitMs?: number) => createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo!, []),
+      runtime: {
+        ...createRuntime(tmpRepo!, []),
+        write(_sessionId, data) {
+          writes.push(data);
+        }
+      },
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo!),
+      appSettings: createAppSettings(["architecture-plan"]),
+      sessionService: {
+        ...sessions,
+        async getRoleSession(repoRoot: string, taskSlug: string, role: string) {
+          const session = await sessions.getRoleSession(repoRoot, taskSlug, role);
+          return session && role === "reviewer" ? { ...session, activityStatus: reviewerActivity } : session;
+        }
+      },
+      roundService: createRoundService([]),
+      reportPollIntervalMs: 5,
+      reviewerIdleWaitMs
+    });
+
+    const writes: string[] = [];
+    const service = createBusyService(writes);
+    await service.requestReviewGate(tmpRepo, "demo-task", "architecture-plan");
+    const requestId = (await service.getState(tmpRepo, "demo-task")).gates["architecture-plan"].requestId!;
+
+    // Claude Code would queue a prompt sent now and report it before the
+    // running turn's Stop, so VCM holds the prompt until that turn ends.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(writes.some((data) => data.includes(requestId))).toBe(false);
+
+    service.recordReviewerTurnEnded("demo-task", "turn-end");
+    reviewerActivity = "idle";
+    await waitFor(async () => writes.some((data) => data.includes(requestId)));
+    service.recordReviewerPromptSubmitted("demo-task", writes.find((data) => data.includes(requestId)));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect((await service.getState(tmpRepo, "demo-task")).gates["architecture-plan"].status).toBe("running");
+    service.stopTask("demo-task");
+
+    // A Reviewer whose activity never clears gets the prompt once the wait ends.
+    reviewerActivity = "running";
+    const cappedWrites: string[] = [];
+    const capped = createBusyService(cappedWrites, 20);
+    await capped.cancelReviewGate(tmpRepo, "demo-task", "architecture-plan", { requestId, reason: "test" });
+    await capped.retryReviewGate(tmpRepo, "demo-task", "architecture-plan");
+    const retryId = (await capped.getState(tmpRepo, "demo-task")).gates["architecture-plan"].requestId!;
+    await waitFor(async () => cappedWrites.some((data) => data.includes(retryId)));
+    capped.stopTask("demo-task");
+  });
+
   it("stops polling a running gate when its task closes", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-"));
     await writeHarnessFiles(tmpRepo);
@@ -2164,6 +2222,11 @@ function createSessionService(
     async markRoleActivityRunning(_repoRoot: string, _taskSlug: string, role: string) {
       const session = sessions.get(role) ?? pmSession;
       activityCalls.push(`running:${role}`);
+      if (role === "reviewer") {
+        // No hooks end the fake Reviewer's turns; tests that need a busy
+        // Reviewer set its activity themselves.
+        return session;
+      }
       const updated = {
         ...session,
         activityStatus: "running" as const

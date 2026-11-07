@@ -662,7 +662,15 @@ cancelled, clears the active Gate, and restarts Reviewer before another request
 can begin. Completion and failure use a current-request compare-and-set check.
 A late result from a cancelled or superseded request remains request history
 only and cannot publish the stable report, mutate the Gate index, update
-architecture disposition, or call back PM.
+architecture disposition, or call back PM. `vcm-artifact` rejects a report for
+a request that is no longer `requested` or `running`, so Reviewer learns VCM
+will not use it.
+
+A request's prompt waits until the Reviewer session is not running a turn (at
+most five minutes, since a missed Stop hook leaves the activity stale). Claude
+Code queues a prompt typed into a running turn but sends its
+`UserPromptSubmit` hook immediately, so the running turn's Stop would otherwise
+look like the end of the new request's turn and fail it.
 
 Code-producing flows run Tester validation and validation-adequacy review
 before code-diff review. The Gate Review service rejects code-diff when the

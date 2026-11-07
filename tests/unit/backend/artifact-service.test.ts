@@ -455,6 +455,39 @@ describe("createArtifactService", () => {
     }).errors).toEqual([]);
   });
 
+  it("rejects a gate report for a request that already ended", async () => {
+    const fs = createMemoryFs();
+    const service = createArtifactService(fs);
+    const submit = (requestId: string) => service.submitArtifact({
+      repoRoot: "/repo",
+      baseRepoRoot: "/repo",
+      handoffDir: ".ai/vcm/handoffs",
+      taskSlug: "demo-task",
+      kind: "gate-review-report",
+      mode: "final",
+      role: "reviewer",
+      artifactPath: `.ai/vcm/gate-reviews/requests/${requestId}.report.md`,
+      content: validArchitectureGateReport().replaceAll("request-1", requestId)
+    });
+    for (const [requestId, status] of [["request-failed", "failed"], ["request-cancelled", "cancelled"], ["request-1", "running"]]) {
+      await fs.writeJson(`/repo/.ai/vcm/gate-reviews/requests/${requestId}.json`, {
+        requestId,
+        gate: "architecture-plan",
+        reportPath: `.ai/vcm/gate-reviews/requests/${requestId}.report.md`,
+        status
+      });
+    }
+
+    await expect(submit("request-failed")).rejects.toMatchObject({
+      message: expect.stringContaining("Gate request request-failed is already failed, so VCM will not use this report.")
+    });
+    await expect(submit("request-cancelled")).rejects.toMatchObject({
+      message: expect.stringContaining("is already cancelled")
+    });
+    await expect(fs.pathExists("/repo/.ai/vcm/gate-reviews/requests/request-failed.report.md")).resolves.toBe(false);
+    await expect(submit("request-1")).resolves.toMatchObject({ status: "accepted" });
+  });
+
   it("accepts only the Memory Proposal locations assigned to the submitting role", async () => {
     const fs = createMemoryFs();
     const service = createArtifactService(fs);
