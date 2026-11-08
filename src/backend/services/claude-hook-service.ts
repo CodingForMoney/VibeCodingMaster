@@ -1291,7 +1291,12 @@ function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+// VCM submits its prompts as a terminal paste, and newer Claude Code versions
+// report a pasted prompt wrapped in <pasted_content id="..."> tags, so the
+// wrapper is removed before looking for VCM's marker.
+const PASTED_CONTENT_OPEN_TAG = /^<pasted_content\b[^>]*>/i;
+
 function isDirectUserPrompt(prompt: string): boolean {
-  const normalized = prompt.trim();
+  const normalized = prompt.trim().replace(PASTED_CONTENT_OPEN_TAG, "").trim();
   return normalized.length > 0 && !/^\[VCM(?:\s|\])/i.test(normalized);
 }

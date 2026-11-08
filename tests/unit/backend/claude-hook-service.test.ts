@@ -186,6 +186,32 @@ describe("createClaudeHookService", () => {
     });
     expect(calls).toEqual(["resolved"]);
     expect(awaitingUser).not.toBeNull();
+
+    // Claude Code wraps a pasted prompt, which is how VCM delivers its messages.
+    await service.handleHook({
+      taskSlug: "demo-task",
+      role: "project-manager",
+      event: {
+        hook_event_name: "UserPromptSubmit",
+        session_id: "claude_pm",
+        prompt: '<pasted_content id="paste-1">\n[VCM GATE REVIEW CALLBACK]\nGate: code-diff\n</pasted_content>'
+      }
+    });
+    expect(calls).toEqual(["resolved"]);
+    expect(awaitingUser).not.toBeNull();
+
+    // A user message pasted by the gateway or translation panel carries no VCM marker.
+    await service.handleHook({
+      taskSlug: "demo-task",
+      role: "project-manager",
+      event: {
+        hook_event_name: "UserPromptSubmit",
+        session_id: "claude_pm",
+        prompt: '<pasted_content id="paste-2">\nYes, use the documented behavior.\n</pasted_content>'
+      }
+    });
+    expect(calls).toEqual(["resolved", "resolved"]);
+    expect(awaitingUser).toBeNull();
   });
 
   it("blocks a PM Stop that asks a question without registering the user wait", async () => {
