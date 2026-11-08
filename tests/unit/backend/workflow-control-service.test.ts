@@ -1569,6 +1569,60 @@ describe("workflow control service", () => {
     expect((await readProgress(fs, context)).status).toBe("completed");
   });
 
+  it("routes an implementation finding after a Debug docs correction that rewrote the Debug result", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+
+    await advance(service, fs, context, "architect", "architect-debug", "accepted debug task");
+    await writeArchitectDebug(fs, context, "debug repair");
+    await advance(service, fs, context, "tester", undefined, "validate debug repair");
+    await writeTestReport(fs, context, "pass");
+    await writeGateIndex(fs, context, {
+      validation: "approve",
+      codeDiffSource: "architect-debug"
+    });
+    await writeCodeDiffDecision(fs, context, "request_changes", ["docs-only"]);
+
+    await advance(service, fs, context, "architect", undefined, "correct the reported docs");
+    await writeArchitectDebug(fs, context, "debug repair with corrected docs");
+    // Before the rerun Gate reviews the correction, a rewritten result still
+    // counts as a new fix that needs validation.
+    await expect(propose(service, fs, context, "architect", undefined, "repair before the rerun"))
+      .rejects.toMatchObject({ code: "WORKFLOW_TRANSITION_DENIED" });
+
+    await writeCodeDiffDecision(fs, context, "request_changes", ["implementation", "test-only"]);
+    await advance(service, fs, context, "architect", undefined, "repair the implementation finding");
+
+    expect((await readProgress(fs, context)).history.map((entry) => `${entry.flow}/${entry.targetRole}`)).toEqual([
+      "architect-debug/architect",
+      "architect-debug/tester",
+      "architect-debug/architect",
+      "architect-debug/architect"
+    ]);
+  });
+
+  it("completes after a Diagnosis docs correction that rewrote the Diagnosis result passes code-diff", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+
+    await advance(service, fs, context, "architect", "architecture-diagnosis", "accepted diagnosis task");
+    await writeArchitectureDiagnosis(fs, context, "implemented diagnosis");
+    await advance(service, fs, context, "tester", undefined, "validate diagnosis implementation");
+    await writeTestReport(fs, context, "pass");
+    await writeGateIndex(fs, context, {
+      validation: "approve",
+      codeDiffSource: "architect-diagnosis"
+    });
+    await writeCodeDiffDecision(fs, context, "request_changes", ["docs-only"]);
+
+    await advance(service, fs, context, "architect", undefined, "correct the reported docs");
+    await writeArchitectureDiagnosis(fs, context, "implemented diagnosis with corrected docs");
+    await writeCodeDiffDecision(fs, context, "approve");
+    await writeFinalAcceptance(fs, context);
+    await completeFlow(service, fs, context);
+    expect((await readProgress(fs, context)).status).toBe("completed");
+  });
+
   it("returns a rewritten Diagnosis result after validation to Tester", async () => {
     const { context, fs } = await createContext(roots);
     const service = createWorkflowControlService({ fs, now: sequenceClock() });

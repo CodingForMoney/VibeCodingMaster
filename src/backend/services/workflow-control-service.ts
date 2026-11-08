@@ -1098,14 +1098,34 @@ async function allowedArchitectFix(
       return [`${source}/architect`];
     }
     // A new fix needs validation; any other post-validation Architect change
-    // is reviewed by an incremental code-diff Gate.
-    if (artifactFresh && artifact.complete) return [`${source}/tester`];
+    // is reviewed by an incremental code-diff Gate. Architect also rewrites its
+    // artifact for a docs correction, so once a code-diff Gate has reviewed
+    // this dispatch, that Gate's result routes the flow instead.
+    if (artifactFresh && artifact.complete && !(await codeDiffReviewedDispatch(fs, input, state, source))) {
+      return [`${source}/tester`];
+    }
     return allowedPostImplementationArchitect(fs, input, state, source, acceptanceFlow);
   }
   return allowedAfterTester(fs, input, state, source, source, {
     testerFailureFlow: source === "architect-debug" ? "architecture-diagnosis" : undefined,
     acceptanceFlow
   });
+}
+
+// True when a code-diff Gate finished, or was skipped or overridden, after the
+// active Architect dispatch was confirmed.
+async function codeDiffReviewedDispatch(
+  fs: FileSystemAdapter,
+  input: WorkflowControlContext,
+  state: WorkflowControlState,
+  flow: "architect-debug" | "architecture-diagnosis"
+): Promise<boolean> {
+  if (!matchingEvidenceBaseline(state, flow, "architect")) return false;
+  const codeDiff = await gateState(fs, input, "code-diff");
+  // A disabled Gate reviews nothing, so it never stands in for Tester.
+  if (!codeDiff || codeDiff.status === "disabled") return false;
+  return (codeDiff.status === "completed" && freshGateDecision(state, flow, "architect", "code-diff", codeDiff) !== undefined)
+    || gatePassedForDispatch(state, flow, "architect", "code-diff", codeDiff);
 }
 
 async function allowedPostImplementationArchitect(

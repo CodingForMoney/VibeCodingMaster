@@ -328,7 +328,10 @@ have no architecture plan and are not checked.
 
 Completion of a delivery flow requires a passed code-diff Gate for the latest
 dispatch: a Tester dispatch with a passing Test Report and validation-adequacy
-approval, or a post-validation Architect dispatch. It also requires an
+approval, or a post-validation Architect dispatch. A post-validation
+Architect dispatch that rewrites its Debug or Diagnosis result routes to Tester
+as a new fix until a code-diff Gate reviews it; after that, the Gate's result
+routes the flow, because a docs correction also rewrites that result. It also requires an
 accepted Final Acceptance produced after that dispatch and no pending
 follow-up transition, so every doc correction or follow-up commit is reviewed
 before acceptance.
@@ -414,6 +417,9 @@ or a panel reloads. The existing round-pause notice, sound preference, and delay
 until translation succeeds or fails remain unchanged. A PM
 `UserPromptSubmit` clears the wait only when its prompt is a direct user message
 without a VCM marker; internal role messages and callbacks cannot unlock it.
+VCM delivers prompts as a terminal paste, and Claude Code may report a pasted
+prompt inside a `<pasted_content>` wrapper, so the marker is checked after that
+wrapper.
 The canceled approval is never restored.
 
 ## Auto Memory Ownership
