@@ -388,17 +388,40 @@ describe("auto-memory-service", () => {
     expect(await readText(context.taskRepoRoot, "CLAUDE.md")).not.toContain(sourceEntry);
     expect(context.terminalWrites.join("\n")).toContain("[VCM Durable Documentation Assignment]");
 
-    const writesBeforeRecovery = context.terminalWrites.length;
-    await context.service.reconcileTask({
+    expect(context.activityRunningCalls).toEqual(["architect"]);
+
+    // A reconcile before the role's prompt hook arrives leaves the delivered
+    // assignment alone instead of queuing a duplicate behind its turn.
+    const reconcile = () => context.service.reconcileTask({
       baseRepoRoot: context.baseRepoRoot,
       taskRepoRoot: context.taskRepoRoot,
       taskSlug: "demo",
       handoffDir: ".ai/vcm/handoffs",
       roundReady: false
     });
-    expect(context.terminalWrites.length).toBeGreaterThan(writesBeforeRecovery);
+    let writesBeforeRecovery = context.terminalWrites.length;
+    await reconcile();
+    expect(context.terminalWrites.length).toBe(writesBeforeRecovery);
+
+    // An interrupted turn sends no Stop hook; after the grace period the
+    // assignment is sent again.
+    context.setRoleTurnEndedAt("architect", "2026-07-11T00:00:05.000Z");
+    context.setNow("2026-07-11T00:00:20.000Z");
+    await reconcile();
+    expect(context.terminalWrites.length).toBe(writesBeforeRecovery);
+    context.setNow("2026-07-11T00:00:40.000Z");
+    await reconcile();
     expect(context.terminalWrites.slice(writesBeforeRecovery).join("\n"))
       .toContain("[VCM Durable Documentation Assignment]");
+
+    // A session that is gone gets the assignment again on the next reconcile.
+    context.setRoleTurnEndedAt("architect", undefined);
+    context.setSessionGone("architect", true);
+    writesBeforeRecovery = context.terminalWrites.length;
+    await reconcile();
+    expect(context.terminalWrites.slice(writesBeforeRecovery).join("\n"))
+      .toContain("[VCM Durable Documentation Assignment]");
+    context.setSessionGone("architect", false);
     state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
     expect(state.active?.assignments[0]).toMatchObject({
       owner: "architect",
@@ -437,6 +460,13 @@ describe("auto-memory-service", () => {
       status: "completed",
       commit: "d0c0001"
     });
+    const reportPath = state.runs[0].assignments[0].reportPath;
+    await expect(context.service.getCompletedDurableDocAssignment(context.taskRepoRoot, "architect", reportPath))
+      .resolves.toMatchObject({ id: assignmentId, commit: "d0c0001" });
+    await expect(context.service.getCompletedDurableDocAssignment(context.taskRepoRoot, "tester", reportPath))
+      .resolves.toBeUndefined();
+    await expect(context.service.getCompletedDurableDocAssignment(context.taskRepoRoot, "architect", "../outside/report.md"))
+      .resolves.toBeUndefined();
   });
 
   it("asks PM to resolve an unknown durable document owner and retains failures for retry", async () => {
@@ -1064,6 +1094,10 @@ describe("auto-memory-service", () => {
     const commitHistory = [{ sha: headCommit, paths: [] as string[] }];
     const busyRoles = new Set<RoleName>();
     const unavailableRoles = new Set<RoleName>();
+    const goneSessions = new Set<string>();
+    const turnEndedAt = new Map<RoleName, string>();
+    const activityRunningCalls: string[] = [];
+    let clock = "2026-07-11T00:00:00.000Z";
     let memoryEnabled = autoMemoryEnabled;
     const sessionFor = (role: RoleName): RoleSessionRecord => ({
       id: `session-${role}`,
@@ -1072,6 +1106,7 @@ describe("auto-memory-service", () => {
       role,
       status: "running",
       activityStatus: busyRoles.has(role) ? "running" : "idle",
+      lastTurnEndedAt: turnEndedAt.get(role),
       command: "claude",
       permissionMode: "bypassPermissions",
       model: "default",
@@ -1117,8 +1152,8 @@ describe("auto-memory-service", () => {
         }
       },
       runtime: {
-        getSession() {
-          return {} as never;
+        getSession(sessionId) {
+          return goneSessions.has(sessionId) ? undefined : {} as never;
         },
         write(_sessionId, data) {
           terminalWrites.push(data);
@@ -1135,6 +1170,11 @@ describe("auto-memory-service", () => {
           return sessionFor(role);
         },
         async resumeRoleSession(_repoRoot, _taskSlug, role) {
+          return sessionFor(role);
+        },
+        async markRoleActivityRunning(_repoRoot, _taskSlug, role) {
+          // Recorded only: no hook in these tests ends the role's turn.
+          activityRunningCalls.push(role);
           return sessionFor(role);
         }
       },
@@ -1162,7 +1202,7 @@ describe("auto-memory-service", () => {
       async isHarnessEngineerAvailable() {
         return true;
       },
-      now: () => "2026-07-11T00:00:00.000Z"
+      now: () => clock
     });
     const service = createService();
     return {
@@ -1179,6 +1219,18 @@ describe("auto-memory-service", () => {
       setRoleUnavailable(role: RoleName) {
         unavailableRoles.add(role);
       },
+      setSessionGone(role: RoleName, gone: boolean) {
+        if (gone) goneSessions.add(`session-${role}`);
+        else goneSessions.delete(`session-${role}`);
+      },
+      setRoleTurnEndedAt(role: RoleName, endedAt: string | undefined) {
+        if (endedAt) turnEndedAt.set(role, endedAt);
+        else turnEndedAt.delete(role);
+      },
+      setNow(value: string) {
+        clock = value;
+      },
+      activityRunningCalls,
       setAutoMemoryEnabled(enabled: boolean) {
         memoryEnabled = enabled;
       },

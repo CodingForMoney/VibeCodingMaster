@@ -310,8 +310,10 @@ commits with the code and judges Documentation Fit against the final code. A
 rerun code-diff Gate reviews incrementally; a Final Acceptance
 `needs-architect-follow-up` covers documentation and known-issues follow-up the
 same way. The validation-adequacy input hash excludes `docs/**`, every
-`ARCHITECTURE.md`, and `.ai/generated/**`, so a doc correction does not
-invalidate an approved validation, while any code or test change after the
+`ARCHITECTURE.md`, `.ai/generated/**`, and the `architect-debug.md` and
+`architecture-diagnosis.md` handoffs (Reviewer still reads their snapshots),
+so a doc correction, which rewrites the branch handoff, does not invalidate an
+approved validation, while any code or test change after the
 approval makes the code-diff request fail until validation-adequacy runs again.
 
 Before starting a code-diff review, Gate Review Service runs the task
@@ -474,7 +476,12 @@ target, runs applicable documentation checks, and submits
 `docs-update-report.md` with the exact Assignment ID. VCM validates fresh report
 evidence and the commit before starting the next assignment. Failure retains
 the assignment for Harness Studio retry; backend restart restores and resumes
-the pending assignment. The memory entry remains deleted throughout this work.
+the pending assignment. A dispatched assignment marks its owner running and is
+sent again only when the owner session is gone or its turn was interrupted
+(no Stop hook) at least 30 seconds earlier, so a reconcile never queues a
+duplicate behind the assignment's own turn. Resubmitting the report of an
+already completed assignment returns that assignment and commit instead of a
+generic path error. The memory entry remains deleted throughout this work.
 Active memory blocks are read-only to role turns. Proposal prompts run through
 the normal workflow-role sessions, so their `UserPromptSubmit`, `Stop`, and
 `StopFailure` hooks participate in Round/Turn tracking. Sequential proposals

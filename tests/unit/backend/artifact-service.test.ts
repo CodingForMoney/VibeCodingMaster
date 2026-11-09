@@ -306,8 +306,13 @@ describe("createArtifactService", () => {
       createdAt: "2026-09-09", updatedAt: "2026-09-09"
     };
     let active = true;
+    let completed = false;
     const service = createArtifactService(fs, {
-      getDurableDocAssignment: async (_repo, role) => active && role === assignment.owner ? assignment : undefined
+      getDurableDocAssignment: async (_repo, role) => active && role === assignment.owner ? assignment : undefined,
+      getCompletedDurableDocAssignment: async (_repo, role, artifactPath) =>
+        completed && role === assignment.owner && artifactPath === assignment.reportPath
+          ? { ...assignment, status: "completed", commit: "abc1234" }
+          : undefined
     });
     const content = renderDocsUpdateReportTemplate("demo-task", assignment.id)
       .replace("## Commit\n\nTBD", "## Commit\n\nabc1234")
@@ -341,6 +346,15 @@ describe("createArtifactService", () => {
     await expect(service.submitArtifact(request)).resolves.toMatchObject({ status: "ok" });
     active = false;
     await expect(service.submitArtifact(request)).rejects.toMatchObject({ code: "ARTIFACT_VALIDATION_FAILED" });
+
+    // A duplicate prompt after completion gets an answer the role can act on.
+    completed = true;
+    await expect(service.submitArtifact(request)).rejects.toMatchObject({
+      code: "DURABLE_DOC_ASSIGNMENT_COMPLETED",
+      message: "Durable-documentation assignment run-doc-1 is already completed (commit abc1234), and VCM accepted its report. No action is needed; end the turn."
+    });
+    await expect(service.submitArtifact({ ...request, role: "coder" as const }))
+      .rejects.toMatchObject({ code: "ARTIFACT_VALIDATION_FAILED" });
   });
 
   it("accepts incomplete coder evidence only as a draft", async () => {

@@ -196,6 +196,13 @@ export interface AutoMemoryService {
   cancelTaskRetrospectiveReview(taskRepoRoot: string, runId: string): Promise<void>;
   isRoleMemoryTurn(taskRepoRoot: string, role: RoleName): Promise<boolean>;
   getDurableDocAssignment(taskRepoRoot: string, role: RoleName): Promise<DurableDocAssignmentState | undefined>;
+  // The completed assignment of this role whose report path is artifactPath,
+  // so a resubmission after a duplicate prompt can be answered precisely.
+  getCompletedDurableDocAssignment(
+    taskRepoRoot: string,
+    role: RoleName,
+    artifactPath: string
+  ): Promise<DurableDocAssignmentState | undefined>;
   handleRoleHook(input: AutoMemoryRoleHookInput): Promise<boolean>;
   handleHarnessEngineerHook(input: AutoMemoryHarnessHookInput): Promise<AutoMemoryHarnessHookResult>;
   assertHarnessEngineerAvailable(taskRepoRoot: string): Promise<void>;
@@ -243,11 +250,14 @@ export interface AutoMemoryServiceDeps {
     | "getRoleSession"
     | "startRoleSession"
     | "resumeRoleSession"
+    | "markRoleActivityRunning"
   >;
   appSettings: Pick<AppSettingsService, "getPreferences" | "getGateReviewSettings">;
   isHarnessEngineerAvailable?: (repoRoot: string) => Promise<boolean>;
   now?: () => string;
 }
+
+const DURABLE_DOC_TURN_END_GRACE_MS = 30 * 1000;
 
 export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemoryService {
   const now = deps.now ?? (() => new Date().toISOString());
@@ -658,6 +668,28 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     const state = await loadActiveState(taskRepoRoot);
     const assignment = state?.status === "documenting" ? currentDurableDocAssignment(state) : undefined;
     return assignment?.status === "running" && assignment.owner === role ? assignment : undefined;
+  }
+
+  async function getCompletedDurableDocAssignment(
+    taskRepoRoot: string,
+    role: RoleName,
+    artifactPath: string
+  ): Promise<DurableDocAssignmentState | undefined> {
+    const runId = artifactPath.startsWith(`${MEMORY_REVIEW_RUNS_ROOT}/`)
+      ? artifactPath.slice(MEMORY_REVIEW_RUNS_ROOT.length + 1).split("/")[0]
+      : undefined;
+    if (!runId) {
+      return undefined;
+    }
+    let run: StoredMemoryReviewRun;
+    try {
+      run = await readRun(taskRepoRoot, runId);
+    } catch {
+      return undefined;
+    }
+    return run.assignments?.find((assignment) => assignment.status === "completed"
+      && assignment.owner === role
+      && assignment.reportPath === artifactPath);
   }
 
   async function handleRoleHook(input: AutoMemoryRoleHookInput): Promise<boolean> {
@@ -1101,7 +1133,14 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
         return;
       }
       const existing = await deps.sessionService.getRoleSession(baseRepoRoot, state.taskSlug, role);
-      if (existing?.activityStatus === "running" && deps.runtime.getSession(existing.id)) {
+      // The assignment's turn reports its own end through the Stop hook, so a
+      // live session keeps the assignment. Sending it again here would queue a
+      // duplicate prompt behind that turn.
+      if (
+        existing?.status === "running"
+        && deps.runtime.getSession(existing.id)
+        && !turnInterruptedAfterDispatch(existing, assignment)
+      ) {
         return;
       }
       assignment.status = assignment.owner ? "pending" : "waiting-owner";
@@ -1143,6 +1182,27 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     await submitTerminalInput(deps.runtime, session.id, assignment.owner
       ? buildDurableDocAssignmentPrompt(taskRepoRoot, assignment)
       : buildDurableDocOwnerPrompt(taskRepoRoot, assignment));
+    // Until the role's UserPromptSubmit hook arrives the session still looks
+    // idle; mark it running so nothing dispatches into it meanwhile.
+    await deps.sessionService.markRoleActivityRunning(
+      baseRepoRoot,
+      state.taskSlug,
+      assignment.owner ?? "project-manager",
+      session.id
+    );
+  }
+
+  // An interrupted turn sends no Stop hook, so its assignment would otherwise
+  // stay running. A turn that ends normally records its end on the session
+  // just before its Stop hook completes or fails the assignment, so the grace
+  // period keeps a reconcile from racing that hook.
+  function turnInterruptedAfterDispatch(session: RoleSessionRecord, assignment: DurableDocAssignmentState): boolean {
+    if (session.activityStatus === "running" || !session.lastTurnEndedAt || !assignment.dispatchedAt) {
+      return false;
+    }
+    const endedAt = Date.parse(session.lastTurnEndedAt);
+    return endedAt > Date.parse(assignment.dispatchedAt)
+      && Date.parse(now()) - endedAt >= DURABLE_DOC_TURN_END_GRACE_MS;
   }
 
   async function finishDurableDocAssignments(taskRepoRoot: string, state: StoredMemoryReviewState): Promise<void> {
@@ -1934,6 +1994,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     cancelTaskRetrospectiveReview,
     isRoleMemoryTurn,
     getDurableDocAssignment,
+    getCompletedDurableDocAssignment,
     handleRoleHook: (input) => withTaskLock(input.taskRepoRoot, () => handleRoleHook(input)),
     handleHarnessEngineerHook: (input) => withTaskLock(input.taskRepoRoot, () => handleHarnessEngineerHook(input)),
     assertHarnessEngineerAvailable

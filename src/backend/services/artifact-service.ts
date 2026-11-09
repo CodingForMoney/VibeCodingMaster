@@ -101,6 +101,11 @@ export interface SubmitArtifactInput {
 export interface ArtifactServiceDeps {
   workflowControlService?: Pick<WorkflowControlService, "submitProgress" | "assertRouteAuthorized">;
   getDurableDocAssignment?: (taskRepoRoot: string, role: RoleName) => Promise<DurableDocAssignmentState | undefined>;
+  getCompletedDurableDocAssignment?: (
+    taskRepoRoot: string,
+    role: RoleName,
+    artifactPath: string
+  ) => Promise<DurableDocAssignmentState | undefined>;
 }
 
 const ARTIFACT_PATH_KEYS: Array<[ArtifactKind, keyof HandoffPaths]> = [
@@ -330,6 +335,16 @@ export function createArtifactService(fs: FileSystemAdapter, deps: ArtifactServi
             throw artifactRejected(input.kind, [`Assignment ID must be exactly ${assignment.id}.`]);
           }
         } else if (input.artifactPath?.trim()) {
+          const completed = input.kind === "docs-update-report"
+            ? await deps.getCompletedDurableDocAssignment?.(input.repoRoot, input.role, input.artifactPath.trim())
+            : undefined;
+          if (completed) {
+            throw new VcmError({
+              code: "DURABLE_DOC_ASSIGNMENT_COMPLETED",
+              message: `Durable-documentation assignment ${completed.id} is already completed${completed.commit ? ` (commit ${completed.commit})` : ""}, and VCM accepted its report. No action is needed; end the turn.`,
+              statusCode: 409
+            });
+          }
           throw artifactRejected(input.kind, ["--path is not allowed for fixed artifact kinds."]);
         }
         const artifactPath = assignment?.reportPath ?? path.posix.join(input.handoffDir, definition.fileName ?? "");
