@@ -88,6 +88,14 @@ Notes:
   resubmission, transition-bound route authorization, interrupted paired-write
   replay, missing-state reconstruction, PM user-question waits, canceled
   approvals, direct-user unlock, and VCM-message non-unlock.
+- Changes to the fixed PM, Architect, or Tester rules, Workflow Control, or
+  Gate Review preconditions: run `workflow-rule-scenarios.test.ts`. Each
+  scenario walks one PM rule branch in a real Git worktree: roles commit and
+  write handoffs as the rules require, PM proposes the prescribed routes
+  through Workflow Control, and PM requests the prescribed Gates from the real
+  Gate Review service with a scripted Reviewer decision. A rule route the
+  controller refuses, or a prescribed Gate that fails to start, fails the
+  scenario. Add a scenario when a rule gains a branch.
 - PM question-detection changes: run `pm-user-question.test.ts`,
   `claude-hook-service.test.ts`, and `pm-user-question.e2e.test.ts`. Quoted
   questions, code, URL parameters, evidence tables, and analytical headings must
