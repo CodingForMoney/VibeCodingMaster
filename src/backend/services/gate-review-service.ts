@@ -158,6 +158,15 @@ const SOURCE_ARTIFACTS: Record<GateReviewGate, string[]> = {
   ]
 };
 
+// Reviewer reads the Debug and Diagnosis handoffs, but they stay out of the
+// validation-adequacy input hash: a Post-Validation Docs Correction rewrites
+// them, and like docs it changes no code or test evidence. Code and test
+// changes still change the tracked-evidence hash.
+const VALIDATION_HASH_EXCLUDED_ARTIFACTS = new Set([
+  ".ai/vcm/handoffs/architect-debug.md",
+  ".ai/vcm/handoffs/architecture-diagnosis.md"
+]);
+
 const CODE_DIFF_SOURCE_ARTIFACTS: Record<CodeDiffSource, string[]> = {
   coder: [
     ".ai/vcm/handoffs/architecture-plan.md",
@@ -1634,7 +1643,9 @@ async function computeInputHash(
     "docs/CODING_STANDARDS.md"
   ];
 
-  const sourceArtifacts = getSourceArtifacts(gate, codeDiffSources);
+  const sourceArtifacts = getSourceArtifacts(gate, codeDiffSources).filter(
+    (item) => gate !== "validation-adequacy" || !VALIDATION_HASH_EXCLUDED_ARTIFACTS.has(item)
+  );
   for (const relativePath of new Set([...common, ...sourceArtifacts].filter((item) => item !== coreArtifact))) {
     digest.update(relativePath);
     const absolutePath = resolveRepoPath(taskRepoRoot, relativePath);

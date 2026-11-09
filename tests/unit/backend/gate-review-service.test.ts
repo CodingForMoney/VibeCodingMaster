@@ -618,6 +618,40 @@ describe("gate-review-service", () => {
     await waitFor(async () => (await service.getState(tmpRepo!, "demo-task")).gates["validation-adequacy"].status === "completed");
   });
 
+  it("keeps validation-adequacy approval when a docs correction rewrites a branch handoff", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-branch-handoff-hash-"));
+    await writeHarnessFiles(tmpRepo);
+    const taskRoot = taskWorktree(tmpRepo);
+    await writeFile(path.join(taskRoot, ".ai/vcm/handoffs/test-report.md"), validTestReport(), "utf8");
+    await writeFile(path.join(taskRoot, ".ai/vcm/handoffs/architect-debug.md"), "Debug result before docs correction\n", "utf8");
+    await writeFile(path.join(taskRoot, ".ai/vcm/handoffs/architecture-diagnosis.md"), "Diagnosis before docs correction\n", "utf8");
+    let trackedEvidence = "100644 blob-a 0\tsrc/feature.ts\n";
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo, [], {
+        "ls-files -s -- . :(exclude).ai/vcm/** :(exclude)docs/** :(exclude,glob)**/ARCHITECTURE.md :(exclude).ai/generated/**": () => trackedEvidence
+      }),
+      runtime: createRuntime(tmpRepo, [], "approve"),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["validation-adequacy"]),
+      sessionService: createSessionService(),
+      roundService: createRoundService(),
+      reportPollIntervalMs: 5
+    });
+
+    expect((await service.requestReviewGate(tmpRepo, "demo-task", "validation-adequacy")).status).toBe("started");
+    await waitFor(async () => (await service.getState(tmpRepo!, "demo-task")).gates["validation-adequacy"].status === "completed");
+
+    await writeFile(path.join(taskRoot, ".ai/vcm/handoffs/architect-debug.md"), "Debug result covering the doc commit\n", "utf8");
+    await writeFile(path.join(taskRoot, ".ai/vcm/handoffs/architecture-diagnosis.md"), "Diagnosis covering the doc commit\n", "utf8");
+    expect((await service.requestReviewGate(tmpRepo, "demo-task", "validation-adequacy")).status).toBe("already_approved");
+
+    trackedEvidence = "100644 blob-b 0\tsrc/feature.ts\n";
+    expect((await service.requestReviewGate(tmpRepo, "demo-task", "validation-adequacy")).status).toBe("started");
+    await waitFor(async () => (await service.getState(tmpRepo!, "demo-task")).gates["validation-adequacy"].status === "completed");
+  });
+
   it("invalidates architecture approval when scaffold evidence changes", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-scaffold-hash-"));
     await writeHarnessFiles(tmpRepo);
