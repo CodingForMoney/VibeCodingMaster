@@ -12,6 +12,7 @@ import {
   waitFor
 } from "./helpers/e2e-actions.js";
 import type { MockClaudePromptContext } from "./helpers/mock-claude-runtime.js";
+import { writeBatchTranslations } from "./helpers/e2e-flow-fixtures.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 const GATEWAY_WAIT_TIMEOUT_MS = 30_000;
@@ -169,13 +170,8 @@ describe("backend E2E Gateway with mock channel and mock Claude Code", () => {
   }, 90_000);
 });
 
-async function writeGatewayTranslations(ctx: MockClaudePromptContext): Promise<void> {
-  await ctx.userPromptSubmit();
-  const items = parseConversationBatchPrompt(ctx.prompt);
-  for (const item of items) {
-    await ctx.writeAbsoluteFile(item.resultPath, translateForGatewayE2e(item.sourceText));
-  }
-  await ctx.stop();
+function writeGatewayTranslations(ctx: MockClaudePromptContext): Promise<void> {
+  return writeBatchTranslations(ctx, translateForGatewayE2e);
 }
 
 function translateForGatewayE2e(sourceText: string): string {
@@ -189,22 +185,6 @@ function translateForGatewayE2e(sourceText: string): string {
     return "Inspect the selected role flow.";
   }
   return `Translated: ${sourceText}`;
-}
-
-function parseConversationBatchPrompt(prompt: string): Array<{ resultPath: string; sourceText: string }> {
-  const items: Array<{ resultPath: string; sourceText: string }> = [];
-  const regex = /Result Path \d+:\s*(.+?)\n<VCM_TEXT\d+>\n([\s\S]*?)\n<\/VCM_TEXT\d+>/g;
-  for (const match of prompt.matchAll(regex)) {
-    const resultPath = match[1]?.trim();
-    const sourceText = match[2]?.trim();
-    if (resultPath && sourceText) {
-      items.push({ resultPath, sourceText });
-    }
-  }
-  if (items.length === 0) {
-    throw new Error(`No gateway translation items found in prompt:\n${prompt}`);
-  }
-  return items;
 }
 
 function sentTexts(env: { mockGateway: { sentTexts: readonly { text: string }[] } }): string[] {

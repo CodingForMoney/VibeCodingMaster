@@ -283,6 +283,12 @@ services with controlled runtime doubles:
   Validation Adequacy Gate before remaining validation completes.
 - Role-scoped translation feeds and Gateway input/output translation without
   duplicate translation work.
+- A whole task driven from the phone (`gateway-task-lifecycle.e2e.test.ts`):
+  `/create-task`, a translated request to PM, the Code-Change Flow under
+  Workflow Control and all three Gates, PM's final reply, a follow-up request
+  after completion, the two-step `/close-task`, and the next `/create-task`.
+  It also proves that closing a task leaves no recreated worktree behind while
+  the translation of PM's last reply is still pending.
 - Auto Memory proposal collection followed by memory review inside the same
   Task Harness Retrospective, plus direct retrospective execution when Auto
   Memory is disabled. The Auto Memory journey also proves that workflow-role
