@@ -384,7 +384,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     taskSlug: string;
     role: RoleName;
     sessionId: string;
-  }): Promise<SessionState> {
+  }, options: { createDir?: boolean } = {}): Promise<SessionState> {
     const state = getState(input.sessionId);
     state.repoRoot = input.repoRoot;
     state.baseRepoRoot = input.baseRepoRoot ?? input.repoRoot;
@@ -406,7 +406,9 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     }
     syncTaskFeedFromSessionState(input.sessionId, state);
 
-    await deps.fs.ensureDir(path.dirname(cachePath));
+    if (options.createDir !== false) {
+      await deps.fs.ensureDir(path.dirname(cachePath));
+    }
     return state;
   }
 
@@ -1742,13 +1744,16 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 
     const roleSession = await getGatewayRoleSession(input);
     if (roleSession) {
+      // A lookup only reads. A stopped session has no transcript tail to write
+      // events, and its task may be closing: creating the cache directory there
+      // would recreate the removed task worktree.
       const state = await prepareCache({
         repoRoot: roleSession.cwd,
         baseRepoRoot: input.repoRoot,
         taskSlug: input.taskSlug,
         role: input.role,
         sessionId: roleSession.id
-      });
+      }, { createDir: roleSession.status === "running" });
       if (roleSession.status === "running") {
         startTranscriptTail(roleSession);
       }
