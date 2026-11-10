@@ -22,6 +22,12 @@ export interface VcmRoleRecoveryState {
   nextRetryAt?: string;
   lastRetryAt?: string;
   failedAt?: string;
+  // Set while the role waits for a Claude plan usage limit to reset.
+  waitReason?: "usage-limit";
+  // When the usage limit resets, if Claude Code stated it.
+  limitResetAt?: string;
+  // When the role first hit the usage limit in this wait.
+  limitSince?: string;
 }
 
 /**

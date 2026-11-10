@@ -819,6 +819,18 @@ describe("createClaudeHookService", () => {
       lastAssistantMessage: "Cannot continue."
     },
     {
+      label: "account on hold",
+      error: "account_on_hold",
+      errorDetails: "Account is on hold",
+      lastAssistantMessage: "Cannot continue."
+    },
+    {
+      label: "cloud credential error",
+      error: "cloud_credential_error",
+      errorDetails: "Unable to load cloud credentials",
+      lastAssistantMessage: "Cannot continue."
+    },
+    {
       label: "context error code",
       error: "context_length_exceeded",
       errorDetails: "The request exceeded the available context.",
@@ -939,6 +951,162 @@ describe("createClaudeHookService", () => {
       failedAt: "2026-06-01T00:00:00.000Z"
     });
     expect(writes).toEqual([]);
+  });
+
+  describe("usage limits", () => {
+    const SESSION_LIMIT = "You've hit your session limit · resets 5:50pm (Asia/Singapore)";
+
+    // A coder session whose StopFailures go through the real retry logic,
+    // with the round's recovery state, timers, writes, and Gateway notices
+    // recorded.
+    function createUsageLimitHarness(clock: { now: string }) {
+      let recovery: Record<string, unknown> | undefined;
+      const timers: Array<{ callback: () => void; delayMs: number }> = [];
+      const writes: string[] = [];
+      const gatewayCalls: Array<Record<string, unknown>> = [];
+      const service = createClaudeHookService({
+        projectService: createProjectServiceStub(),
+        taskService: createTaskServiceStub(),
+        sessionService: {
+          getRoleSession: boundRoleSession,
+          async markRoleActivityRunning() {
+            return undefined;
+          },
+          async recordClaudeHookEvent() {
+            return undefined;
+          }
+        } as never,
+        messageService: {
+          async listPendingRouteFiles() {
+            return [];
+          },
+          async scanAndDispatchPendingRouteFiles() {
+            return [];
+          }
+        } as never,
+        roundService: {
+          async getSessionRoundState() {
+            return { taskSlug: "demo-task", status: "running", roleRecovery: recovery } as never;
+          },
+          async setRoleRecovery(input) {
+            recovery = input.recovery as unknown as Record<string, unknown>;
+            return {} as never;
+          },
+          async recordClaudeHookEvent() {
+            return {} as never;
+          }
+        } as RoundService,
+        translationService: {
+          async recordConversationBoundary() {
+            return undefined;
+          }
+        } as Pick<TranslationService, "recordConversationBoundary">,
+        appSettings: createAppSettingsStub(),
+        gatewayService: {
+          async handleRoleStop() {},
+          async handleRoleStopFailure(input) {
+            gatewayCalls.push(input as unknown as Record<string, unknown>);
+          }
+        },
+        runtime: {
+          write(_sessionId, data) {
+            writes.push(data);
+          }
+        },
+        now: () => clock.now,
+        retrySetTimeout(callback, delayMs) {
+          timers.push({ callback, delayMs });
+          return timers.length;
+        },
+        retryClearTimeout() {}
+      });
+      const fail = (lastAssistantMessage: string) => service.handleHook({
+        taskSlug: "demo-task",
+        role: "coder",
+        event: {
+          hook_event_name: "StopFailure",
+          session_id: "claude_coder",
+          error: "rate_limit",
+          error_details: "429 Too Many Requests",
+          last_assistant_message: lastAssistantMessage
+        }
+      });
+      return { fail, timers, writes, gatewayCalls, recovery: () => recovery };
+    }
+
+    it("waits until shortly after the reset, without counting retries, and tells Gateway once", async () => {
+      const clock = { now: "2026-10-26T09:32:33.000Z" };
+      const harness = createUsageLimitHarness(clock);
+
+      await harness.fail(SESSION_LIMIT);
+
+      expect(harness.recovery()).toMatchObject({
+        status: "waiting",
+        attempt: 0,
+        error: "rate_limit",
+        lastAssistantMessage: SESSION_LIMIT,
+        waitReason: "usage-limit",
+        limitResetAt: "2026-10-26T09:50:00.000Z",
+        limitSince: "2026-10-26T09:32:33.000Z",
+        nextRetryAt: "2026-10-26T09:52:00.000Z"
+      });
+      expect(harness.timers.map((timer) => timer.delayMs)).toEqual([19 * 60_000 + 27_000]);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(harness.gatewayCalls).toEqual([expect.objectContaining({
+        role: "coder",
+        error: "rate_limit",
+        lastAssistantMessage: SESSION_LIMIT,
+        usageLimitWait: { resetAt: "2026-10-26T09:50:00.000Z", nextRetryAt: "2026-10-26T09:52:00.000Z" }
+      })]);
+      expect(harness.writes).toEqual([]);
+
+      // The retry after the reset finds the limit still in place and no reset
+      // time: VCM checks again in an hour and does not notify again.
+      clock.now = "2026-10-26T09:52:00.000Z";
+      harness.timers[0]!.callback();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(harness.writes.join("")).toContain("[VCM Recovery]");
+      await harness.fail("Claude usage limit reached.");
+
+      expect(harness.recovery()).toMatchObject({
+        status: "waiting",
+        attempt: 0,
+        waitReason: "usage-limit",
+        limitResetAt: undefined,
+        limitSince: "2026-10-26T09:32:33.000Z",
+        nextRetryAt: "2026-10-26T10:52:00.000Z"
+      });
+      expect(harness.timers.at(-1)?.delayMs).toBe(60 * 60_000);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(harness.gatewayCalls).toHaveLength(1);
+    });
+
+    it("stops waiting after eight days", async () => {
+      const clock = { now: "2026-10-26T09:32:33.000Z" };
+      const harness = createUsageLimitHarness(clock);
+      await harness.fail("Claude usage limit reached.");
+
+      clock.now = "2026-11-03T09:32:33.000Z";
+      await harness.fail("Claude usage limit reached.");
+
+      expect(harness.recovery()).toMatchObject({
+        status: "failed",
+        waitReason: "usage-limit",
+        limitSince: "2026-10-26T09:32:33.000Z"
+      });
+    });
+
+    it("keeps short-term rate limits on the normal retry schedule", async () => {
+      const harness = createUsageLimitHarness({ now: "2026-10-26T09:32:33.000Z" });
+
+      await harness.fail("API Error: Rate limit reached");
+
+      expect(harness.recovery()).toMatchObject({ status: "waiting", attempt: 1, nextRetryAt: "2026-10-26T09:33:33.000Z" });
+      expect(harness.recovery()?.waitReason).toBeUndefined();
+      expect(harness.timers.map((timer) => timer.delayMs)).toEqual([60_000]);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(harness.gatewayCalls).toEqual([]);
+    });
   });
 
   it("notifies Gateway when a StopFailure becomes a terminal role failure", async () => {

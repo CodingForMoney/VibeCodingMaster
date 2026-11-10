@@ -30,13 +30,22 @@ import type { TranslationWorkerService } from "./translation-worker-service.js";
 import type { ArchitectRestartService } from "./architect-restart-service.js";
 import type { WorkflowControlService } from "./workflow-control-service.js";
 import type { RoleContextRestartService } from "./role-context-restart-service.js";
+import { detectUsageLimit, type UsageLimit } from "./usage-limit.js";
 
 const MAX_ROLE_RETRY_ATTEMPTS = 20;
 const ROLE_RETRY_BASE_DELAY_MS = 60_000;
+// A usage limit waits for its reset time, retried shortly after it; a limit
+// whose reset time is unknown is checked again every hour. Waiting stops after
+// eight days, longer than a weekly limit lasts.
+const USAGE_LIMIT_RESET_BUFFER_MS = 2 * 60_000;
+const USAGE_LIMIT_UNKNOWN_RESET_RETRY_MS = 60 * 60_000;
+const MAX_USAGE_LIMIT_WAIT_MS = 8 * 24 * 60 * 60_000;
 const NON_RETRYABLE_STOP_FAILURE_ERRORS = new Set([
   "authentication_failed",
   "oauth_org_not_allowed",
+  "account_on_hold",
   "billing_error",
+  "cloud_credential_error",
   "invalid_request",
   "model_not_found",
   "max_output_tokens",
@@ -601,7 +610,10 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       });
     }
 
-    const retryResult = await scheduleStopFailureRetry(input, context, failure);
+    const usageLimit = detectUsageLimit(failure, new Date(now()));
+    const retryResult = usageLimit
+      ? await scheduleUsageLimitRetry(input, context, failure, usageLimit)
+      : await scheduleStopFailureRetry(input, context, failure);
     if (retryResult === "scheduled") {
       return {
         ok: true,
@@ -745,6 +757,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
         role: input.role,
         error: options.gatewayStopFailure.error,
         errorDetails: options.gatewayStopFailure.errorDetails,
+        lastAssistantMessage: options.gatewayStopFailure.lastAssistantMessage,
         attempt: options.gatewayStopFailure.attempt,
         maxAttempts: options.gatewayStopFailure.maxAttempts
       }).catch(() => undefined);
@@ -966,6 +979,95 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     return "scheduled";
   }
 
+  // Waits for the usage limit to reset instead of retrying on the short-term
+  // schedule, which would give up after about three and a half hours while a
+  // session or weekly limit can last longer. Waits do not count as retry
+  // attempts, and Gateway hears about the limit once, when the wait starts.
+  async function scheduleUsageLimitRetry(
+    input: ClaudeHookRequest,
+    context: Awaited<ReturnType<typeof getHookContext>>,
+    failure: StopFailureDiagnostic,
+    usageLimit: UsageLimit
+  ): Promise<StopFailureRetryResult> {
+    const preferences = await deps.appSettings.getPreferences();
+    if (!preferences.roleRetryEnabled || !deps.runtime) {
+      return "not-scheduled";
+    }
+
+    const stateInput = createRoundStateInput(context);
+    const currentRoundState = await deps.roundService.getSessionRoundState(stateInput);
+    if (
+      currentRoundState.stopReason === "manual-interrupt"
+      && currentRoundState.status === "stopped"
+      && currentRoundState.activeRole === input.role
+    ) {
+      return "manual-interrupt";
+    }
+    const previous = currentRoundState.roleRecovery?.role === input.role
+      && currentRoundState.roleRecovery.status !== "failed"
+      ? currentRoundState.roleRecovery
+      : undefined;
+    const alreadyWaiting = previous?.waitReason === "usage-limit";
+    const timestamp = now();
+    const nowMs = Date.parse(timestamp);
+    const limitSince = alreadyWaiting && previous?.limitSince ? previous.limitSince : timestamp;
+    const usageLimitFailure = { ...failure, usageLimit: { resetAt: usageLimit.resetAt, limitSince } };
+    if (nowMs - Date.parse(limitSince) >= MAX_USAGE_LIMIT_WAIT_MS) {
+      await markStopFailureRecoveryFailed(input, context, usageLimitFailure, previous?.attempt ?? 0, timestamp);
+      return "not-scheduled";
+    }
+
+    const resetMs = usageLimit.resetAt ? Date.parse(usageLimit.resetAt) : Number.NaN;
+    const nextRetryAt = new Date(resetMs > nowMs
+      ? resetMs + USAGE_LIMIT_RESET_BUFFER_MS
+      : nowMs + USAGE_LIMIT_UNKNOWN_RESET_RETRY_MS).toISOString();
+    const attempt = previous?.attempt ?? 0;
+    await deps.roundService.setRoleRecovery({
+      ...stateInput,
+      recovery: {
+        role: input.role,
+        status: "waiting",
+        attempt,
+        maxAttempts: MAX_ROLE_RETRY_ATTEMPTS,
+        lastFailureAt: timestamp,
+        error: failure.error,
+        errorDetails: failure.errorDetails,
+        lastAssistantMessage: failure.lastAssistantMessage,
+        retryable: true,
+        nextRetryAt,
+        waitReason: "usage-limit",
+        limitResetAt: usageLimit.resetAt,
+        limitSince
+      }
+    });
+    const session = await deps.sessionService.getRoleSession(
+      context.project.repoRoot,
+      context.taskSlug,
+      input.role
+    );
+    if (session) {
+      await deps.sessionService.markRoleActivityRunning(
+        context.project.repoRoot,
+        context.taskSlug,
+        input.role,
+        session.id
+      );
+    }
+    scheduleStopFailureRetryTimer(input, context, attempt, nextRetryAt);
+    if (!alreadyWaiting && (await isHookSessionBoundToTask(context, input.role))) {
+      void deps.gatewayService?.handleRoleStopFailure({
+        repoRoot: context.project.repoRoot,
+        taskSlug: context.taskSlug,
+        role: input.role,
+        error: failure.error,
+        errorDetails: failure.errorDetails,
+        lastAssistantMessage: failure.lastAssistantMessage,
+        usageLimitWait: { resetAt: usageLimit.resetAt, nextRetryAt }
+      }).catch(() => undefined);
+    }
+    return "scheduled";
+  }
+
   async function isManualInterruptedStopFailure(
     context: Awaited<ReturnType<typeof getHookContext>>,
     role: RoleName
@@ -1056,7 +1158,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
   async function markStopFailureRecoveryFailed(
     input: ClaudeHookRequest,
     context: Awaited<ReturnType<typeof getHookContext>>,
-    failure: StopFailureDiagnostic,
+    failure: StopFailureDiagnostic & { usageLimit?: { resetAt?: string; limitSince: string } },
     attempt: number,
     timestamp = now()
   ): Promise<void> {
@@ -1073,7 +1175,10 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
         errorDetails: failure.errorDetails,
         lastAssistantMessage: failure.lastAssistantMessage,
         retryable: failure.retryable,
-        failedAt: timestamp
+        failedAt: timestamp,
+        ...(failure.usageLimit
+          ? { waitReason: "usage-limit" as const, limitResetAt: failure.usageLimit.resetAt, limitSince: failure.usageLimit.limitSince }
+          : {})
       }
     });
   }

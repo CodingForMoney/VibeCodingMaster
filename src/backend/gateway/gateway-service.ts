@@ -93,8 +93,13 @@ export interface GatewayRoleStopFailureInput {
   role: RoleName;
   error?: string;
   errorDetails?: string;
+  // The error text Claude Code showed, such as its usage-limit message.
+  lastAssistantMessage?: string;
   attempt?: number;
   maxAttempts?: number;
+  // Set when the role waits for a Claude plan usage limit to reset; VCM
+  // continues on its own at nextRetryAt.
+  usageLimitWait?: { resetAt?: string; nextRetryAt: string };
 }
 
 export interface GatewayServiceDeps {
@@ -1622,6 +1627,22 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     round?: VcmSessionRoundState
   ): string {
     const roundLabel = round?.roundSequence ? `第 ${round.roundSequence} 轮` : "当前 round";
+    const claudeMessage = input.lastAssistantMessage && input.lastAssistantMessage !== input.errorDetails
+      ? `Claude Code: ${truncateGatewayFailureDetails(input.lastAssistantMessage)}`
+      : undefined;
+    if (input.usageLimitWait) {
+      return [
+        "Claude 额度已用完，VCM 已暂停该角色，等待额度恢复。",
+        `Task: ${input.taskSlug}`,
+        `Role: ${input.role}`,
+        `Round: ${roundLabel}`,
+        claudeMessage,
+        "",
+        input.usageLimitWait.resetAt
+          ? "VCM 会在额度恢复约 2 分钟后自动继续，无需操作。"
+          : "Claude Code 没有给出恢复时间，VCM 每小时自动检查一次，恢复后自动继续。"
+      ].filter((line): line is string => line !== undefined).join("\n");
+    }
     const retryLine = input.maxAttempts !== undefined
       ? `Retry: ${input.attempt ?? 0}/${input.maxAttempts}`
       : undefined;
@@ -1633,6 +1654,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       input.error ? `Reason: ${input.error}` : undefined,
       retryLine,
       input.errorDetails ? `Details: ${truncateGatewayFailureDetails(input.errorDetails)}` : undefined,
+      claudeMessage,
       "",
       "请在 VCM 中检查状态，或修复问题后继续给出下一步指令。"
     ].filter((line): line is string => line !== undefined).join("\n");

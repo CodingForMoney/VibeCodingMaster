@@ -837,6 +837,45 @@ describe("gateway-service long connection", () => {
     }
   });
 
+  it("tells the phone when a role waits for a Claude usage limit to reset", async () => {
+    const settings = createSettings({
+      enabled: true,
+      binding: {
+        token: "token-1",
+        boundUserId: "user-1",
+        loginUserId: "user-1"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const service = createService({
+      settings,
+      channel: createChannel([], sentTexts),
+      roundState: { status: "running", roundId: "round-1", roundSequence: 3, activeRole: "coder" }
+    });
+
+    try {
+      await service.setConnectionEnabled(true);
+      await service.handleRoleStopFailure({
+        repoRoot: "/repo",
+        taskSlug: "demo-task",
+        role: "coder",
+        error: "rate_limit",
+        errorDetails: "429 Too Many Requests",
+        lastAssistantMessage: "You've hit your session limit · resets 5:50pm (Asia/Singapore)",
+        usageLimitWait: { resetAt: "2026-10-26T09:50:00.000Z", nextRetryAt: "2026-10-26T09:52:00.000Z" }
+      });
+
+      expect(sentTexts).toHaveLength(1);
+      expect(sentTexts[0]).toContain("Claude 额度已用完，VCM 已暂停该角色，等待额度恢复。");
+      expect(sentTexts[0]).toContain("Role: coder");
+      expect(sentTexts[0]).toContain("Claude Code: You've hit your session limit · resets 5:50pm (Asia/Singapore)");
+      expect(sentTexts[0]).toContain("VCM 会在额度恢复约 2 分钟后自动继续，无需操作。");
+      expect(sentTexts[0]).not.toContain("Retry:");
+    } finally {
+      service.stop();
+    }
+  });
+
   it("does not push role stop failure messages for manual interrupts", async () => {
     const settings = createSettings({
       enabled: true,

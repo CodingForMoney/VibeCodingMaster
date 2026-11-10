@@ -1035,9 +1035,20 @@ Claude hooks:
 
 Role retry is enabled by default. Retryable StopFailure events retry up to 20
 times: first after 1 minute, then +1 minute per attempt. Non-retryable errors
-include authentication, billing, invalid request, model-not-found, and
-max-output-token failures. Context-length and request-too-large failures are
-also non-retryable because resending the unchanged context cannot recover them.
+include authentication, account-on-hold, billing, cloud-credential, invalid
+request, model-not-found, and max-output-token failures. Context-length and
+request-too-large failures are also non-retryable because resending the
+unchanged context cannot recover them.
+
+A Claude plan usage limit arrives as a `rate_limit` StopFailure, the same type
+as short-term throttling; only Claude Code's message tells them apart
+("You've hit your session limit · resets 5:50pm (Asia/Singapore)"). VCM
+recognizes that message and waits for the reset instead: it retries two
+minutes after the stated reset time, or every hour when the message gives
+none. These waits do not count as retry attempts, the round state records
+`waitReason: "usage-limit"` with the reset time, desktop shows the reset, and
+Gateway is told once when the wait starts. Waiting ends as a recovery failure
+after eight days, longer than a weekly limit lasts.
 
 Round state is backend-owned. Stop starts a 10 second settle window; a new
 `UserPromptSubmit` inside the window continues the same Round. If no new prompt

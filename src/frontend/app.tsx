@@ -34,7 +34,7 @@ import type { ProjectSummary } from "../shared/types/project.js";
 import type { ProjectRuntimeState } from "../shared/types/api.js";
 import type { WorkflowControlState } from "../shared/types/workflow.js";
 import type { RoleName } from "../shared/types/role.js";
-import type { VcmRoleRecoveryState, VcmRoundStatus, VcmSessionRoundState } from "../shared/types/round.js";
+import type { VcmRoundStatus, VcmSessionRoundState } from "../shared/types/round.js";
 import {
   createSessionModelOptions,
   type ClaudePermissionMode,
@@ -64,6 +64,11 @@ import { clearUiErrorForActions, formatUiError } from "./state/error-format.js";
 import { clearPollError, recordPollError } from "./state/poll-error-gate.js";
 import { useUiErrorState } from "./state/ui-error-state.js";
 import { useScheduledPoll } from "./state/use-scheduled-poll.js";
+import {
+  formatRoleRecoveryFailureMessage,
+  formatRoleRecoveryNotice,
+  getRoleRecoveryNoticeKey
+} from "./state/role-recovery-notice.js";
 import { ProjectDashboard } from "./routes/project-dashboard.js";
 import { TaskWorkspace, type TaskWorkspaceLaunchState } from "./routes/task-workspace.js";
 
@@ -1798,60 +1803,6 @@ type AudioContextWindow = Window & typeof globalThis & {
 };
 
 let flowPauseAudioContext: AudioContext | null = null;
-
-function getRoleRecoveryNoticeKey(taskSlug: string, recovery: VcmRoleRecoveryState): string {
-  return `${taskSlug}:${recovery.role}:${recovery.lastFailureAt}`;
-}
-
-function formatRoleRecoveryNotice(recovery: VcmRoleRecoveryState): string {
-  const role = formatRoleRecoveryRole(recovery.role);
-  const reason = formatRoleRecoveryReason(recovery);
-  if (recovery.status === "retrying") {
-    return `CC 出错，正在重试 ${role}${reason} · 第 ${recovery.attempt}/${recovery.maxAttempts} 次`;
-  }
-  return `CC 出错，重试中 ${role}${reason} · 第 ${recovery.attempt}/${recovery.maxAttempts} 次 · ${formatRetryDelay(recovery.nextRetryAt)}`;
-}
-
-function formatRoleRecoveryFailureMessage(recovery: VcmRoleRecoveryState, roleLabel: string): string {
-  const reason = formatRoleRecoveryReason(recovery);
-  if (recovery.retryable === false) {
-    return `CC stopped for ${roleLabel}: ${formatRoleRecoveryError(recovery)} cannot be fixed by retrying.`;
-  }
-  return `CC retry failed after ${recovery.maxAttempts} attempts for ${roleLabel}${reason}.`;
-}
-
-function formatRoleRecoveryReason(recovery: VcmRoleRecoveryState): string {
-  if (!recovery.error || recovery.error === "unknown") {
-    return "";
-  }
-  return ` · ${recovery.error}`;
-}
-
-function formatRoleRecoveryError(recovery: VcmRoleRecoveryState): string {
-  return recovery.error && recovery.error !== "unknown"
-    ? recovery.error
-    : "this error";
-}
-
-function formatRoleRecoveryRole(role: string): string {
-  return role
-    .split("-")
-    .filter(Boolean)
-    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
-    .join(" ");
-}
-
-function formatRetryDelay(nextRetryAt: string | undefined): string {
-  if (!nextRetryAt) {
-    return "即将重试";
-  }
-  const delayMs = Date.parse(nextRetryAt) - Date.now();
-  if (!Number.isFinite(delayMs) || delayMs <= 0) {
-    return "即将重试";
-  }
-  const minutes = Math.ceil(delayMs / 60_000);
-  return `${minutes} 分钟后`;
-}
 
 async function primeFlowPauseAudio(): Promise<boolean> {
   const context = getFlowPauseAudioContext();
