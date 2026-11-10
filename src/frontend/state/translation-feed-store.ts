@@ -36,49 +36,65 @@ export function selectTranslationPanelSessionState(
   return store.sessions[sessionId] ?? createEmptySessionState(role);
 }
 
+// Returns the same store, and the same session objects, when a poll brings
+// nothing new: every role's translation panel re-renders from this store each
+// second, so a fresh object per poll would re-render every retained entry.
 export function applyTranslationTaskFeed(
   store: TranslationPanelFeedStore,
   result: PollTranslationTaskFeedResult
 ): TranslationPanelFeedStore {
-  const next = ensureTaskStore(store, result.taskSlug);
-  const sessions = { ...next.sessions };
+  const base = ensureTaskStore(store, result.taskSlug);
+  let sessions = base.sessions;
+  const setSession = (sessionId: string, next: TranslationPanelSessionState) => {
+    if (sessions === base.sessions) {
+      sessions = { ...base.sessions };
+    }
+    sessions[sessionId] = next;
+  };
 
   for (const session of result.sessions) {
-    sessions[session.sessionId] = {
+    const current = sessions[session.sessionId];
+    if (current && current.role === session.role && current.status === session.status) {
+      continue;
+    }
+    setSession(session.sessionId, {
       ...createEmptySessionState(session.role),
-      ...sessions[session.sessionId],
+      ...current,
       role: session.role,
       status: session.status
-    };
+    });
   }
 
   for (const taskEvent of result.events) {
     const current = sessions[taskEvent.sessionId] ?? createEmptySessionState(taskEvent.role);
     if (taskEvent.event.type === "status") {
-      sessions[taskEvent.sessionId] = {
+      setSession(taskEvent.sessionId, {
         ...current,
         role: taskEvent.role,
         status: taskEvent.event.status
-      };
+      });
     } else if (taskEvent.event.type === "failures") {
-      sessions[taskEvent.sessionId] = {
+      setSession(taskEvent.sessionId, {
         ...current,
         role: taskEvent.role,
         failures: taskEvent.event.failures
-      };
+      });
     } else if (taskEvent.event.type === "entry") {
       const trimmed = trimTranslationEntries(upsertEntry(current.entries, taskEvent.event.entry));
-      sessions[taskEvent.sessionId] = {
+      setSession(taskEvent.sessionId, {
         ...current,
         role: taskEvent.role,
         entries: trimmed.entries,
         failures: trimmed.removedIds.size > 0
           ? current.failures.filter((failure) => !trimmed.removedIds.has(failure.translationId))
           : current.failures
-      };
+      });
     }
   }
 
+  if (base === store && sessions === base.sessions && base.cursor === result.nextCursor) {
+    return store;
+  }
   return {
     taskSlug: result.taskSlug,
     cursor: result.nextCursor,

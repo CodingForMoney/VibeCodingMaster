@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { memo, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -258,13 +258,7 @@ export function TranslationPanel({
       </div>
 
       <div className="translation-entry-list" ref={entryListRef}>
-        {entries.length === 0 ? <p className="muted">Translated Claude Code output will appear here.</p> : null}
-        {entries.map((entry) => (
-          <TranslationEntryRow
-            entry={entry}
-            key={entry.id}
-          />
-        ))}
+        <TranslationEntryList entries={entries} />
       </div>
 
       <div className="translation-composer">
@@ -695,7 +689,26 @@ function FileTranslationPanel({
   );
 }
 
-function TranslationEntryRow({ entry }: { entry: TranslationEntry }) {
+// Every role's panel stays mounted and re-renders on each task poll, while a
+// long task retains up to 500 entries per panel. The list and its rows are
+// memoized on entry identity, which the feed store keeps for unchanged entries,
+// so a poll that brings nothing new skips them instead of rebuilding the list
+// and re-parsing each entry's Markdown.
+const TranslationEntryList = memo(function TranslationEntryList({ entries }: { entries: TranslationEntry[] }) {
+  return (
+    <>
+      {entries.length === 0 ? <p className="muted">Translated Claude Code output will appear here.</p> : null}
+      {entries.map((entry) => (
+        <TranslationEntryRow
+          entry={entry}
+          key={entry.id}
+        />
+      ))}
+    </>
+  );
+});
+
+const TranslationEntryRow = memo(function TranslationEntryRow({ entry }: { entry: TranslationEntry }) {
   if (entry.sourceKind === "conversation-boundary") {
     return <ConversationBoundaryRow entry={entry} />;
   }
@@ -722,7 +735,7 @@ function TranslationEntryRow({ entry }: { entry: TranslationEntry }) {
       {entry.error ? <p className="translation-entry-note is-error">{entry.error}</p> : null}
     </article>
   );
-}
+});
 
 function ConversationBoundaryRow({ entry }: { entry: TranslationEntry }) {
   const label = entry.boundaryKind === "end" ? "结束" : "开始";
