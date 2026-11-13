@@ -434,8 +434,8 @@ describe("auto-memory-service", () => {
       "# Architecture\n\nLifecycle ownership is backend-owned.\n",
       "utf8"
     );
-    context.recordHarnessCommit(["docs/ARCHITECTURE.md"], "d0c0001");
     const assignmentId = state.active!.assignments[0].id;
+    context.recordHarnessCommit(["docs/ARCHITECTURE.md"], "d0c0001", `[VCM Docs] ${assignmentId}: document lifecycle ownership`);
     await mkdir(path.dirname(path.join(context.taskRepoRoot, state.active!.assignments[0].reportPath)), { recursive: true });
     await writeFile(
       path.join(context.taskRepoRoot, state.active!.assignments[0].reportPath),
@@ -586,6 +586,31 @@ describe("auto-memory-service", () => {
     expect(state.status).toBe("failed");
     expect(state.active!.assignments[0].error).toContain("Unable to dispatch");
     expect(state.active!.assignments[1].status).toBe("completed");
+  });
+
+  it("tells the owner which commit subject to use and rejects a documentation commit with another subject", async () => {
+    const context = await createContext(true);
+    const [assignment] = await prepareDocAssignments(context, ["docs/ARCHITECTURE.md"]);
+    expect(context.terminalWrites.join("\n")).toContain(`Use the commit subject "[VCM Docs] ${assignment.id}: <summary>"`);
+
+    // The owner committed with its normal task subject.
+    const targetPath = path.join(context.taskRepoRoot, assignment.targetPath);
+    await mkdir(path.dirname(targetPath), { recursive: true });
+    await writeFile(targetPath, assignment.content);
+    context.recordHarnessCommit([assignment.targetPath], "d0c0456", "architect(demo): document the module");
+    await writeAssignmentReport(context, assignment, "d0c0456");
+    const report = await readFile(path.join(context.taskRepoRoot, assignment.reportPath), "utf8");
+
+    // Submission feedback names the problem while the role can still fix it.
+    await expect(context.service.checkDurableDocAssignmentReport(context.taskRepoRoot, assignment, report))
+      .resolves.toBe(`Commit d0c0456 subject must start with "[VCM Docs] ${assignment.id}:"; found "architect(demo): document the module". Reword the commit (git commit --amend when it is the latest commit) and report it again.`);
+    await expect(context.service.checkDurableDocAssignmentReport(context.taskRepoRoot, assignment, report.replace("## Decision\n\nsynced", "## Decision\n\nunchanged")))
+      .resolves.toBeUndefined();
+
+    await context.service.handleRoleHook(docHook(context, "architect"));
+    const state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.status).toBe("failed");
+    expect(state.active!.assignments[0].error).toContain(`subject must start with "[VCM Docs] ${assignment.id}:"`);
   });
 
   it("accepts the actual documentation commit after HEAD advances", async () => {
@@ -1091,7 +1116,7 @@ describe("auto-memory-service", () => {
     const gitCommits: Array<{ message: string; paths: string[] }> = [];
     let gitDiff = "";
     let headCommit = "base-commit";
-    const commitHistory = [{ sha: headCommit, paths: [] as string[] }];
+    const commitHistory: Array<{ sha: string; paths: string[]; subject?: string }> = [{ sha: headCommit, paths: [] }];
     const busyRoles = new Set<RoleName>();
     const unavailableRoles = new Set<RoleName>();
     const goneSessions = new Set<string>();
@@ -1127,7 +1152,7 @@ describe("auto-memory-service", () => {
         async getCommitInfo(_repo, ref) {
           const matches = commitHistory.filter((commit) => commit.sha.startsWith(ref!));
           if (matches.length !== 1) throw new Error(`Unknown or ambiguous commit: ${ref}`);
-          return { sha: matches[0].sha, subject: "test commit" };
+          return { sha: matches[0].sha, subject: matches[0].subject ?? "test commit" };
         },
         async getChangedPaths(_repo, base, head) {
           if (base === `${head}^`) {
@@ -1237,8 +1262,8 @@ describe("auto-memory-service", () => {
       setGitDiff(diff: string) {
         gitDiff = diff;
       },
-      recordHarnessCommit(paths: string[], commit = "harness-memory-commit") {
-        commitHistory.push({ sha: commit, paths: [...paths] });
+      recordHarnessCommit(paths: string[], commit = "harness-memory-commit", subject?: string) {
+        commitHistory.push({ sha: commit, paths: [...paths], subject });
         headCommit = commit;
       }
     };
@@ -1283,7 +1308,7 @@ describe("auto-memory-service", () => {
     const targetPath = path.join(context.taskRepoRoot, assignment.targetPath);
     await mkdir(path.dirname(targetPath), { recursive: true });
     await writeFile(targetPath, assignment.content);
-    context.recordHarnessCommit([assignment.targetPath], commit);
+    context.recordHarnessCommit([assignment.targetPath], commit, `[VCM Docs] ${assignment.id}: update ${assignment.targetPath}`);
     await writeAssignmentReport(context, assignment, commit);
   }
 

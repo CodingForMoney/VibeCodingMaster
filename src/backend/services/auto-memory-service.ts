@@ -19,7 +19,7 @@ import type {
 import type { RoleName, VcmRoleName } from "../../shared/types/role.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
 import { checkMarkdownArtifact, readArtifactSectionContent, readArtifactSectionValue } from "../../shared/validation/artifact-check.js";
-import { DOCS_UPDATE_COMMIT_RULE } from "../../shared/validation/artifact-contract.js";
+import { DOCS_UPDATE_COMMIT_RULE, durableDocCommitSubjectPrefix } from "../../shared/validation/artifact-contract.js";
 import { resolveRepoPath, type FileSystemAdapter } from "../adapters/filesystem.js";
 import type { GitAdapter } from "../adapters/git-adapter.js";
 import { VcmError } from "../errors.js";
@@ -203,6 +203,12 @@ export interface AutoMemoryService {
     role: RoleName,
     artifactPath: string
   ): Promise<DurableDocAssignmentState | undefined>;
+  // The problem completion would find with a synced report's commit, if any.
+  checkDurableDocAssignmentReport(
+    taskRepoRoot: string,
+    assignment: DurableDocAssignmentState,
+    reportContent: string
+  ): Promise<string | undefined>;
   handleRoleHook(input: AutoMemoryRoleHookInput): Promise<boolean>;
   handleHarnessEngineerHook(input: AutoMemoryHarnessHookInput): Promise<AutoMemoryHarnessHookResult>;
   assertHarnessEngineerAvailable(taskRepoRoot: string): Promise<void>;
@@ -668,6 +674,22 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     const state = await loadActiveState(taskRepoRoot);
     const assignment = state?.status === "documenting" ? currentDurableDocAssignment(state) : undefined;
     return assignment?.status === "running" && assignment.owner === role ? assignment : undefined;
+  }
+
+  async function checkDurableDocAssignmentReport(
+    taskRepoRoot: string,
+    assignment: DurableDocAssignmentState,
+    reportContent: string
+  ): Promise<string | undefined> {
+    if (readArtifactSectionValue(reportContent, "Decision")?.trim().toLowerCase() !== "synced") {
+      return undefined;
+    }
+    try {
+      await validateDurableDocCommit(taskRepoRoot, assignment, reportContent, await deps.git.getHeadCommit(taskRepoRoot));
+      return undefined;
+    } catch (error) {
+      return errorMessage(error);
+    }
   }
 
   async function getCompletedDurableDocAssignment(
@@ -1262,8 +1284,9 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
   ): Promise<string> {
     const reportedCommit = readArtifactSectionContent(reportContent, "Commit")!;
     let commit: string;
+    let subject: string;
     try {
-      commit = (await deps.git.getCommitInfo(taskRepoRoot, reportedCommit)).sha;
+      ({ sha: commit, subject } = await deps.git.getCommitInfo(taskRepoRoot, reportedCommit));
     } catch (error) {
       const detail = error instanceof VcmError && error.hint ? `${errorMessage(error)} ${error.hint}` : errorMessage(error);
       throw new Error(`Commit ${reportedCommit} could not be resolved to a unique Git commit: ${detail}`);
@@ -1286,6 +1309,10 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     const changedPaths = await deps.git.getChangedPaths(taskRepoRoot, assignment.baseCommit, currentHead);
     if (!changedPaths.includes(assignment.targetPath)) {
       throw new Error(`Commit ${commit} modified ${assignment.targetPath}, but no net change remains in ${assignment.baseCommit}..${currentHead}. Verify the current document before reporting completion.`);
+    }
+    const subjectPrefix = durableDocCommitSubjectPrefix(assignment.id);
+    if (!subject.startsWith(subjectPrefix)) {
+      throw new Error(`Commit ${commit} subject must start with "${subjectPrefix}"; found "${subject}". Reword the commit (git commit --amend when it is the latest commit) and report it again.`);
     }
     return commit;
   }
@@ -1995,6 +2022,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     isRoleMemoryTurn,
     getDurableDocAssignment,
     getCompletedDurableDocAssignment,
+    checkDurableDocAssignmentReport,
     handleRoleHook: (input) => withTaskLock(input.taskRepoRoot, () => handleRoleHook(input)),
     handleHarnessEngineerHook: (input) => withTaskLock(input.taskRepoRoot, () => handleHarnessEngineerHook(input)),
     assertHarnessEngineerAvailable
@@ -2130,6 +2158,7 @@ function buildDurableDocAssignmentPrompt(
     ...assignment.evidence.map((item) => `- ${item}`),
     "",
     "Verify the content, update the target and any directly related durable documentation, run applicable documentation checks, and commit the documentation changes.",
+    `Use the commit subject "${durableDocCommitSubjectPrefix(assignment.id)} <summary>" so Project Manager can tell this post-acceptance documentation commit apart; VCM rejects a synced report whose commit has another subject.`,
     `Assigned report path: ${assignment.reportPath}`,
     `Submit with .ai/tools/vcm-artifact docs-update-report --file <candidate> --path ${assignment.reportPath} --mode final`,
     "Set Assignment ID to the exact ID above.",

@@ -37,6 +37,12 @@ export const L3_REQUIRED_VALUES = ["yes", "no"] as const;
 export const L3_ACTIONS = ["run-existing", "updated", "added"] as const;
 export const DOCS_REPORT_DECISIONS = ["synced", "unchanged", "blocked"] as const;
 export const DOCS_UPDATE_COMMIT_PATTERN = /^[0-9a-f]{7,40}$/;
+// Subject prefix of the commits a durable-documentation assignment makes, so
+// Project Manager can tell these post-acceptance documentation commits apart.
+export const DURABLE_DOC_COMMIT_PREFIX = "[VCM Docs]";
+export function durableDocCommitSubjectPrefix(assignmentId: string): string {
+  return `${DURABLE_DOC_COMMIT_PREFIX} ${assignmentId}:`;
+}
 export const DOCS_UPDATE_COMMIT_RULE = "When Decision is synced, Commit must contain only one bare lowercase hexadecimal commit hash (7-40 characters, for example abc1234) on a single line. No backticks, bullets, links, subjects, or extra lines; put explanations in Evidence Reviewed. An unchanged result does not require a new commit.";
 export const FINAL_ACCEPTANCE_DECISIONS = [
   "accepted",

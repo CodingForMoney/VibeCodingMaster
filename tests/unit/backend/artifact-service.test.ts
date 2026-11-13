@@ -502,6 +502,40 @@ describe("createArtifactService", () => {
     await expect(submit("request-1")).resolves.toMatchObject({ status: "accepted" });
   });
 
+  it("rejects a final assignment report whose commit completion would reject", async () => {
+    const fs = createMemoryFs();
+    const assignment: DurableDocAssignmentState = {
+      id: "run-doc-1", runId: "run", sourceMemoryPath: "CLAUDE.md", sourceEntry: "Fact",
+      content: "Fact", reason: "Durable fact", evidence: ["src/app.ts"], targetPath: "docs/ARCHITECTURE.md",
+      owner: "architect", status: "running", reportPath: durableDocAssignmentReportPath("run", "run-doc-1"),
+      createdAt: "2026-09-09", updatedAt: "2026-09-09"
+    };
+    const checked: string[] = [];
+    const service = createArtifactService(fs, {
+      getDurableDocAssignment: async () => assignment,
+      checkDurableDocReport: async (_repo, checkedAssignment) => {
+        checked.push(checkedAssignment.id);
+        return "Commit abc1234 subject must start with \"[VCM Docs] run-doc-1:\"; found \"architect(demo): docs\".";
+      }
+    });
+    const content = renderDocsUpdateReportTemplate("demo-task", assignment.id)
+      .replace("## Commit\n\nTBD", "## Commit\n\nabc1234")
+      .replaceAll("TBD", "Verified docs").replace("synced|unchanged|blocked", "synced");
+    const request = {
+      repoRoot: "/repo", baseRepoRoot: "/repo", handoffDir: ".ai/vcm/handoffs", taskSlug: "demo-task",
+      kind: "docs-update-report", mode: "final" as const, role: "architect" as const, content,
+      artifactPath: assignment.reportPath
+    };
+
+    await expect(service.submitArtifact(request)).rejects.toMatchObject({
+      code: "ARTIFACT_VALIDATION_FAILED",
+      message: expect.stringContaining("subject must start with \"[VCM Docs] run-doc-1:\"")
+    });
+    await expect(fs.pathExists(`/repo/${assignment.reportPath}`)).resolves.toBe(false);
+    await expect(service.submitArtifact({ ...request, mode: "draft" })).resolves.toMatchObject({ path: assignment.reportPath });
+    expect(checked).toEqual(["run-doc-1"]);
+  });
+
   it("accepts only the Memory Proposal locations assigned to the submitting role", async () => {
     const fs = createMemoryFs();
     const service = createArtifactService(fs);

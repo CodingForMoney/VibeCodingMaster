@@ -344,7 +344,9 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     workflowControlService,
     getDurableDocAssignment: (taskRepoRoot, role) => autoMemoryService.getDurableDocAssignment(taskRepoRoot, role),
     getCompletedDurableDocAssignment: (taskRepoRoot, role, artifactPath) =>
-      autoMemoryService.getCompletedDurableDocAssignment(taskRepoRoot, role, artifactPath)
+      autoMemoryService.getCompletedDurableDocAssignment(taskRepoRoot, role, artifactPath),
+    checkDurableDocReport: (taskRepoRoot, assignment, reportContent) =>
+      autoMemoryService.checkDurableDocAssignmentReport(taskRepoRoot, assignment, reportContent)
   });
   const projectService = createProjectService({
     fs,

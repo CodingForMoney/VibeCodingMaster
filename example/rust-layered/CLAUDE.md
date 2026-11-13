@@ -82,6 +82,7 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 - Communication-Only Flow uses: `project-manager response or relay -> completion`.
 - Gate Review is PM-triggered at its defined trigger points; the tool decides whether review is enabled or required.
 - Ignore commits whose subject starts with `[VCM Harness]`. Do not review, attribute, or route those commits unless they cause a test failure. A test failure caused by a Harness commit follows the normal test-failure flow.
+- Commits whose subject starts with `[VCM Docs]` are durable-documentation updates that VCM assigned from a memory review after Final Acceptance. They belong to the task and its PR; do not review, re-gate, or route them.
 - Final acceptance closes only a complete code-delivery flow. After a Debug or Diagnosis Branch passes its code-diff Gate, final acceptance closes the parent flow it returned to, never the branch alone.
 - PR-Preparation Flow starts only after the active delivery flow completes; every complete code-delivery flow requires final acceptance to pass.
 - If Docs-Only Flow or Validation-Only Flow reveals that the accepted outcome requires production-code, runtime-behavior, public-contract, dependency, or system-architecture changes, project-manager routes through the full Code-Change Flow.

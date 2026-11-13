@@ -482,8 +482,13 @@ Architect, Coder, or Tester, with a direct user question only when PM cannot
 choose. The backend then sends `[VCM Durable Documentation Assignment]` directly
 to the owner without creating a Docs-Only Flow. The role updates and commits the
 target, runs applicable documentation checks, and submits
-`docs-update-report.md` with the exact Assignment ID. VCM validates fresh report
-evidence and the commit before starting the next assignment. Failure retains
+`docs-update-report.md` with the exact Assignment ID. The commit subject starts
+with `[VCM Docs] <assignment-id>:`, because these commits land after Final
+Acceptance: the root rules mark them as task documentation that is not
+reviewed again, and PR-Preparation Flow includes them, lists them with their
+assignment IDs, and runs no Gate for them. VCM validates fresh report evidence
+and the commit, subject included, when the report is submitted and again
+before starting the next assignment. Failure retains
 the assignment for Harness Studio retry; backend restart restores and resumes
 the pending assignment. A dispatched assignment marks its owner running and is
 sent again only when the owner session is gone or its turn was interrupted

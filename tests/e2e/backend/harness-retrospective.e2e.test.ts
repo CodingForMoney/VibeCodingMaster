@@ -411,7 +411,7 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
         delivered.push(target);
         await ctx.writeFile(target, `# Documentation\n\n${matchPromptPath(ctx.prompt, "Content to preserve")}\n`);
         await git(ctx.cwd, "add", "--", target);
-        await git(ctx.cwd, "commit", "-m", `docs: update ${target}`);
+        await git(ctx.cwd, "commit", "-m", `[VCM Docs] ${matchPromptPath(ctx.prompt, "Assignment ID")}: update ${target}`);
         const commit = (await git(ctx.cwd, "rev-parse", "HEAD")).stdout.trim();
         if (role === "architect") {
           architectureCommit = commit;
@@ -662,7 +662,7 @@ async function writeDurableArchitectureAssignment(ctx: MockClaudePromptContext, 
     "# Architecture\n\nLifecycle ownership is maintained by backend hooks.\n"
   );
   await git(ctx.cwd, "add", "--", "docs/ARCHITECTURE.md");
-  await git(ctx.cwd, "commit", "-m", "docs: record lifecycle ownership");
+  await git(ctx.cwd, "commit", "-m", `[VCM Docs] ${assignmentId}: record lifecycle ownership`);
   const commit = (await git(ctx.cwd, "rev-parse", "HEAD")).stdout.trim();
   await submit(
     renderDocsUpdateReportTemplate(ctx.taskSlug, assignmentId)

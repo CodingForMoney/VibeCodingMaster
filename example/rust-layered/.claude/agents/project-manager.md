@@ -419,6 +419,7 @@ If required work or evidence is incomplete, return to the responsible flow or ro
 PR-Preparation Flow does not perform technical review, validation, documentation updates, Gate Review, or Final Acceptance.
 
 - Create a draft PR by default unless the user requests a ready PR.
+- Commits after the HEAD the latest code-diff Gate approved: `[VCM Harness]` and `[VCM Docs]` commits belong to the PR without another Gate. List each `[VCM Docs]` commit with its assignment ID (the subject's `[VCM Docs] <assignment-id>:`) in the PR description. Any other commit after that HEAD is unreviewed task work: return it to the responsible flow before preparing the PR.
 
 ### Background Jobs
 

@@ -106,6 +106,13 @@ export interface ArtifactServiceDeps {
     role: RoleName,
     artifactPath: string
   ) => Promise<DurableDocAssignmentState | undefined>;
+  // Checks a final assignment report's commit as completion will, so the role
+  // can correct it in the same turn; returns the problem, if any.
+  checkDurableDocReport?: (
+    taskRepoRoot: string,
+    assignment: DurableDocAssignmentState,
+    reportContent: string
+  ) => Promise<string | undefined>;
 }
 
 const ARTIFACT_PATH_KEYS: Array<[ArtifactKind, keyof HandoffPaths]> = [
@@ -354,6 +361,12 @@ export function createArtifactService(fs: FileSystemAdapter, deps: ArtifactServi
         });
         if (validation.errors.length > 0) {
           throw artifactRejected(input.kind, validation.errors);
+        }
+        if (assignment && input.mode === "final") {
+          const problem = await deps.checkDurableDocReport?.(input.repoRoot, assignment, normalized);
+          if (problem) {
+            throw artifactRejected(input.kind, [problem]);
+          }
         }
         if (input.kind === "workflow-progress") {
           if (input.mode !== "final") {
