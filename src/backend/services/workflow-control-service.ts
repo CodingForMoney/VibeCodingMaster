@@ -1085,7 +1085,9 @@ async function allowedArchitectFix(
     if (source === "architect-debug" && artifact.disposition === ARCHITECT_DEBUG_NORMAL_PLAN_DISPOSITION) {
       return ["code-change/architect"];
     }
-    if (source === "architecture-diagnosis" && artifact.disposition === "analysis completed") {
+    // Only a completed analysis-only Diagnosis returns to its parent; a pending
+    // or blocked one sends the same Architect back.
+    if (source === "architecture-diagnosis" && artifact.complete && artifact.disposition === "analysis completed") {
       return parentFlow ? [`${parentFlow}/architect`] : [];
     }
     if (artifact.disposition === "user clarification required") {
@@ -1259,7 +1261,7 @@ async function artifactState(
   if (kind === "architecture-plan") value = inline("Planning Result");
   if (kind === "coder-completion") value = inline("Decision");
   if (kind === "architect-debug") value = inline("Status") ?? readArtifactSectionContent(content, "Final Disposition")?.trim().toLowerCase();
-  if (kind === "architecture-diagnosis") value = readArtifactSectionContent(content, "Final Disposition")?.trim().toLowerCase();
+  if (kind === "architecture-diagnosis") value = inline("Status") ?? readArtifactSectionContent(content, "Final Disposition")?.trim().toLowerCase();
   if (kind === "test-report") value = inline("Test Result");
   if (kind === "docs-update-report" || kind === "final-acceptance") {
     value = readArtifactSectionContent(content, "Decision")?.trim().toLowerCase();
@@ -1570,7 +1572,10 @@ async function validateCompletion(
   const inBranch = flowRun.activeBranch === candidate.flow;
   if (candidate.flow === "architecture-diagnosis" && !inBranch) {
     const diagnosis = await artifactState(fs, input, "architecture-diagnosis.md", "architecture-diagnosis");
-    if (diagnosis.disposition === "analysis completed"
+    // The final contract rejects analysis completed with a commit or changed
+    // files, so a completed analysis-only Diagnosis changed no code.
+    if (diagnosis.complete
+      && diagnosis.disposition === "analysis completed"
       && evidenceProducedAfterActiveDispatch(
         state,
         candidate.flow,

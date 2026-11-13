@@ -293,6 +293,15 @@ Machine-consumed option values are defined once in `artifact-contract.ts` and
 shared by generated templates, final-submission validation, and workflow
 consumers. Architect Debug `Final Disposition` therefore accepts only its exact
 listed value in final mode; explanatory prose cannot become workflow state.
+Architect Debug and Architecture Diagnosis results both carry `Status:
+pending|completed`: an in-progress or blocked result stays `pending` with the
+exact blocker and no final disposition, and Workflow Control routes only a
+`completed` result onward, sending the same Architect back otherwise. A
+Diagnosis `analysis completed` must record `None.` under `Changed Files And
+Public Surface` and `Commit`; a Diagnosis that changed code reports
+`diagnosis implementation completed`, so only a completed analysis that changed
+no code returns a branch to its parent or completes a root Diagnosis flow
+without Tester validation and Gate Review.
 
 Most fixed artifacts have one owner. `docs-update-report.md` is shared by
 Architect, Coder, and Tester because Docs-Only Flow assigns documentation to

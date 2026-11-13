@@ -3,6 +3,7 @@ import {
   renderArchitectureBriefTemplate,
   renderArchitecturePlanTemplate,
   renderArchitectDebugTemplate,
+  renderArchitectureDiagnosisTemplate,
   renderDocsUpdateReportTemplate,
   renderFinalAcceptanceTemplate,
   renderTestReportTemplate
@@ -223,6 +224,41 @@ Implement the manifest.
 
     expect(result.status).toBe("ok");
     expect(result.invalidFields).toEqual([]);
+  });
+
+  describe("Architecture Diagnosis", () => {
+    const diagnosis = (status: string, disposition: string, changes = "src/feature.ts", commit = "abc1234") =>
+      renderArchitectureDiagnosisTemplate("demo")
+        .replace("Status: pending|completed", `Status: ${status}`)
+        .replace("analysis completed|diagnosis implementation completed|user clarification required", disposition)
+        .replace("### Changed Files And Public Surface\n\nTBD", `### Changed Files And Public Surface\n\n${changes}`)
+        .replace("### Commit\n\nTBD", `### Commit\n\n${commit}`)
+        .replaceAll("TBD", "Verified evidence.");
+
+    it("lets a blocked Diagnosis stay pending as a draft without a final disposition", () => {
+      const blocked = diagnosis("pending", "analysis completed|diagnosis implementation completed|user clarification required");
+      expect(checkMarkdownArtifact("architecture-diagnosis", "architecture-diagnosis.md", blocked, { mode: "draft" }).status).toBe("ok");
+      const final = checkMarkdownArtifact("architecture-diagnosis", "architecture-diagnosis.md", blocked);
+      expect(final.status).toBe("incomplete");
+      expect(final.invalidFields).toContain("Status must be exactly one of \"completed\"; found \"pending\".");
+    });
+
+    it("accepts a completed implementation and an analysis that changed nothing", () => {
+      expect(checkMarkdownArtifact("architecture-diagnosis", "architecture-diagnosis.md",
+        diagnosis("completed", "diagnosis implementation completed")).status).toBe("ok");
+      expect(checkMarkdownArtifact("architecture-diagnosis", "architecture-diagnosis.md",
+        diagnosis("completed", "analysis completed", "None.", "None.")).status).toBe("ok");
+    });
+
+    it("rejects analysis completed for a Diagnosis that committed code", () => {
+      const result = checkMarkdownArtifact("architecture-diagnosis", "architecture-diagnosis.md",
+        diagnosis("completed", "analysis completed"));
+      expect(result.status).toBe("incomplete");
+      expect(result.invalidFields).toEqual([
+        "Changed Files And Public Surface must be exactly \"None.\" for analysis completed; a Diagnosis that changed or committed code reports diagnosis implementation completed, or stays Status: pending while blocked.",
+        "Commit must be exactly \"None.\" for analysis completed; a Diagnosis that changed or committed code reports diagnosis implementation completed, or stays Status: pending while blocked."
+      ]);
+    });
   });
 
   it("rejects explanations appended to an Architect Debug disposition", () => {

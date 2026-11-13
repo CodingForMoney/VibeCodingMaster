@@ -329,6 +329,27 @@ describe("Project Manager rule scenarios: Architect Debug Branch", SCENARIOS, ()
 });
 
 describe("Project Manager rule scenarios: Architecture Diagnosis Branch", SCENARIOS, () => {
+  it("Incomplete role result: a blocked Diagnosis sends the same Architect back", async () => {
+    const s = await createScenario();
+    await s.enterCodeChangeTester();
+    await s.testerValidates("fail");
+    await s.route("architect", "architect-debug", "Tester failure");
+    await s.debugFixes();
+    await s.route("tester", undefined, "Debug fix");
+    await s.testerValidates("fail");
+    await s.route("architect", "architecture-diagnosis", "Debug validation failed");
+    await s.diagnosisBlocked();
+    await s.expectRouteDenied("architect", "architect-debug");
+    await s.route("architect", undefined, "the Diagnosis is blocked on an L2 check");
+    await s.diagnosisFixes();
+    await s.route("tester", undefined, "Diagnosis fix");
+    await s.testerValidates();
+    await s.gate("validation-adequacy");
+    await s.gate("code-diff", "architect-diagnosis");
+    await s.accept();
+  });
+
+
   it("Docs Code-Diff Correction: the rerun code-diff reviews the docs and the flow completes", async () => {
     const s = await createScenario();
     await s.enterDiagnosisBranchValidated();
@@ -643,6 +664,14 @@ class Scenario {
     this.writeDiagnosisHandoff();
   }
 
+  // Architecture Diagnosis: commit the implementation, but an applicable
+  // L2/L3 check cannot complete, so the result stays pending with the blocker.
+  async diagnosisBlocked(): Promise<void> {
+    await this.commit({ "src/feature.ts": this.nextVersion("diagnosis fix") }, "fix: repair feature design");
+    this.writeHandoff("architecture-diagnosis.md", renderArchitectureDiagnosisTemplate(TASK_SLUG), { Status: "pending" }, [],
+      `blocked: the L2 job was killed ${this.fileVersion}`);
+  }
+
   // Architect Post-Validation Docs Correction: commit docs only. Production
   // code, tests, and architecture-plan.md stay unchanged; a Debug or Diagnosis
   // handoff is rewritten as the Current Handoff Contract requires.
@@ -712,7 +741,7 @@ class Scenario {
   }
 
   private writeDiagnosisHandoff(): void {
-    this.writeHandoff("architecture-diagnosis.md", renderArchitectureDiagnosisTemplate(TASK_SLUG), {}, [[
+    this.writeHandoff("architecture-diagnosis.md", renderArchitectureDiagnosisTemplate(TASK_SLUG), { Status: "completed" }, [[
       "analysis completed|diagnosis implementation completed|user clarification required",
       "diagnosis implementation completed"
     ]], `diagnosis evidence ${this.fileVersion}`);

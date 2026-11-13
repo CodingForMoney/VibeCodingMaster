@@ -155,6 +155,7 @@ describe("backend E2E with mock Claude Code", () => {
       ]));
     } else {
       await write("architecture-diagnosis.md", completeWorkflowArtifact(renderArchitectureDiagnosisTemplate(task.taskSlug), [
+        ["Status: pending|completed", "Status: completed"],
         ["analysis completed|diagnosis implementation completed|user clarification required", "diagnosis implementation completed"]
       ]));
     }

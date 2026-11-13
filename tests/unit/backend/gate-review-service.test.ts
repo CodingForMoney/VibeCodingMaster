@@ -1966,6 +1966,8 @@ local fix completed
 function validArchitectureDiagnosis(): string {
   return `# Architecture Diagnosis: demo-task
 
+Status: completed
+
 ## Diagnosis Boundary
 Feature module.
 

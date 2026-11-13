@@ -16,6 +16,11 @@ export const ARCHITECT_DEBUG_DISPOSITIONS = [
   ARCHITECT_DEBUG_NORMAL_PLAN_DISPOSITION,
   "user clarification required"
 ] as const;
+export const ARCHITECTURE_DIAGNOSIS_STATUSES = ["pending", "completed"] as const;
+export const ARCHITECTURE_DIAGNOSIS_ANALYSIS_ONLY_DISPOSITION = "analysis completed";
+// An analysis-only Diagnosis changes no code: these sections must be exactly
+// "None." for its final disposition.
+export const ARCHITECTURE_DIAGNOSIS_ANALYSIS_ONLY_SECTIONS = ["Changed Files And Public Surface", "Commit"] as const;
 export const ARCHITECTURE_DIAGNOSIS_DISPOSITIONS = [
   "analysis completed",
   "diagnosis implementation completed",

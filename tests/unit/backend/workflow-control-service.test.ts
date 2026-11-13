@@ -1514,6 +1514,46 @@ describe("workflow control service", () => {
     });
   });
 
+  it("sends a blocked Diagnosis back to its Architect instead of the parent flow", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await advance(service, fs, context, "architect", "architect-debug", "accepted debug task");
+    await writeArchitectDebug(fs, context, "debug repair");
+    await advance(service, fs, context, "tester", undefined, "validate debug repair");
+    await writeTestReport(fs, context, "fail", "none", "debug validation failure");
+    await advance(service, fs, context, "architect", "architecture-diagnosis", "debug validation failed");
+
+    // The Diagnosis committed its implementation, but an applicable L2/L3
+    // check could not complete: the draft stays pending, whatever its
+    // disposition section says.
+    await writeArchitectureDiagnosis(fs, context, "blocked on a killed L2 job", "analysis completed", "pending");
+    await expect(propose(service, fs, context, "architect", "architect-debug", "return to the parent"))
+      .rejects.toMatchObject({ code: "WORKFLOW_TRANSITION_DENIED" });
+    await advance(service, fs, context, "architect", undefined, "the Diagnosis is still blocked");
+
+    await writeArchitectureDiagnosis(fs, context, "diagnosis implementation validated");
+    await advance(service, fs, context, "tester", undefined, "validate the Diagnosis implementation");
+  });
+
+  it("does not complete a root Diagnosis as analysis-only while it is pending or committed code", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await advance(service, fs, context, "architect", "architecture-diagnosis", "diagnose the failure");
+
+    await writeArchitectureDiagnosis(fs, context, "blocked implementation", "analysis completed", "pending");
+    await expect(completeFlow(service, fs, context)).rejects.toMatchObject({ code: "WORKFLOW_COMPLETION_INVALID" });
+
+    // analysis completed with a commit fails the final contract, so it is
+    // not an analysis-only result either.
+    await writeFinalArtifact(fs, context, "architecture-diagnosis.md", renderArchitectureDiagnosisTemplate(context.taskSlug), [
+      ["Status: pending|completed", "Status: completed"],
+      ["analysis completed|diagnosis implementation completed|user clarification required", "analysis completed"],
+      ["### Commit\n\nTBD", "### Commit\n\nabc1234"]
+    ]);
+    await expect(completeFlow(service, fs, context)).rejects.toMatchObject({ code: "WORKFLOW_COMPLETION_INVALID" });
+    await advance(service, fs, context, "architect", undefined, "record the Diagnosis implementation honestly");
+  });
+
   it("completes a standalone analysis-only Architecture Diagnosis without Tester", async () => {
     const { context, fs } = await createContext(roots);
     const service = createWorkflowControlService({ fs, now: sequenceClock() });
@@ -2065,16 +2105,26 @@ async function writeArchitectureDiagnosis(
   fs: FileSystemAdapter,
   context: WorkflowControlContext,
   assessment: string,
-  disposition: "analysis completed" | "diagnosis implementation completed" | "user clarification required" = "diagnosis implementation completed"
+  disposition: "analysis completed" | "diagnosis implementation completed" | "user clarification required" = "diagnosis implementation completed",
+  status: "pending" | "completed" = "completed"
 ): Promise<void> {
+  // An analysis-only Diagnosis records no changed files and no commit.
+  const analysisOnly: Array<[string, string]> = disposition === "analysis completed"
+    ? [
+        ["### Changed Files And Public Surface\n\nTBD", "### Changed Files And Public Surface\n\nNone."],
+        ["### Commit\n\nTBD", "### Commit\n\nNone."]
+      ]
+    : [];
   await writeFinalArtifact(
     fs,
     context,
     "architecture-diagnosis.md",
     renderArchitectureDiagnosisTemplate(context.taskSlug),
     [
+      ["Status: pending|completed", `Status: ${status}`],
       ["## Architecture Assessment\n\nTBD", `## Architecture Assessment\n\n${assessment}`],
-      ["analysis completed|diagnosis implementation completed|user clarification required", disposition]
+      ["analysis completed|diagnosis implementation completed|user clarification required", disposition],
+      ...analysisOnly
     ]
   );
 }

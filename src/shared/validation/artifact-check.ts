@@ -3,7 +3,10 @@ import {
   ARCHITECT_DEBUG_DISPOSITIONS,
   ARCHITECT_DEBUG_STATUSES,
   ARCHITECTURE_BRIEF_STATUSES,
+  ARCHITECTURE_DIAGNOSIS_ANALYSIS_ONLY_DISPOSITION,
+  ARCHITECTURE_DIAGNOSIS_ANALYSIS_ONLY_SECTIONS,
   ARCHITECTURE_DIAGNOSIS_DISPOSITIONS,
+  ARCHITECTURE_DIAGNOSIS_STATUSES,
   ARCHITECTURE_EVIDENCE_STATUSES,
   ARCHITECTURE_PLAN_RESULTS,
   CODER_COMPLETION_DECISIONS,
@@ -183,14 +186,35 @@ function validateArtifactFields(
   }
 
   if (kind === "architecture-diagnosis") {
-    const disposition = readArtifactSectionContent(content, "Final Disposition")?.trim().toLowerCase();
-    return isAllowedValue(disposition, ARCHITECTURE_DIAGNOSIS_DISPOSITIONS)
-      ? []
-      : [renderExactSectionError(
+    // Like architect-debug, an in-progress or blocked Diagnosis stays
+    // `Status: pending`; only a completed one carries a Final Disposition.
+    const invalidFields = validateLifecycleField(
+      content,
+      "Status",
+      ARCHITECTURE_DIAGNOSIS_STATUSES,
+      "completed",
+      mode
+    );
+    if (mode === "final") {
+      const disposition = readArtifactSectionContent(content, "Final Disposition")?.trim().toLowerCase();
+      if (!isAllowedValue(disposition, ARCHITECTURE_DIAGNOSIS_DISPOSITIONS)) {
+        invalidFields.push(renderExactSectionError(
           "Final Disposition",
           ARCHITECTURE_DIAGNOSIS_DISPOSITIONS.join("|"),
           disposition
-        )];
+        ));
+      } else if (disposition === ARCHITECTURE_DIAGNOSIS_ANALYSIS_ONLY_DISPOSITION) {
+        for (const section of ARCHITECTURE_DIAGNOSIS_ANALYSIS_ONLY_SECTIONS) {
+          const value = readArtifactSectionContent(content, section)?.trim();
+          if (value !== STRICT_NONE_VALUE) {
+            invalidFields.push(
+              `${section} must be exactly "${STRICT_NONE_VALUE}" for analysis completed; a Diagnosis that changed or committed code reports diagnosis implementation completed, or stays Status: pending while blocked.`
+            );
+          }
+        }
+      }
+    }
+    return invalidFields;
   }
 
   if (kind === "test-report") {

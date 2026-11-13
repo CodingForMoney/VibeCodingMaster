@@ -3,6 +3,7 @@ import {
   ARCHITECT_DEBUG_STATUSES,
   ARCHITECTURE_BRIEF_STATUSES,
   ARCHITECTURE_DIAGNOSIS_DISPOSITIONS,
+  ARCHITECTURE_DIAGNOSIS_STATUSES,
   ARCHITECTURE_EVIDENCE_STATUSES,
   ARCHITECTURE_PLAN_RESULTS,
   CODER_COMPLETION_DECISIONS,
@@ -444,6 +445,8 @@ export function renderArchitectureDiagnosisTemplate(taskSlug: string): string {
   return `# Architecture Diagnosis: ${taskSlug}
 
 ${CURRENT_HANDOFF_NOTICE}
+
+Status: ${renderArtifactOptions(ARCHITECTURE_DIAGNOSIS_STATUSES)}
 
 ## Diagnosis Boundary
 

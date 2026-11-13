@@ -306,9 +306,11 @@ Each rewritten `architecture-diagnosis.md` must be a complete, self-contained cu
 - Before reporting `diagnosis implementation completed`, run every existing L2/L3 check applicable to the diagnosed failure path.
 - Every applicable L2/L3 check must pass. If a level is not applicable, record the concrete reason.
 - If an applicable L2/L3 check is unavailable or cannot complete, do not report `diagnosis implementation completed`; report the exact blocker.
+- Keep `Status: pending` while the Diagnosis is in progress or blocked, and record the exact blocker under `Implementation And Validation`. Set `Status: completed` only with a final disposition.
 - Under `Implementation And Validation`, record each L2/L3 command or test case, the diagnosed failure path it covers, its result, and its evidence.
 - Architect-run Diagnosis validation is implementation evidence and does not replace Tester final validation.
 - Final disposition must be one of: `analysis completed`, `diagnosis implementation completed`, or `user clarification required`.
+- `analysis completed` means the Diagnosis changed no code: `Changed Files And Public Surface` and `Commit` are exactly `None.`. A Diagnosis that changed or committed code reports `diagnosis implementation completed`, or stays `Status: pending` while blocked.
 
 ### Replan And Drift
 
