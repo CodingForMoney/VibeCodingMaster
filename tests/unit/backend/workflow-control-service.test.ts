@@ -680,9 +680,10 @@ describe("workflow control service", () => {
     await writeFinalAcceptance(fs, context);
     await advance(service, fs, context, "architect", undefined, "correct the reported docs");
 
-    // Until the rerun code-diff Gate decides, only Architect may continue.
-    await expect(propose(service, fs, context, "tester", undefined, "skip the rerun"))
-      .rejects.toMatchObject({ code: "WORKFLOW_TRANSITION_DENIED" });
+    // The flow cannot complete before the rerun code-diff Gate decides. Tester
+    // stays open for a follow-up that changed code; it adds validation and
+    // still leads to both Gates.
+    await expect(completeFlow(service, fs, context)).rejects.toMatchObject({ code: "WORKFLOW_COMPLETION_INVALID" });
     await writeCodeDiffDecision(fs, context, "approve");
     await expect(completeFlow(service, fs, context)).rejects.toMatchObject({
       code: "WORKFLOW_COMPLETION_INVALID",
@@ -692,6 +693,29 @@ describe("workflow control service", () => {
     await completeFlow(service, fs, context);
     expect((await readProgress(fs, context)).history.map((entry) => entry.targetRole))
       .toEqual(["architect", "coder", "tester", "architect"]);
+  });
+
+  it("returns an Architect follow-up that changed code through Tester and both Gates", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await enterCodeChangeValidated(service, fs, context);
+    await writeFinalAcceptance(fs, context, "needs-architect-follow-up");
+    await advance(service, fs, context, "architect", undefined, "Final Acceptance follow-up");
+
+    // The follow-up changed production code, so it returns through Tester.
+    await advance(service, fs, context, "tester", undefined, "validate the follow-up's code");
+    await writeTestReport(fs, context, "pass", "none", "follow-up validation");
+    await expect(completeFlow(service, fs, context)).rejects.toMatchObject({ code: "WORKFLOW_COMPLETION_INVALID" });
+    await writeGateIndex(fs, context, {
+      architecture: "approve",
+      validation: "approve",
+      codeDiff: "approve",
+      codeDiffSource: "coder"
+    }, "2026-08-08T00:00:00.000Z");
+    await writeFinalAcceptance(fs, context);
+    await completeFlow(service, fs, context);
+    expect((await readProgress(fs, context)).history.map((entry) => entry.targetRole))
+      .toEqual(["architect", "coder", "tester", "architect", "tester"]);
   });
 
   it("routes a test-only finding from the rerun code-diff Gate to Tester", async () => {

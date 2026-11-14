@@ -1026,7 +1026,8 @@ async function allowedCodeChange(
   }
   // An Architect dispatch after validation (a code-diff docs correction or a
   // Final Acceptance follow-up, including the first dispatch after a branch
-  // returns) is reviewed by an incremental code-diff Gate.
+  // returns) is reviewed by an incremental code-diff Gate, or returns through
+  // Tester when it changed code or tests.
   if (segment.some((entry, index) => index > testerIndex && entry.targetRole === "architect")) {
     return allowedPostImplementationArchitect(fs, input, state, "code-change", "code-change");
   }
@@ -1153,7 +1154,11 @@ async function allowedPostImplementationArchitect(
   if (gatePassedForDispatch(state, flow, "architect", "code-diff", codeDiff)) {
     return finalAcceptanceFollowUpTargets(fs, input, state, flow, "architect", acceptanceFlow);
   }
-  return [`${flow}/architect`];
+  // Until a code-diff Gate reviews this dispatch, a documentation-only change
+  // goes to that Gate while work that changed code or tests returns through
+  // Tester, validation-adequacy, and code-diff. Workflow Control cannot see
+  // which, and Tester only adds validation, so both stay open.
+  return [`${flow}/architect`, `${flow}/tester`];
 }
 
 // Routes a code-diff Gate rejection: any implementation finding goes to the

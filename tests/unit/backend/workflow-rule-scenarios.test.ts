@@ -172,6 +172,23 @@ describe("Project Manager rule scenarios: Code-Change Flow", SCENARIOS, () => {
     await s.accept();
   });
 
+  it("Final Acceptance Follow-Up: returns an Architect follow-up that changed code through Tester and both Gates", async () => {
+    const s = await createScenario();
+    await s.enterCodeChangeValidated();
+    await s.gate("code-diff", "coder");
+    await s.accept("needs-architect-follow-up");
+    await s.route("architect", undefined, "Final Acceptance follow-up");
+    await s.architectChangesCode();
+    // The follow-up's code invalidated the validation-adequacy approval, so
+    // the documentation path (code-diff alone) cannot start.
+    expect(await s.gateFailsToStart("code-diff", "coder")).toContain("requires a current validation-adequacy approval");
+    await s.route("tester", undefined, "validate the follow-up's code");
+    await s.testerValidates();
+    await s.gate("validation-adequacy");
+    await s.gate("code-diff", "coder");
+    await s.accept();
+  });
+
   it("Final Acceptance Follow-Up: repeats validation and both Gates after a Coder follow-up", async () => {
     const s = await createScenario();
     await s.enterCodeChangeValidated();
@@ -675,6 +692,11 @@ class Scenario {
   // Architect Post-Validation Docs Correction: commit docs only. Production
   // code, tests, and architecture-plan.md stay unchanged; a Debug or Diagnosis
   // handoff is rewritten as the Current Handoff Contract requires.
+  // Architect follow-up that changes production code.
+  async architectChangesCode(): Promise<void> {
+    await this.commit({ "src/feature.ts": this.nextVersion("architect follow-up") }, "fix: apply the follow-up");
+  }
+
   async architectCorrectsDocs(handoff?: "architect-debug" | "architecture-diagnosis"): Promise<void> {
     await this.commit({ "docs/ARCHITECTURE.md": this.nextVersion("architecture docs") }, "docs: correct architecture docs");
     if (handoff === "architect-debug") this.writeDebugHandoff();

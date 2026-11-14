@@ -318,7 +318,10 @@ commits with the code and judges Documentation Fit against the final code. A
 `docs-only` code-diff finding returns to Architect, whose correction commits the
 rerun code-diff Gate reviews incrementally; a Final Acceptance
 `needs-architect-follow-up` covers documentation and known-issues follow-up the
-same way. The validation-adequacy input hash excludes `docs/**`, every
+same way. Until that rerun Gate decides, Workflow Control also allows Tester
+after such an Architect dispatch: a follow-up that changed code or tests
+returns through Tester, validation-adequacy, and code-diff, because Workflow
+Control cannot tell the two apart and Tester only adds validation. The validation-adequacy input hash excludes `docs/**`, every
 `ARCHITECTURE.md`, `.ai/generated/**`, and the `architect-debug.md` and
 `architecture-diagnosis.md` handoffs (Reviewer still reads their snapshots),
 so a doc correction, which rewrites the branch handoff, does not invalidate an
