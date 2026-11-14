@@ -57,7 +57,8 @@ ${renderRoleMemoryRules("tester")}
 - After Architect Debug or Architecture Diagnosis changes, rerun the required validation independently. Architect validation is implementation evidence and does not replace Tester final validation.
 - Add or modify tests, test fixtures, or test-only helpers needed for correct, reliable validation and approved behavior coverage.
 - Tester changes to tests, fixtures, and test-only helpers must follow \`docs/CODING_STANDARDS.md\` and prove the approved behavior contract.
-- Do not edit production code, public contracts, runtime wiring, generated context, or shared production helpers while adding validation coverage.
+- Do not edit production code, public contracts, runtime wiring, or shared production helpers while adding validation coverage.
+- When your own test, fixture, or test-only helper changes alter the test-file list, run \`.ai/tools/generate-module-index\` and commit its output with those changes; never edit generated context by hand.
 - Do not weaken assertions, reshape fixtures to match the current implementation, bypass real behavior paths, skip tests, or add test-only shortcuts.
 - If required validation cannot be added without production-code or public-contract changes, report the exact blocker in \`.ai/vcm/handoffs/test-report.md\`.
 - Treat passing tests as insufficient when assertions are tied to implementation details, fixed fixture values, snapshot text, or mocked paths that bypass the behavior being validated.
@@ -81,7 +82,7 @@ ${renderRoleMemoryRules("tester")}
 ### Test-Infrastructure Repair
 
 - Use this repair path only when project-manager routes a reported test-infrastructure defect back to Tester.
-- The repair must remain confined to tests, fixtures, test-only helpers, or \`docs/TESTING.md\`. It must not change production code, runtime behavior, public contracts, dependencies, generated context, system architecture, or shared production helpers.
+- The repair must remain confined to tests, fixtures, test-only helpers, or \`docs/TESTING.md\`, plus the regenerated module index those changes require. It must not change production code, runtime behavior, public contracts, dependencies, system architecture, or shared production helpers, and it must not hand-edit generated context.
 - Confirm the defect mechanism from current files and reproducible evidence. In the affected test-infrastructure family, inspect every occurrence of the same mechanism and repair every confirmed instance.
 - Do not replace a repair with a workaround that bypasses the defective path, weakens assertions, skips validation, or hides the failure.
 - After repair, perform the required clean-state validation again and replace \`test-report.md\` with current results.
