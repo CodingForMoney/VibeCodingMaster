@@ -8,7 +8,7 @@ import { createServer, type ServerDeps } from "../../../../src/backend/server.js
 import { createNodeFileSystemAdapter } from "../../../../src/backend/adapters/filesystem.js";
 import { createCommandRunner } from "../../../../src/backend/adapters/command-runner.js";
 import { createGitAdapter } from "../../../../src/backend/adapters/git-adapter.js";
-import type { ClaudeAdapter } from "../../../../src/backend/adapters/claude-adapter.js";
+import { createClaudeAdapter, type ClaudeAdapter } from "../../../../src/backend/adapters/claude-adapter.js";
 import type { CodexBridgeAdapter } from "../../../../src/backend/adapters/codex-bridge-adapter.js";
 import { createAppSettingsService } from "../../../../src/backend/services/app-settings-service.js";
 import { createCodexBridgeIntegrationService } from "../../../../src/backend/services/codex-bridge-integration-service.js";
@@ -50,9 +50,7 @@ import { createJobGuardService } from "../../../../src/backend/services/job-guar
 import { createWorkflowControlService } from "../../../../src/backend/services/workflow-control-service.js";
 import { readVcmPackageVersion } from "../../../../src/backend/app-version.js";
 import type { RoleName } from "../../../../src/shared/types/role.js";
-import { roleRuntimeDisallowedTools, roleUsesRuntimeDenyList } from "../../../../src/backend/role-tool-policy.js";
 import {
-  isCodexBridgeSessionModel,
   type ClaudePermissionMode,
   type SessionEffort,
   type SessionModel
@@ -449,50 +447,14 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
   };
 }
 
+// Only the Claude Code version probe is mocked. Role launch arguments come
+// from the production adapter, so E2E journeys exercise the real command.
 function createMockClaudeAdapter(): ClaudeAdapter {
-  return {
-    async isAvailable() {
-      return true;
-    },
-    async getVersion() {
-      return "mock-claude-code/0.0.0";
-    },
-    buildRoleStartCommand(role, command = "claude", permissionMode = "default", claudeSessionId, resume = false, model = "default", effort = "default", settingsOverride, appendSystemPrompt) {
-      const args: string[] = [];
-      if (roleUsesRuntimeDenyList(role)) {
-        args.push("--disallowedTools", roleRuntimeDisallowedTools(role).join(","));
-      } else {
-        args.push("--allowedTools", "Glob,Grep");
-      }
-      args.push("--agent", role);
-      const sessionSettings = { ...settingsOverride };
-      if (claudeSessionId) {
-        args.push(resume ? "--resume" : "--session-id", claudeSessionId);
-      }
-      if (!isCodexBridgeSessionModel(model)) {
-        args.push("--model", model);
-      }
-      if (effort === "ultracode") {
-        sessionSettings.ultracode = true;
-      } else if (effort !== "default") {
-        args.push("--effort", effort);
-      }
-      if (Object.keys(sessionSettings).length > 0) {
-        args.push("--settings", JSON.stringify(sessionSettings));
-      }
-      if (permissionMode !== "default") {
-        args.push("--permission-mode", permissionMode);
-      }
-      if (appendSystemPrompt) {
-        args.push("--append-system-prompt", appendSystemPrompt);
-      }
-      return {
-        command,
-        args,
-        display: [command, ...args].join(" ")
-      };
+  return createClaudeAdapter({
+    async run() {
+      return { stdout: "mock-claude-code/0.0.0", stderr: "", exitCode: 0 };
     }
-  };
+  });
 }
 
 export function roleLaunchBody(input: {

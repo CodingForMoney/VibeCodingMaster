@@ -141,7 +141,7 @@ describe("backend E2E Codex Bridge integration", () => {
       "--disallowedTools",
       CODE_ROLE_RUNTIME_DISALLOWED_TOOLS.join(",")
     ]));
-    expect(nativeInput.args).not.toContain("--allowedTools");
+    expect(nativeInput.args).toEqual(expect.arrayContaining(["--allowedTools", "Glob,Grep"]));
     expect(nativeInput.env.ENABLE_LSP_TOOL).toBeUndefined();
     expect(nativeInput.args).not.toContain("--settings");
     expect(nativeInput.env.ANTHROPIC_BASE_URL).toBeUndefined();
@@ -238,7 +238,7 @@ describe("backend E2E Codex Bridge integration", () => {
       "--disallowedTools",
       REVIEWER_RUNTIME_DISALLOWED_TOOLS.join(",")
     ]));
-    expect(reviewerInput.args).not.toContain("--allowedTools");
+    expect(reviewerInput.args).toEqual(expect.arrayContaining(["--allowedTools", "Glob,Grep"]));
     expect(reviewerInput.env.ENABLE_LSP_TOOL).toBeUndefined();
     for (const auxiliary of launches.slice(1)) {
       const auxiliaryInput = env.mockRuntime.getCreateInput(auxiliary.json<{ id: string }>().id);

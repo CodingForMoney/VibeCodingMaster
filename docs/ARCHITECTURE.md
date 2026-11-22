@@ -225,7 +225,11 @@ semantic class is treated as complete, and every relationship records its
 search pattern and scope so Reviewer can rerun it. Relationships that a macro,
 code generation, configuration-excluded code, or runtime dispatch hides from
 search remain unresolved with their reason. Coder and Reviewer use the same
-generated context, Glob, Grep, and complete source reads. The
+generated context, Glob, Grep, and complete source reads. Every role launch
+names Glob and Grep in `--allowedTools`, because Claude Code otherwise removes
+both tools from the session and its subagents and settings allow rules do not
+count as that opt-in; Architect and Reviewer add their runtime deny list beside
+it. The
 shared Bash PreToolUse guard supervises Bash execution but does not prohibit text
 search. A separate Agent PreToolUse guard permits Architect to invoke only
 `vcm-architect-evidence-worker`, `vcm-architect-scaffold-worker`, and

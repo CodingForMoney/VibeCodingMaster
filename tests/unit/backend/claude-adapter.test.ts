@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createClaudeAdapter } from "../../../src/backend/adapters/claude-adapter.js";
 import { CODE_ROLE_RUNTIME_DISALLOWED_TOOLS } from "../../../src/backend/role-tool-policy.js";
+import { TOOL_ROLE_NAMES, VCM_ROLE_NAMES } from "../../../src/shared/constants.js";
 
 describe("createClaudeAdapter", () => {
   const adapter = createClaudeAdapter({
@@ -273,6 +274,8 @@ describe("createClaudeAdapter", () => {
     )).toEqual({
       command: "claude",
       args: [
+        "--allowedTools",
+        "Glob,Grep",
         "--disallowedTools",
         CODE_ROLE_RUNTIME_DISALLOWED_TOOLS.join(","),
         "--agent",
@@ -282,7 +285,7 @@ describe("createClaudeAdapter", () => {
         "--effort",
         "medium"
       ],
-      display: `claude --disallowedTools '${CODE_ROLE_RUNTIME_DISALLOWED_TOOLS.join(",")}' --agent architect --model opus --effort medium`
+      display: `claude --allowedTools 'Glob,Grep' --disallowedTools '${CODE_ROLE_RUNTIME_DISALLOWED_TOOLS.join(",")}' --agent architect --model opus --effort medium`
     });
   });
 
@@ -290,8 +293,22 @@ describe("createClaudeAdapter", () => {
     const command = adapter.buildRoleStartCommand("reviewer", "claude", "default", undefined, false, "default", "default");
 
     expect(command.args).not.toContain("--plugin-dir");
-    expect(command.args).not.toContain("--allowedTools");
     const disallowed = command.args[command.args.indexOf("--disallowedTools") + 1]!.split(",");
     expect(disallowed).toEqual(expect.arrayContaining(["Agent", "Edit"]));
+  });
+
+  // Claude Code removes Glob and Grep from the whole session tool pool,
+  // subagents included, unless the launch names them in --allowedTools.
+  it.each([...VCM_ROLE_NAMES, ...TOOL_ROLE_NAMES])("opts %s into the Glob and Grep search tools", (role) => {
+    const command = adapter.buildRoleStartCommand(role);
+
+    const allowedIndex = command.args.indexOf("--allowedTools");
+    expect(allowedIndex).toBeGreaterThan(-1);
+    expect(command.args[allowedIndex + 1]!.split(",")).toEqual(expect.arrayContaining(["Glob", "Grep"]));
+    if (command.args.includes("--disallowedTools")) {
+      const disallowed = command.args[command.args.indexOf("--disallowedTools") + 1]!.split(",");
+      expect(disallowed).not.toContain("Glob");
+      expect(disallowed).not.toContain("Grep");
+    }
   });
 });

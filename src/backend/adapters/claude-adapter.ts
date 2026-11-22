@@ -46,11 +46,12 @@ export function createClaudeAdapter(runner: CommandRunner): ClaudeAdapter {
       return result.stdout.trim();
     },
     buildRoleStartCommand(role, command = "claude", permissionMode = "default", claudeSessionId, resume = false, model = "default", effort = "default", settingsOverride, appendSystemPrompt) {
-      const args: string[] = [];
+      // Claude Code removes Glob and Grep from the whole session tool pool,
+      // subagents included, unless the launch names them in --allowedTools.
+      // Settings allow rules do not count, so every role passes the flag.
+      const args: string[] = ["--allowedTools", "Glob,Grep"];
       if (roleUsesRuntimeDenyList(role)) {
         args.push("--disallowedTools", roleRuntimeDisallowedTools(role).join(","));
-      } else {
-        args.push("--allowedTools", "Glob,Grep");
       }
       args.push("--agent", role);
       const sessionSettings = { ...settingsOverride };
