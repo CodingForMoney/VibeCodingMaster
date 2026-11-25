@@ -258,10 +258,24 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
           runtimeSessionId: stringOrUndefined(input.event.vcm_runtime_session_id),
           runtimeSessionToken: input.runtimeSessionToken
         });
+    if (eventName === "StopFailure") {
+      const current = projectScoped
+        ? await deps.sessionService.getProjectHarnessEngineerSession(context.project.repoRoot)
+        : await deps.sessionService.getRoleSession(context.project.repoRoot, input.taskSlug, input.role);
+      if (current && !(await isStopFailureOfSessionTurn(current))) {
+        // A failed background query must not fail a healthy retrospective.
+        noteHook(input, { outcome: "ignored-background-stop-failure" });
+        return completedHookResult(input, eventName);
+      }
+    }
     const session = await recordSessionEvent(eventName);
     if (!session) {
       return completedHookResult(input, eventName);
     }
+    const claudeSessionId = stringOrUndefined(input.event.session_id);
+    const stopFailureError = eventName === "StopFailure"
+      ? describeStopFailure(parseStopFailureDiagnostic(input.event))
+      : undefined;
     const activeTask = deps.autoMemoryService || deps.harnessFeedbackService
       ? (await deps.taskService.listTasks(context.project.repoRoot))
           .find((task) => task.cleanupStatus !== "cleaned" && (projectScoped || task.taskSlug === input.taskSlug))
@@ -272,7 +286,9 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
           taskRepoRoot: getTaskRuntimeRepoRoot(activeTask),
           taskSlug: activeTask.taskSlug,
           eventName,
-          allowStopBlock: options.allowBlock && eventName === "Stop"
+          allowStopBlock: options.allowBlock && eventName === "Stop",
+          ...(claudeSessionId ? { sessionId: claudeSessionId } : {}),
+          ...(stopFailureError ? { stopFailureError } : {})
         })
       : undefined;
     if (memoryResult?.stopBlockReason) {
@@ -306,7 +322,9 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
             eventName,
             memoryReviewStatus: memoryState?.status ?? "idle",
             memoryReviewHasAssignments: Boolean(memoryState?.active?.assignments.length),
-            memoryReviewError: memoryState?.active?.error
+            memoryReviewError: memoryState?.active?.error,
+            ...(claudeSessionId ? { sessionId: claudeSessionId } : {}),
+            ...(stopFailureError ? { stopFailureError } : {})
           }
         )
       : false;
@@ -997,6 +1015,16 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     if (session.activityStatus === "running" && !retryPending) {
       return true;
     }
+    return hasApiErrorAfterTurnBoundary(session);
+  }
+
+  // A tool role such as the Harness Engineer has no VCM retry, so its turn is
+  // tracked whenever it runs.
+  async function isStopFailureOfSessionTurn(session: RoleSessionRecord): Promise<boolean> {
+    return session.activityStatus === "running" || hasApiErrorAfterTurnBoundary(session);
+  }
+
+  async function hasApiErrorAfterTurnBoundary(session: RoleSessionRecord): Promise<boolean> {
     const { apiError } = await readTranscriptTurnEvidence(session);
     const boundaryMs = Math.max(
       timestampMsOrZero(session.lastTurnStartedAt),
@@ -1589,6 +1617,14 @@ function parseStopFailureDiagnostic(event: ClaudeHookRequest["event"]): StopFail
     retryable: !NON_RETRYABLE_STOP_FAILURE_ERRORS.has(error)
       && !NON_RETRYABLE_CONTEXT_FAILURE_PATTERNS.some((pattern) => diagnosticText.includes(pattern))
   };
+}
+
+function describeStopFailure(failure: StopFailureDiagnostic): string {
+  const detail = failure.errorDetails ?? failure.lastAssistantMessage;
+  const text = detail ? `${failure.error}: ${detail}` : failure.error;
+  return text.length > HOOK_EVENT_DETAIL_MAX_LENGTH
+    ? `${text.slice(0, HOOK_EVENT_DETAIL_MAX_LENGTH - 3)}...`
+    : text;
 }
 
 function normalizeDiagnosticString(value: unknown, maxLength: number): string | undefined {

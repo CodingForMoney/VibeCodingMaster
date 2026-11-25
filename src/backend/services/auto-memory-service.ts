@@ -96,7 +96,15 @@ interface StoredMemoryReviewState {
   reviewBaseCommit?: string;
   stopBlockCount?: number;
   error?: string;
+  // Set when a StopFailure interrupted the review turn. The review stays
+  // failed, but the next turn end from the same Harness Engineer session
+  // validates its result as an uninterrupted turn would.
+  interruptedAt?: string;
+  interruptedSessionId?: string;
 }
+
+// VCM 0.9.13 and earlier recorded an interrupted turn as a plain failure.
+const LEGACY_INTERRUPTED_REVIEW_ERROR = "Task Harness Retrospective memory review turn failed.";
 
 type StoredMemoryReviewStateOnDisk = Omit<StoredMemoryReviewState, "drafts"> & {
   drafts: Array<Omit<MemoryDraftState, "status"> & {
@@ -240,6 +248,9 @@ export interface AutoMemoryHarnessHookInput {
   eventName: ClaudeHookEventName;
   // True only when the hook response can still keep the turn alive.
   allowStopBlock?: boolean;
+  // Claude Code session of the Harness Engineer turn that sent the hook.
+  sessionId?: string;
+  stopFailureError?: string;
 }
 
 export interface AutoMemoryHarnessHookResult {
@@ -784,6 +795,14 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     if (state?.status === "reviewing" && !state.reviewPromptDispatchedAt) {
       return { handled: false };
     }
+    if (
+      state
+      && isInterruptedReview(state)
+      && (input.eventName === "Stop" || input.eventName === "StopFailure")
+      && isSameClaudeSession(state.interruptedSessionId, input.sessionId)
+    ) {
+      await resumeInterruptedReview(input.taskRepoRoot, state);
+    }
     if (!state || state.status !== "reviewing") {
       return { handled: false };
     }
@@ -791,7 +810,11 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       return { handled: true };
     }
     if (input.eventName === "StopFailure") {
-      await failReview(input.taskRepoRoot, state, "Task Harness Retrospective memory review turn failed.");
+      state.interruptedAt = now();
+      if (input.sessionId) {
+        state.interruptedSessionId = input.sessionId;
+      }
+      await failReview(input.taskRepoRoot, state, interruptedReviewError(input.stopFailureError));
       return { handled: true };
     }
     if (input.eventName === "Stop") {
@@ -831,6 +854,22 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       return { handled: true };
     }
     return { handled: true };
+  }
+
+  // The continued turn of an interrupted review ends like an uninterrupted
+  // one, so the review and its run return to reviewing before validation.
+  async function resumeInterruptedReview(taskRepoRoot: string, state: StoredMemoryReviewState): Promise<void> {
+    state.status = "reviewing";
+    state.updatedAt = now();
+    delete state.error;
+    delete state.interruptedAt;
+    delete state.interruptedSessionId;
+    await persistActiveState(taskRepoRoot, state);
+    const run = await readRun(taskRepoRoot, state.runId);
+    const resumedRun: StoredMemoryReviewRun = { ...run, status: "reviewing", updatedAt: state.updatedAt };
+    delete resumedRun.failedAt;
+    delete resumedRun.error;
+    await persistRun(taskRepoRoot, resumedRun);
   }
 
   // A correctable retrospective result keeps the Harness Engineer turn alive
@@ -1522,7 +1561,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     await writeRunMemorySet(taskRepoRoot, state.runId, "after", after);
     const diff = renderMemoryDiff(before, after);
     const run = await readRun(taskRepoRoot, state.runId);
-    await persistRun(taskRepoRoot, {
+    const appliedRun: StoredMemoryReviewRun = {
       ...run,
       status: "applied",
       updatedAt: timestamp,
@@ -1530,7 +1569,11 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       afterHashes: hashMemorySet(after),
       diff,
       assignments
-    });
+    };
+    // A retried or continued review may have failed this run earlier.
+    delete appliedRun.failedAt;
+    delete appliedRun.error;
+    await persistRun(taskRepoRoot, appliedRun);
     await deps.fs.writeText(
       resolveRepoPath(taskRepoRoot, `${MEMORY_REVIEW_RUNS_ROOT}/${state.runId}/applied.patch`),
       diff
@@ -1543,6 +1586,8 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     state.assignments = assignments;
     state.updatedAt = timestamp;
     delete state.error;
+    delete state.interruptedAt;
+    delete state.interruptedSessionId;
     await persistActiveState(taskRepoRoot, state);
   }
 
@@ -2488,6 +2533,25 @@ function reviewResultRelativePath(runId: string): string {
 // Errors the Harness Engineer can correct in its own output: the result file,
 // the memory edit, or the memory commit. A malformed result file surfaces as a
 // JSON SyntaxError.
+function isInterruptedReview(state: StoredMemoryReviewState): boolean {
+  return state.status === "failed"
+    && state.assignments.length === 0
+    && Boolean(state.reviewPromptDispatchedAt)
+    && (Boolean(state.interruptedAt) || state.error === LEGACY_INTERRUPTED_REVIEW_ERROR);
+}
+
+// An unrecorded session on either side cannot rule the turn out.
+function isSameClaudeSession(recorded: string | undefined, incoming: string | undefined): boolean {
+  return !recorded || !incoming || recorded === incoming;
+}
+
+function interruptedReviewError(stopFailureError: string | undefined): string {
+  return [
+    `Task Harness Retrospective memory review turn was interrupted${stopFailureError ? ` (${stopFailureError})` : ""}.`,
+    "Type continue in the Harness Engineer terminal to finish it, or retry the review once its result is written."
+  ].join(" ");
+}
+
 function isFixableMemoryResultError(error: unknown): boolean {
   if (error instanceof SyntaxError) {
     return true;

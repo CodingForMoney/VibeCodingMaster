@@ -638,6 +638,11 @@ review requests collect proposals before starting the retrospective. A failed
 proposal collection, combined retrospective memory review, or durable-document
 assignment must be retried from Harness Studio.
 
+If an API error interrupts the retrospective turn, Harness Studio says so. Type
+`continue` in the Harness Engineer terminal: when that turn ends, VCM validates
+the report and memory review as usual. Retrying the memory review in Harness
+Studio, once its result file exists, also completes the retrospective.
+
 ## Closing a Task
 
 `Close Task` is destructive.

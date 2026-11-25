@@ -849,6 +849,68 @@ describe("auto-memory-service", () => {
     expect(context.terminalWrites.join("\n")).toContain("[VCM Durable Documentation Assignment]");
   });
 
+  it("validates the continued turn of a memory review interrupted by StopFailure", async () => {
+    const context = await createContext(true);
+    const move = await prepareCommittedMemoryMove(context);
+    const hook = (eventName: "Stop" | "StopFailure", sessionId: string) => context.service.handleHarnessEngineerHook({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      eventName,
+      allowStopBlock: eventName === "Stop",
+      sessionId,
+      ...(eventName === "StopFailure" ? { stopFailureError: "unknown: API Error: 403" } : {})
+    });
+
+    await expect(hook("StopFailure", "he-1")).resolves.toEqual({ handled: true });
+    let state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.status).toBe("failed");
+    expect(state.active?.error).toContain("memory review turn was interrupted (unknown: API Error: 403)");
+    expect(state.runs[0]).toMatchObject({ runId: move.review.runId, status: "failed" });
+
+    await move.writeResult("none");
+    // Another Harness Engineer session did not continue the interrupted turn.
+    await expect(hook("Stop", "he-2")).resolves.toEqual({ handled: false });
+    state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.status).toBe("failed");
+
+    await expect(hook("Stop", "he-1")).resolves.toEqual({ handled: true });
+    state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.status).toBe("documenting");
+    expect(state.active?.error).toBeUndefined();
+    expect(state.active?.assignments[0]).toMatchObject({ targetPath: "docs/ARCHITECTURE.md", status: "running" });
+    expect(state.runs[0]).toMatchObject({ runId: move.review.runId, status: "applied" });
+    expect(state.runs[0].error).toBeUndefined();
+    expect(state.runs[0].failedAt).toBeUndefined();
+    expect(context.terminalWrites.join("\n")).toContain("[VCM Durable Documentation Assignment]");
+  });
+
+  it("keeps an interrupted memory review correctable when its continued result is invalid", async () => {
+    const context = await createContext(true);
+    const move = await prepareCommittedMemoryMove(context);
+    await context.service.handleHarnessEngineerHook({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      eventName: "StopFailure",
+      sessionId: "he-1"
+    });
+    await move.writeResult("");
+
+    const blocked = await context.service.handleHarnessEngineerHook({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      eventName: "Stop",
+      allowStopBlock: true,
+      sessionId: "he-1"
+    });
+
+    expect(blocked.stopBlockReason).toContain("Attempt 1 of 3");
+    const state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.status).toBe("reviewing");
+  });
+
   it("rejects reviewed memory that Harness Engineer did not commit", async () => {
     const context = await createContext(true);
     await prepareHarnessMemoryReview(context);

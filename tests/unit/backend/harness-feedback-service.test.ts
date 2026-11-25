@@ -617,6 +617,199 @@ None.
   });
 });
 
+describe("harness-feedback-service interrupted retrospective", () => {
+  const markerPath = () => path.join(tmpRepo!, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.json");
+  const reportPath = () => path.join(tmpRepo!, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.md");
+  const feedbackPath = ".ai/vcm/harness-feedback/pending/01-coder.md";
+
+  async function setup(withMemoryReview = false) {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-retrospective-interrupted-"));
+    const taskRepoRoot = path.join(tmpRepo, ".claude/worktrees/demo-task");
+    await mkdir(path.join(taskRepoRoot, ".ai/vcm/handoffs"), { recursive: true });
+    await writeFile(
+      path.join(taskRepoRoot, ".ai/vcm/handoffs/final-acceptance.md"),
+      renderFinalAcceptance("accepted"),
+      "utf8"
+    );
+    await mkdir(path.join(tmpRepo, ".ai/vcm/harness-feedback/pending"), { recursive: true });
+    await writeFile(path.join(tmpRepo, feedbackPath), renderFeedback("Coder feedback", "coder"), "utf8");
+    const service = createHarnessFeedbackService({
+      fs: createNodeFileSystemAdapter(),
+      runtime: createRuntime([]),
+      sessionService: createSessionService(),
+      ...(withMemoryReview
+        ? {
+            autoMemoryService: {
+              async prepareTaskRetrospectiveReview() {
+                return {
+                  runId: "memory-run",
+                  roleDraftsPath: path.join(taskRepoRoot, "memory-run/drafts"),
+                  currentMemoryPath: path.join(taskRepoRoot, "memory-run/before"),
+                  activeMemoryPaths: [path.join(taskRepoRoot, "CLAUDE.md")],
+                  existingEntriesPath: path.join(taskRepoRoot, "memory-run/existing-entries.json"),
+                  proposalCandidates: [],
+                  reviewResultPath: path.join(taskRepoRoot, "memory-run/review-result.json")
+                };
+              },
+              async cancelTaskRetrospectiveReview() {
+                return undefined;
+              }
+            }
+          }
+        : {}),
+      now: createClock()
+    });
+    const start = (trigger: "manual" | "auto") => service.startTaskRetrospective(tmpRepo!, {
+      taskSlug: "demo-task",
+      taskRepoRoot,
+      handoffDir: ".ai/vcm/handoffs",
+      trigger
+    });
+    await start("auto");
+    const hook = (
+      eventName: "Stop" | "StopFailure" | "UserPromptSubmit",
+      sessionId: string,
+      memoryReviewStatus: "idle" | "documenting" | "failed" = "idle"
+    ) => service.handleTaskRetrospectiveHook(tmpRepo!, {
+      taskSlug: "demo-task",
+      eventName,
+      memoryReviewStatus,
+      sessionId,
+      ...(eventName === "StopFailure"
+        ? { stopFailureError: "unknown: API Error: 403 Request blocked before it reached Anthropic's API" }
+        : {})
+    });
+    const writeReport = () => writeFile(
+      reportPath(),
+      renderRetrospectiveReport([path.join(tmpRepo!, feedbackPath)]),
+      "utf8"
+    );
+    const readMarker = async () => JSON.parse(await readFile(markerPath(), "utf8"));
+    return { service, start, hook, writeReport, readMarker };
+  }
+
+  it("finishes the retrospective when the interrupted session's continued turn ends", async () => {
+    const { service, hook, writeReport, readMarker } = await setup();
+
+    await expect(hook("StopFailure", "claude-1")).resolves.toBe(true);
+    const interrupted = await readMarker();
+    expect(interrupted).toMatchObject({
+      status: "failed",
+      interruptedAt: expect.any(String),
+      interruptedSessionId: "claude-1",
+      pendingFeedbackPaths: [feedbackPath]
+    });
+    expect(interrupted.error).toContain("was interrupted (unknown: API Error: 403");
+    await expect(service.getState(tmpRepo!, "demo-task")).resolves.toMatchObject({
+      warnings: [expect.stringContaining("Type continue in the Harness Engineer terminal")]
+    });
+
+    // The continued turn's prompt does not finish anything yet.
+    await expect(hook("UserPromptSubmit", "claude-1")).resolves.toBe(false);
+    expect((await readMarker()).status).toBe("failed");
+
+    await writeReport();
+    await expect(hook("Stop", "claude-1")).resolves.toBe(true);
+
+    await expect(readFile(path.join(tmpRepo!, feedbackPath), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    const completed = await readMarker();
+    expect(completed).toMatchObject({ status: "completed", pendingFeedbackPaths: [] });
+    expect(completed).not.toHaveProperty("error");
+    expect(completed).not.toHaveProperty("interruptedAt");
+    expect(completed).not.toHaveProperty("interruptedSessionId");
+    await expect(service.getState(tmpRepo!, "demo-task")).resolves.toMatchObject({ warnings: [] });
+  });
+
+  it("keeps the retrospective interrupted when the continued turn fails again", async () => {
+    const { hook, writeReport, readMarker } = await setup();
+
+    await hook("StopFailure", "claude-1");
+    await expect(hook("StopFailure", "claude-1")).resolves.toBe(true);
+    expect(await readMarker()).toMatchObject({ status: "failed", interruptedSessionId: "claude-1" });
+
+    await writeReport();
+    await hook("Stop", "claude-1");
+    expect((await readMarker()).status).toBe("completed");
+  });
+
+  it("ignores the turn end of another Harness Engineer session", async () => {
+    const { hook, writeReport, readMarker } = await setup();
+
+    await hook("StopFailure", "claude-1");
+    await writeReport();
+    await expect(hook("Stop", "claude-2")).resolves.toBe(false);
+
+    expect(await readMarker()).toMatchObject({ status: "failed", interruptedSessionId: "claude-1" });
+    await expect(readFile(path.join(tmpRepo!, feedbackPath), "utf8")).resolves.toContain("Coder feedback");
+  });
+
+  it("does not let an automatic start replace an interrupted retrospective, but a manual one may", async () => {
+    const { start, hook, readMarker } = await setup();
+
+    await hook("StopFailure", "claude-1");
+    await expect(start("auto")).rejects.toMatchObject({ code: "TASK_HARNESS_RETROSPECTIVE_EXISTS" });
+    expect((await readMarker()).status).toBe("failed");
+
+    await expect(start("manual")).resolves.toMatchObject({ version: 1 });
+    expect((await readMarker()).status).toBe("running");
+  });
+
+  it("completes an interrupted retrospective once a memory review retry applies its run", async () => {
+    const { service, hook, writeReport, readMarker } = await setup(true);
+    const runs = (status: "failed" | "applied") => [{
+      runId: "memory-run",
+      taskSlug: "demo-task",
+      source: "auto" as const,
+      status,
+      createdAt: "2026-06-01T00:00:00.000Z"
+    }];
+
+    await hook("StopFailure", "claude-1");
+    await expect(service.completeWaitingTaskRetrospective(tmpRepo!, "demo-task", {
+      status: "failed",
+      runs: runs("failed")
+    })).resolves.toBe(false);
+    // An applied run cannot finish a retrospective whose report is missing.
+    await expect(service.completeWaitingTaskRetrospective(tmpRepo!, "demo-task", {
+      status: "documenting",
+      runs: runs("applied")
+    })).resolves.toBe(false);
+    expect((await readMarker()).status).toBe("failed");
+
+    await writeReport();
+    await expect(service.completeWaitingTaskRetrospective(tmpRepo!, "demo-task", {
+      status: "documenting",
+      runs: runs("applied")
+    })).resolves.toBe(true);
+    const waiting = await readMarker();
+    expect(waiting).toMatchObject({ status: "waiting-docs", pendingFeedbackPaths: [] });
+    expect(waiting).not.toHaveProperty("error");
+    expect(waiting).not.toHaveProperty("interruptedAt");
+    await expect(readFile(path.join(tmpRepo!, feedbackPath), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+
+    await expect(service.completeWaitingTaskRetrospective(tmpRepo!, "demo-task", {
+      status: "idle",
+      runs: runs("applied")
+    })).resolves.toBe(true);
+    expect((await readMarker()).status).toBe("completed");
+  });
+
+  it("recovers a retrospective that an earlier VCM failed on StopFailure", async () => {
+    const { hook, writeReport, readMarker } = await setup();
+    const marker = await readMarker();
+    await writeFile(markerPath(), JSON.stringify({
+      ...marker,
+      status: "failed",
+      failedAt: "2026-01-01T00:00:09.000Z",
+      error: "Harness Engineer Task Harness Retrospective turn failed."
+    }), "utf8");
+
+    await writeReport();
+    await expect(hook("Stop", "claude-1")).resolves.toBe(true);
+    expect((await readMarker()).status).toBe("completed");
+  });
+});
+
 function renderFinalAcceptance(decision: string): string {
   return [
     "# Final Acceptance",

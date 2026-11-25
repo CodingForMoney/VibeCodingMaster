@@ -918,7 +918,9 @@ lowercase hexadecimal hash (7-40 characters); format errors are rejected on
 artifact submission, using the same validation as completion.
 Failed assignments do not block later items; the
 retrospective reports any remaining failures after the queue drains and can
-complete after retry. Migration content remains in the task-local run without
+complete after retry. A StopFailure that interrupts the retrospective turn
+keeps the retrospective and memory review recoverable: the next Stop of the
+same Harness Engineer Session validates the result normally. Migration content remains in the task-local run without
 being automatically put back into memory. Already-applied migrations survive
 backend restart and disabling Auto Memory.
 

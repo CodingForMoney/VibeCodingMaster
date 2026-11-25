@@ -1837,6 +1837,85 @@ describe("createClaudeHookService", () => {
     ]);
   });
 
+  it.each([
+    ["idle", false],
+    ["running", true]
+  ] as const)("handles a Harness Engineer StopFailure only during its turn (%s)", async (activityStatus, handled) => {
+    const calls: string[] = [];
+    const task = await createTaskServiceStub().loadTask();
+    const harnessEngineer = {
+      id: "runtime_harness_engineer",
+      claudeSessionId: "harness_engineer_session",
+      taskSlug: "__project_harness_engineer__",
+      role: "harness-engineer",
+      status: "running",
+      activityStatus,
+      command: "claude --agent harness-engineer",
+      permissionMode: "default",
+      cwd: "/repo",
+      terminalBackend: "node-pty",
+      lastTurnStartedAt: "2026-06-01T00:00:00.000Z",
+      updatedAt: "2026-06-01T00:00:00.000Z"
+    } satisfies RoleSessionRecord;
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: {
+        async listTasks() {
+          return [task];
+        }
+      } as never,
+      sessionService: {
+        async getProjectHarnessEngineerSession() {
+          return harnessEngineer;
+        },
+        async recordProjectHarnessEngineerHookEvent(_repoRoot, input) {
+          calls.push(`session:${input.eventName}`);
+          return { ...harnessEngineer, activityStatus: "idle" };
+        }
+      } as SessionService,
+      autoMemoryService: {
+        async handleHarnessEngineerHook(input) {
+          calls.push(`memory:${input.eventName}:${input.sessionId}:${input.stopFailureError}`);
+          return { handled: true };
+        },
+        async getState() {
+          return { status: "failed", runs: [] };
+        }
+      } as never,
+      harnessFeedbackService: {
+        async handleTaskRetrospectiveHook(_repoRoot, input) {
+          calls.push(`retrospective:${input.eventName}:${input.sessionId}:${input.stopFailureError}`);
+          return true;
+        }
+      } as never,
+      appSettings: createAppSettingsStub()
+    });
+
+    await service.handleHook({
+      taskSlug: "__project_harness_engineer__",
+      role: "harness-engineer",
+      event: {
+        hook_event_name: "StopFailure",
+        session_id: "harness_engineer_session",
+        error: "unknown",
+        error_details: "API Error: 403 Request blocked",
+        cwd: "/repo"
+      }
+    });
+
+    expect(calls).toEqual(handled
+      ? [
+          "session:StopFailure",
+          "memory:StopFailure:harness_engineer_session:unknown: API Error: 403 Request blocked",
+          "retrospective:StopFailure:harness_engineer_session:unknown: API Error: 403 Request blocked"
+        ]
+      : []);
+    expect(service.listRecentHookEvents().at(-1)).toMatchObject({
+      eventName: "StopFailure",
+      outcome: handled ? expect.any(String) : "ignored-background-stop-failure"
+    });
+  });
+
   it("ignores stale VCM role hooks before workflow side effects", async () => {
     const calls: string[] = [];
     const current = await boundRoleSession("/repo", "demo-task", "coder");

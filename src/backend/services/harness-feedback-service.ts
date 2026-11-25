@@ -51,6 +51,9 @@ export interface TaskRetrospectiveHookInput {
   memoryReviewStatus: AutoMemoryReviewStatus;
   memoryReviewHasAssignments?: boolean;
   memoryReviewError?: string;
+  // Claude Code session of the Harness Engineer turn that sent the hook.
+  sessionId?: string;
+  stopFailureError?: string;
 }
 
 export interface HarnessFeedbackServiceDeps {
@@ -89,7 +92,16 @@ interface TaskRetrospectiveMarker {
   failedAt?: string;
   feedbackProcessedAt?: string;
   error?: string;
+  // Set when a StopFailure interrupted the retrospective turn. The marker
+  // stays failed, but the next turn end from the same Harness Engineer
+  // session, or a memory review retry that applies this run, re-validates the
+  // report instead of discarding it.
+  interruptedAt?: string;
+  interruptedSessionId?: string;
 }
+
+// VCM 0.9.13 and earlier recorded an interrupted turn as a plain failure.
+const LEGACY_INTERRUPTED_RETROSPECTIVE_ERROR = "Harness Engineer Task Harness Retrospective turn failed.";
 
 export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): HarnessFeedbackService {
   const now = deps.now ?? (() => new Date().toISOString());
@@ -166,6 +178,13 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
       || existingMarker.status === "triggered"
       || existingMarker.status === "waiting-docs"
       || (existingMarker.finalAcceptanceHash === finalAcceptanceHash && existingMarker.status !== "failed")
+      // An automatic start must not replace an interrupted turn the user can
+      // still continue; a manual start may.
+      || (
+        input.trigger === "auto"
+        && existingMarker.finalAcceptanceHash === finalAcceptanceHash
+        && isInterruptedRetrospective(existingMarker)
+      )
     )) {
       throw new VcmError({
         code: "TASK_HARNESS_RETROSPECTIVE_EXISTS",
@@ -238,8 +257,22 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
     repoRoot: string,
     input: TaskRetrospectiveHookInput
   ): Promise<boolean> {
-    const marker = await loadTaskRetrospectiveMarker(repoRoot, input.taskSlug);
-    if (!marker || (marker.status !== "running" && marker.status !== "triggered")) {
+    const loaded = await loadTaskRetrospectiveMarker(repoRoot, input.taskSlug);
+    if (!loaded) {
+      return false;
+    }
+    let marker = loaded;
+    if (isInterruptedRetrospective(loaded)) {
+      // Only the end of a continued turn of the interrupted session can
+      // finish the retrospective.
+      if (
+        (input.eventName !== "Stop" && input.eventName !== "StopFailure")
+        || !isSameClaudeSession(loaded.interruptedSessionId, input.sessionId)
+      ) {
+        return false;
+      }
+      marker = resumeInterruptedRetrospective(loaded);
+    } else if (loaded.status !== "running" && loaded.status !== "triggered") {
       return false;
     }
     if (input.eventName === "UserPromptSubmit" || input.eventName === "PostCompact") {
@@ -253,20 +286,13 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
         status: "failed",
         failedAt: timestamp,
         updatedAt: timestamp,
-        error: "Harness Engineer Task Harness Retrospective turn failed."
+        interruptedAt: timestamp,
+        ...(input.sessionId ? { interruptedSessionId: input.sessionId } : {}),
+        error: interruptedRetrospectiveError(input.stopFailureError)
       });
       return true;
     }
-    const reportPath = resolveRepoPath(repoRoot, marker.analysisPath);
-    const reportContent = await deps.fs.pathExists(reportPath)
-      ? await deps.fs.readText(reportPath)
-      : "";
-    const reportErrors = reportContent.trim()
-      ? [
-          ...getRetrospectiveReportErrors(reportContent),
-          ...getFeedbackDispositionErrors(repoRoot, marker.pendingFeedbackPaths ?? [], reportContent)
-        ]
-      : ["Report is empty."];
+    const reportErrors = await getRetrospectiveReportValidationErrors(repoRoot, marker);
     const reportReady = reportErrors.length === 0;
     if (!reportReady) {
       await persistTaskRetrospectiveMarker(repoRoot, {
@@ -314,13 +340,44 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
     memory: Pick<AutoMemoryStateReport, "status" | "runs">
   ): Promise<boolean> {
     const marker = await loadTaskRetrospectiveMarker(repoRoot, taskSlug);
-    // A memory review that failed validation recovers only when a retry
-    // re-validated and applied that same run; a discarded run never does.
-    const memoryReviewRecovered = Boolean(
-      marker?.memoryReviewFailure
-      && marker.memoryRunId
+    const memoryRunApplied = Boolean(
+      marker?.memoryRunId
       && memory.runs.some((run) => run.runId === marker.memoryRunId && run.status === "applied")
     );
+    if (marker && memoryRunApplied && isInterruptedRetrospective(marker)) {
+      // A memory review retry applied the interrupted turn's result, so the
+      // report that turn wrote is validated as if the turn had ended.
+      if ((await getRetrospectiveReportValidationErrors(repoRoot, marker)).length > 0) {
+        return false;
+      }
+      const processedMarker = await consumeAcceptedFeedback(repoRoot, resumeInterruptedRetrospective(marker));
+      if (!processedMarker) {
+        return true;
+      }
+      const timestamp = now();
+      if (memory.status === "documenting") {
+        await persistTaskRetrospectiveMarker(repoRoot, {
+          ...processedMarker,
+          status: "waiting-docs",
+          updatedAt: timestamp
+        });
+      } else if (memory.status === "failed") {
+        await persistTaskRetrospectiveMarker(repoRoot, {
+          ...processedMarker,
+          status: "failed",
+          durableDocFailure: true,
+          failedAt: timestamp,
+          updatedAt: timestamp,
+          error: "Task Harness Retrospective durable-document assignment failed."
+        });
+      } else {
+        await completeTaskRetrospective(repoRoot, processedMarker);
+      }
+      return true;
+    }
+    // A memory review that failed validation recovers only when a retry
+    // re-validated and applied that same run; a discarded run never does.
+    const memoryReviewRecovered = Boolean(marker?.memoryReviewFailure && memoryRunApplied);
     if (
       !marker
       || (marker.status !== "waiting-docs"
@@ -377,6 +434,22 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
       completedAt: timestamp,
       updatedAt: timestamp
     });
+  }
+
+  async function getRetrospectiveReportValidationErrors(
+    repoRoot: string,
+    marker: TaskRetrospectiveMarker
+  ): Promise<string[]> {
+    const reportPath = resolveRepoPath(repoRoot, marker.analysisPath);
+    const reportContent = await deps.fs.pathExists(reportPath)
+      ? await deps.fs.readText(reportPath)
+      : "";
+    return reportContent.trim()
+      ? [
+          ...getRetrospectiveReportErrors(reportContent),
+          ...getFeedbackDispositionErrors(repoRoot, marker.pendingFeedbackPaths ?? [], reportContent)
+        ]
+      : ["Report is empty."];
   }
 
   async function consumeAcceptedFeedback(
@@ -739,6 +812,32 @@ function compactLine(value: string): string {
 
 function getTaskRetrospectiveMarkerPath(taskSlug: string): string {
   return `${TASK_RETROSPECTIVE_DIR}/${sanitizeFeedbackId(taskSlug)}.json`;
+}
+
+function isInterruptedRetrospective(marker: TaskRetrospectiveMarker): boolean {
+  return marker.status === "failed"
+    && (Boolean(marker.interruptedAt) || marker.error === LEGACY_INTERRUPTED_RETROSPECTIVE_ERROR);
+}
+
+function resumeInterruptedRetrospective(marker: TaskRetrospectiveMarker): TaskRetrospectiveMarker {
+  const resumed: TaskRetrospectiveMarker = { ...marker, status: "running" };
+  delete resumed.interruptedAt;
+  delete resumed.interruptedSessionId;
+  delete resumed.failedAt;
+  delete resumed.error;
+  return resumed;
+}
+
+// An unrecorded session on either side cannot rule the turn out.
+function isSameClaudeSession(recorded: string | undefined, incoming: string | undefined): boolean {
+  return !recorded || !incoming || recorded === incoming;
+}
+
+function interruptedRetrospectiveError(stopFailureError: string | undefined): string {
+  return [
+    `Harness Engineer Task Harness Retrospective turn was interrupted${stopFailureError ? ` (${stopFailureError})` : ""}.`,
+    "Type continue in the Harness Engineer terminal to finish it; VCM validates the report when that turn ends."
+  ].join(" ");
 }
 
 function sanitizeFeedbackId(value: string): string {

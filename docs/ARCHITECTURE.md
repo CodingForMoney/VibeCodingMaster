@@ -538,6 +538,18 @@ indefinite `documenting` state. Retrospective reports that failure and completes
 after the assignments are successfully retried. Accepted feedback dispositions
 are consumed independently of later document completion.
 
+A StopFailure that ends the retrospective turn records the retrospective marker
+and the memory review as interrupted, with the Claude Session ID of that turn.
+Both stay failed, so automatic triggers do not restart the retrospective and
+memory work still delays it, but the next Stop of the same Harness Engineer
+Session validates the report, `review-result.json`, and the memory commit
+exactly as an uninterrupted turn would. A memory review retry that applies the
+interrupted run also re-validates the report and completes the retrospective
+from it. A manual Review Task Harness request may still replace an interrupted
+retrospective. A StopFailure while the Harness Engineer is idle comes from a
+background query and changes neither state unless the transcript shows a
+main-thread API error after the Session's last turn boundary.
+
 Each assignment owns a report under its memory-review run and retains its
 original commit baseline across retries and recovery. Artifact submission binds
 the report path and Assignment ID to the currently assigned owner; Docs-Only
