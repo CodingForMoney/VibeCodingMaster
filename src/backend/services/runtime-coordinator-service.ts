@@ -8,6 +8,7 @@ import { VcmError } from "../errors.js";
 import type { GatewayService } from "../gateway/gateway-service.js";
 import type { AppSettingsService } from "./app-settings-service.js";
 import type { AutoMemoryService } from "./auto-memory-service.js";
+import type { ClaudeHookService } from "./claude-hook-service.js";
 import type { HarnessFeedbackService } from "./harness-feedback-service.js";
 import type { HarnessService } from "./harness-service.js";
 import type { ProjectService } from "./project-service.js";
@@ -51,6 +52,7 @@ export interface RuntimeCoordinatorServiceDeps {
   autoMemoryService: Pick<AutoMemoryService, "reconcileTask" | "getTaskRetrospectiveReadiness">;
   roundService: Pick<RoundService, "getSessionRoundState">;
   gatewayService: Pick<GatewayService, "getStatus">;
+  roleActivityReconciler?: Pick<ClaudeHookService, "reconcileStaleRoleActivity">;
   getStateRoot(repoRoot: string): Promise<string>;
   setInterval?: (callback: () => void, delayMs: number) => unknown;
   clearInterval?: (timer: unknown) => void;
@@ -106,6 +108,12 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
       if (!activeTask) {
         return { activeTask: null, gatewayStatus };
       }
+
+      // A failure here must not stop tool-session or Auto Memory reconciliation.
+      await deps.roleActivityReconciler?.reconcileStaleRoleActivity(repoRoot, activeTask.taskSlug)
+        .catch((error: unknown) => {
+          console.warn("[VCM] Stale role activity reconciliation failed", error);
+        });
 
       const taskRepoRoot = getTaskRuntimeRepoRoot(activeTask);
       const harnessInitialized = await deps.harnessService.getHarnessStatus(taskRepoRoot)

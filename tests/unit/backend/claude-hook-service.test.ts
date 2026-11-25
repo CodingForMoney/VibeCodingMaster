@@ -1086,7 +1086,10 @@ describe("createClaudeHookService", () => {
       const harness = createUsageLimitHarness(clock);
       await harness.fail("Claude usage limit reached.");
 
+      // The hourly retry eight days later hits the limit again.
       clock.now = "2026-11-03T09:32:33.000Z";
+      harness.timers.at(-1)!.callback();
+      await new Promise((resolve) => setTimeout(resolve, 10));
       await harness.fail("Claude usage limit reached.");
 
       expect(harness.recovery()).toMatchObject({

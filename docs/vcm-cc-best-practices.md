@@ -1027,14 +1027,17 @@ Claude hooks:
   boundaries.
 - `Stop`: ends the active Turn, starts the stop window, and triggers pending
   route delivery.
-- `StopFailure`: schedules recovery for retryable failures, handles manual
-  interruption, and eventually records recovery failure.
+- `StopFailure`: schedules recovery for retryable failures of a VCM-tracked
+  turn, handles manual interruption, and eventually records recovery failure.
+  A StopFailure from a failed background query of an idle session, which leaves
+  no API error in the transcript, changes nothing.
 - `PostCompact`: refreshes session metadata without changing running/idle flow
   state.
 - `PermissionRequest`: returns the configured local permission decision.
 
 Role retry is enabled by default. Retryable StopFailure events retry up to 20
-times: first after 1 minute, then +1 minute per attempt. Non-retryable errors
+times: first after 1 minute, then +1 minute per attempt. Each role keeps its own
+attempt count and backoff, so roles failing together are all retried. Non-retryable errors
 include authentication, account-on-hold, billing, cloud-credential, invalid
 request, model-not-found, and max-output-token failures. Context-length and
 request-too-large failures are also non-retryable because resending the

@@ -67,7 +67,8 @@ import { useScheduledPoll } from "./state/use-scheduled-poll.js";
 import {
   formatRoleRecoveryFailureMessage,
   formatRoleRecoveryNotice,
-  getRoleRecoveryNoticeKey
+  getRoleRecoveryNoticeKey,
+  selectActiveRoleRecovery
 } from "./state/role-recovery-notice.js";
 import { ProjectDashboard } from "./routes/project-dashboard.js";
 import { TaskWorkspace, type TaskWorkspaceLaunchState } from "./routes/task-workspace.js";
@@ -755,14 +756,13 @@ export function App() {
     activeSessionRoundState && activeSessionRoundState.taskSlug === activeTask?.taskSlug
       ? activeSessionRoundState.roundState
       : null;
-  const roleRecoveryNoticeKey = activeTask?.taskSlug && sidebarRoundState?.roleRecovery
-    ? getRoleRecoveryNoticeKey(activeTask.taskSlug, sidebarRoundState.roleRecovery)
+  const activeRoleRecovery = sidebarRoundState ? selectActiveRoleRecovery(sidebarRoundState) : undefined;
+  const roleRecoveryNoticeKey = activeTask?.taskSlug && activeRoleRecovery
+    ? getRoleRecoveryNoticeKey(activeTask.taskSlug, activeRoleRecovery)
     : null;
-  const roleRecoveryNoticeText = sidebarRoundState?.roleRecovery &&
-    sidebarRoundState.roleRecovery.status !== "failed" &&
-    roleRecoveryNoticeKey !== dismissedRoleRecoveryKey
-      ? formatRoleRecoveryNotice(sidebarRoundState.roleRecovery)
-      : null;
+  const roleRecoveryNoticeText = activeRoleRecovery && roleRecoveryNoticeKey !== dismissedRoleRecoveryKey
+    ? formatRoleRecoveryNotice(activeRoleRecovery)
+    : null;
   const sidebarGateReview =
     activeGateReview && activeGateReview.taskSlug === activeTask?.taskSlug
       ? activeGateReview.state

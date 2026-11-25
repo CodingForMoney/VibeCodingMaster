@@ -88,6 +88,15 @@ describe("createRuntimeCoordinatorService", () => {
     service.stop();
   });
 
+  it("settles stale workflow-role activity of the active task on every reconcile", async () => {
+    const calls: string[] = [];
+    const service = createCoordinator({ calls, translator: undefined, harnessEngineer: undefined });
+
+    await service.reconcileProject("/repo");
+
+    expect(calls).toContain("reconcile-stale-activity:/repo:demo-task");
+  });
+
   it("resumes existing task tool sessions and starts conversation translation listeners", async () => {
     const calls: string[] = [];
     const launches: ToolLaunchCall[] = [];
@@ -349,6 +358,12 @@ function createCoordinator(input: {
           translationEnabled = true;
         }
         return null as never;
+      }
+    },
+    roleActivityReconciler: {
+      async reconcileStaleRoleActivity(repoRoot, taskSlug) {
+        input.calls.push(`reconcile-stale-activity:${repoRoot}:${taskSlug}`);
+        return [];
       }
     },
     setInterval() {

@@ -557,6 +557,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     autoMemoryService,
     roundService,
     gatewayService,
+    roleActivityReconciler: claudeHookService,
     async getStateRoot(repoRoot) {
       return (await projectService.loadConfig(repoRoot)).stateRoot;
     }
@@ -580,7 +581,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     appRoot,
     runtime,
     gatewayService,
-    translationService
+    translationService,
+    hookEvents: claudeHookService
   });
 
   return {

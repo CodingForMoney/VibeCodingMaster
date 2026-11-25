@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   formatRoleRecoveryFailureMessage,
-  formatRoleRecoveryNotice
+  formatRoleRecoveryNotice,
+  selectActiveRoleRecovery
 } from "../../../src/frontend/state/role-recovery-notice.js";
 import type { VcmRoleRecoveryState } from "../../../src/shared/types/round.js";
 
@@ -20,6 +21,16 @@ function recovery(overrides: Partial<VcmRoleRecoveryState>): VcmRoleRecoveryStat
 }
 
 describe("role recovery notices", () => {
+  it("shows the latest role still being retried even when another role's recovery failed", () => {
+    const failed = recovery({ role: "architect", status: "failed", lastFailureAt: "2026-10-26T09:40:00.000Z" });
+    const older = recovery({ role: "coder", lastFailureAt: "2026-10-26T09:30:00.000Z" });
+    const newer = recovery({ role: "tester", status: "retrying", lastFailureAt: "2026-10-26T09:35:00.000Z" });
+
+    expect(selectActiveRoleRecovery({ roleRecovery: failed, roleRecoveries: [failed, older, newer] })).toBe(newer);
+    expect(selectActiveRoleRecovery({ roleRecovery: failed, roleRecoveries: [failed] })).toBeUndefined();
+    expect(selectActiveRoleRecovery({ roleRecovery: older })).toBe(older);
+  });
+
   it("shows a usage-limit wait with its reset instead of a retry count", () => {
     const waiting = recovery({
       attempt: 0,

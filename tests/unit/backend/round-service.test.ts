@@ -1156,6 +1156,122 @@ describe("round-service", () => {
       since: stopped.state.stoppedAt
     });
   });
+
+  describe("per-role recovery", () => {
+    const input = { stateRepoRoot: "/repo", stateRoot: ".ai/vcm", taskSlug: "demo-task" };
+    const waitingRecovery = (role: RoleName, attempt: number, lastFailureAt: string) => ({
+      role,
+      status: "waiting" as const,
+      attempt,
+      maxAttempts: 20,
+      lastFailureAt,
+      nextRetryAt: "2026-05-31T00:05:00.000Z"
+    });
+
+    it("keeps one recovery entry per role instead of overwriting another role's entry", async () => {
+      const service = createRoundService({ fs: createMemoryFs(), now: () => "2026-05-31T00:00:00.000Z" });
+
+      await service.setRoleRecovery({ ...input, recovery: waitingRecovery("coder", 1, "2026-05-31T00:00:00.000Z") });
+      const both = await service.setRoleRecovery({ ...input, recovery: waitingRecovery("tester", 2, "2026-05-31T00:00:30.000Z") });
+
+      expect(both.roleRecoveries).toEqual([
+        expect.objectContaining({ role: "coder", status: "waiting", attempt: 1 }),
+        expect.objectContaining({ role: "tester", status: "waiting", attempt: 2 })
+      ]);
+
+      const afterClear = await service.clearRoleRecovery({ ...input, role: "tester" });
+      expect(afterClear.roleRecoveries).toEqual([expect.objectContaining({ role: "coder", attempt: 1 })]);
+      expect(afterClear.roleRecovery).toMatchObject({ role: "coder", attempt: 1 });
+    });
+
+    it("summarizes a failed recovery ahead of a role that is still retrying", async () => {
+      const stopped = await driveRoundToStopped("coder");
+
+      await stopped.service.setRoleRecovery({
+        ...input,
+        recovery: { role: "coder", status: "failed", attempt: 20, maxAttempts: 20, lastFailureAt: "2026-05-31T00:00:12.000Z" }
+      });
+      const state = await stopped.service.setRoleRecovery({ ...input, recovery: waitingRecovery("tester", 1, "2026-05-31T00:00:13.000Z") });
+
+      expect(state.roleRecovery).toMatchObject({ role: "coder", status: "failed" });
+      expect(state.flowPause).toMatchObject({ paused: true, reason: "role-recovery-failed", role: "coder" });
+    });
+
+    it("migrates a legacy single recovery entry", async () => {
+      const fs = createMemoryFs();
+      await fs.writeJsonAtomic("/repo/.ai/vcm/rounds/demo-task.json", {
+        version: 1,
+        taskSlug: "demo-task",
+        totalRoundCount: 0,
+        totalTurnCount: 0,
+        totalCompletedTurnCount: 0,
+        totalCcActiveMs: 0,
+        roleRecovery: waitingRecovery("architect", 4, "2026-05-31T00:00:00.000Z"),
+        updatedAt: "2026-05-31T00:00:00.000Z"
+      });
+      const service = createRoundService({ fs, now: () => "2026-05-31T00:00:01.000Z" });
+
+      const state = await service.getSessionRoundState(input);
+
+      expect(state.roleRecoveries).toEqual([expect.objectContaining({ role: "architect", attempt: 4 })]);
+      expect(state.roleRecovery).toMatchObject({ role: "architect", attempt: 4 });
+    });
+
+    it("keeps the usage-limit wait fields of a recovery entry", async () => {
+      const service = createRoundService({ fs: createMemoryFs(), now: () => "2026-05-31T00:00:00.000Z" });
+
+      await service.setRoleRecovery({
+        ...input,
+        recovery: {
+          ...waitingRecovery("coder", 0, "2026-05-31T00:00:00.000Z"),
+          waitReason: "usage-limit",
+          limitResetAt: "2026-05-31T05:00:00.000Z",
+          limitSince: "2026-05-30T23:00:00.000Z"
+        }
+      });
+
+      await expect(service.getSessionRoundState(input)).resolves.toMatchObject({
+        roleRecovery: {
+          waitReason: "usage-limit",
+          limitResetAt: "2026-05-31T05:00:00.000Z",
+          limitSince: "2026-05-30T23:00:00.000Z"
+        }
+      });
+    });
+
+    it("cancels only the interrupted role's pending retry on a manual interrupt", async () => {
+      const service = createRoundService({ fs: createMemoryFs(), now: () => "2026-05-31T00:00:00.000Z" });
+      await service.setRoleRecovery({ ...input, recovery: waitingRecovery("coder", 1, "2026-05-31T00:00:00.000Z") });
+      await service.setRoleRecovery({ ...input, recovery: waitingRecovery("tester", 1, "2026-05-31T00:00:00.000Z") });
+
+      const interrupted = await service.recordManualInterrupt({ ...input, role: "coder" });
+
+      expect(interrupted.roleRecoveries).toEqual([expect.objectContaining({ role: "tester", status: "waiting" })]);
+    });
+
+    it("keeps a failed recovery entry on a manual interrupt", async () => {
+      const service = createRoundService({ fs: createMemoryFs(), now: () => "2026-05-31T00:00:00.000Z" });
+      await service.setRoleRecovery({
+        ...input,
+        recovery: { role: "coder", status: "failed", attempt: 20, maxAttempts: 20, lastFailureAt: "2026-05-31T00:00:00.000Z" }
+      });
+
+      const interrupted = await service.recordManualInterrupt({ ...input, role: "coder" });
+
+      expect(interrupted.roleRecoveries).toEqual([expect.objectContaining({ role: "coder", status: "failed" })]);
+    });
+
+    it("clears only the exited role's recovery entry on an unexpected terminal exit", async () => {
+      const service = createRoundService({ fs: createMemoryFs(), now: () => "2026-05-31T00:00:00.000Z" });
+      await service.recordClaudeHookEvent({ ...input, role: "coder", eventName: "UserPromptSubmit" });
+      await service.setRoleRecovery({ ...input, recovery: waitingRecovery("coder", 1, "2026-05-31T00:00:00.000Z") });
+      await service.setRoleRecovery({ ...input, recovery: waitingRecovery("tester", 1, "2026-05-31T00:00:00.000Z") });
+
+      const exited = await service.recordTerminalExit({ ...input, role: "coder" });
+
+      expect(exited.roleRecoveries).toEqual([expect.objectContaining({ role: "tester" })]);
+    });
+  });
 });
 
 async function driveRoundToStopped(role: RoleName = "project-manager") {

@@ -20,4 +20,12 @@ describe("isSafeTerminalResize", () => {
     expect(isManualInterruptInput("abc\u0003def")).toBe(true);
     expect(isManualInterruptInput("hello")).toBe(false);
   });
+
+  it("detects a lone Esc as an interrupt but not an escape sequence", () => {
+    expect(isManualInterruptInput("\u001b")).toBe(true);
+    expect(isManualInterruptInput("\u001b[A")).toBe(false);
+    expect(isManualInterruptInput("\u001bOP")).toBe(false);
+    expect(isManualInterruptInput("\u001b[200~pasted\u001b[201~")).toBe(false);
+    expect(isManualInterruptInput("\u001bb")).toBe(false);
+  });
 });

@@ -58,4 +58,33 @@ describe("createDiagnosticsService", () => {
     expect(diagnostics.gateway.polling).toBe(true);
     expect(diagnostics.translation.transcriptWatchers).toBe(1);
   });
+
+  it("lists recent hook events newest first, filtered by task and role", () => {
+    const event = (receivedAt: string, role: string, taskSlug = "demo") => ({
+      receivedAt,
+      taskSlug,
+      role,
+      eventName: "StopFailure",
+      outcome: "retry-scheduled"
+    });
+    const service = createDiagnosticsService({
+      appRoot: process.cwd(),
+      runtime: { listSessions: () => [] },
+      gatewayService: { getDiagnostics: () => ({ polling: false }) },
+      translationService: { getDiagnostics: () => ({ sessions: 0, transcriptWatchers: 0, listeners: 0 }) },
+      hookEvents: {
+        listRecentHookEvents: () => [
+          event("2026-11-25T00:00:01.000Z", "coder"),
+          event("2026-11-25T00:00:02.000Z", "tester"),
+          event("2026-11-25T00:00:03.000Z", "coder", "other-task"),
+          event("2026-11-25T00:00:04.000Z", "coder")
+        ]
+      }
+    });
+
+    expect(service.getHookEventDiagnostics({ taskSlug: "demo", role: "coder" }).events.map((entry) => entry.receivedAt))
+      .toEqual(["2026-11-25T00:00:04.000Z", "2026-11-25T00:00:01.000Z"]);
+    expect(service.getHookEventDiagnostics({ limit: 1 }).events.map((entry) => entry.receivedAt))
+      .toEqual(["2026-11-25T00:00:04.000Z"]);
+  });
 });

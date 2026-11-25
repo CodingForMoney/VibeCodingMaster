@@ -694,6 +694,23 @@ Claude Code only resumes conversations it actually saved. VCM records a Claude
 session id after the first accepted prompt. If a session never received a prompt,
 start a fresh session instead of resuming.
 
+### A role stays running
+
+VCM learns that a turn ended from Claude Code hooks. If a turn-end hook is lost,
+VCM settles the role by itself once its transcript has been quiet for five
+minutes and the last record ended the turn. To stop a turn yourself, press
+Ctrl+C or Esc in its terminal; that also cancels a pending automatic retry.
+
+To see how VCM handled recent hooks, query the diagnostics endpoint, for
+example:
+
+```bash
+curl "http://127.0.0.1:4173/api/diagnostics/hook-events?role=coder&limit=20"
+```
+
+Apply the Harness again after upgrading VCM so the installed hooks pick up
+delivery fixes.
+
 ### Translation does not appear
 
 Check that:

@@ -82,7 +82,14 @@ export interface VcmSessionRoundState {
   totalCompletedTurnCount: number;
   totalCcActiveMs: number;
   currentRoundCcActiveMs: number;
+  /**
+   * One recovery entry for consumers that show a single recovery: the latest
+   * failed entry when any role's recovery failed, otherwise the latest waiting
+   * or retrying entry. `roleRecoveries` holds every role's entry.
+   */
   roleRecovery?: VcmRoleRecoveryState;
+  /** Recovery state of each role that has one, at most one entry per role. */
+  roleRecoveries?: VcmRoleRecoveryState[];
   /**
    * Authoritative flow-pause signal (backend-owned). Frontend consumes this
    * instead of deriving the pause decision from status/roundId/roleRecovery.
@@ -90,4 +97,37 @@ export interface VcmSessionRoundState {
   flowPause?: VcmFlowPauseState;
   roles: RoleName[];
   updatedAt: string;
+}
+
+/** The recovery entry of one role, or `undefined` when that role has none. */
+export function findRoleRecovery(
+  state: Pick<VcmSessionRoundState, "roleRecovery" | "roleRecoveries">,
+  role: RoleName
+): VcmRoleRecoveryState | undefined {
+  if (state.roleRecoveries) {
+    return state.roleRecoveries.find((recovery) => recovery.role === role);
+  }
+  return state.roleRecovery?.role === role ? state.roleRecovery : undefined;
+}
+
+/**
+ * The entry shown when only one recovery fits: the latest failed entry, else
+ * the latest waiting or retrying entry.
+ */
+export function summarizeRoleRecoveries(
+  recoveries: readonly VcmRoleRecoveryState[]
+): VcmRoleRecoveryState | undefined {
+  const failed = recoveries.filter((recovery) => recovery.status === "failed");
+  const candidates = failed.length > 0 ? failed : recoveries;
+  return candidates.reduce<VcmRoleRecoveryState | undefined>((latest, recovery) => {
+    if (!latest) {
+      return recovery;
+    }
+    return recoveryEventAt(recovery) > recoveryEventAt(latest) ? recovery : latest;
+  }, undefined);
+}
+
+function recoveryEventAt(recovery: VcmRoleRecoveryState): number {
+  const parsed = Date.parse(recovery.failedAt ?? recovery.lastFailureAt);
+  return Number.isFinite(parsed) ? parsed : 0;
 }

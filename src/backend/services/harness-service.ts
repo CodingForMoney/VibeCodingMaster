@@ -230,7 +230,7 @@ const VCM_HOOK_DEFINITIONS: ReadonlyArray<{ eventName: string; matcher?: string;
   { eventName: "PreToolUse", matcher: "Agent", command: VCM_SUBAGENT_GUARD_HOOK_COMMAND, timeout: 10 },
   { eventName: "UserPromptSubmit", command: VCM_HOOK_COMMAND, timeout: 10 },
   { eventName: "Stop", command: VCM_STOP_HOOK_COMMAND, timeout: 10 },
-  { eventName: "StopFailure", command: VCM_FAST_HOOK_COMMAND, timeout: 5 },
+  { eventName: "StopFailure", command: VCM_HOOK_COMMAND, timeout: 10 },
   { eventName: "PostCompact", command: VCM_FAST_HOOK_COMMAND, timeout: 5 },
   { eventName: "PermissionRequest", command: VCM_PERMISSION_REQUEST_HOOK_COMMAND, timeout: 5 }
 ];

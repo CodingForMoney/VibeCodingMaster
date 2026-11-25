@@ -3,7 +3,13 @@ import { randomUUID } from "node:crypto";
 import { isVcmRoleName } from "../../shared/constants.js";
 import type { ClaudeTurnHookEventName } from "../../shared/types/claude-hook.js";
 import type { RoleName } from "../../shared/types/role.js";
-import type { VcmFlowPauseState, VcmRoleRecoveryState, VcmRoundStopReason, VcmSessionRoundState } from "../../shared/types/round.js";
+import {
+  summarizeRoleRecoveries,
+  type VcmFlowPauseState,
+  type VcmRoleRecoveryState,
+  type VcmRoundStopReason,
+  type VcmSessionRoundState
+} from "../../shared/types/round.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
 import type { TaskStatus } from "../../shared/types/task.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
@@ -87,7 +93,9 @@ interface PersistedRoundFile {
   totalTurnCount: number;
   totalCompletedTurnCount: number;
   totalCcActiveMs: number;
-  roleRecovery?: VcmRoleRecoveryState;
+  // One entry per role. Older files stored a single `roleRecovery` shared by
+  // every role; it is read once and migrated into this list.
+  roleRecoveries?: VcmRoleRecoveryState[];
   updatedAt: string;
 }
 
@@ -394,18 +402,30 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
       return withTaskLock(input, async () => {
         const timestamp = now();
         const state = await load(input);
-        const next = applyManualInterrupt({
+        const stopped = applyManualInterrupt({
           state,
           taskSlug: input.taskSlug,
           role: input.role,
           timestamp
         });
-        if (!manualInterruptWasApplied(state, next, input.role)) {
+        const roundStopped = manualInterruptWasApplied(state, stopped, input.role);
+        // An interrupt cancels the role's pending retry, so its timer finds
+        // no entry and does not paste a recovery prompt afterwards.
+        const roleRecoveries = removeRoleRecovery(state.roleRecoveries, input.role, isActiveRoleRecovery);
+        const retryCancelled = roleRecoveries.length !== (state.roleRecoveries?.length ?? 0);
+        if (!roundStopped && !retryCancelled) {
           return toSessionRoundState(state, timestamp);
         }
+        const next: PersistedRoundFile = {
+          ...(roundStopped ? stopped : state),
+          roleRecoveries,
+          updatedAt: timestamp
+        };
         await save(input, next);
-        clearSettleTimer(input);
-        await updateSessionStatus(input, next.currentRound?.status === "running" ? "running" : "stopped");
+        if (roundStopped) {
+          clearSettleTimer(input);
+          await updateSessionStatus(input, next.currentRound?.status === "running" ? "running" : "stopped");
+        }
         return toSessionRoundState(next, timestamp);
       });
     },
@@ -438,13 +458,14 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
           role: input.recovery.role,
           timestamp
         });
+        const failed = normalizeRoleRecovery({
+          ...input.recovery,
+          status: "failed",
+          failedAt: input.recovery.failedAt ?? timestamp
+        });
         const next = {
           ...stopped,
-          roleRecovery: normalizeRoleRecovery({
-            ...input.recovery,
-            status: "failed",
-            failedAt: input.recovery.failedAt ?? timestamp
-          }),
+          roleRecoveries: failed ? upsertRoleRecovery(stopped.roleRecoveries, failed) : stopped.roleRecoveries,
           updatedAt: timestamp
         };
         await save(input, next);
@@ -457,9 +478,10 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
       return withTaskLock(input, async () => {
         const timestamp = now();
         const state = await load(input);
+        const recovery = normalizeRoleRecovery(input.recovery);
         const next = {
           ...state,
-          roleRecovery: normalizeRoleRecovery(input.recovery),
+          roleRecoveries: recovery ? upsertRoleRecovery(state.roleRecoveries, recovery) : state.roleRecoveries,
           updatedAt: timestamp
         };
         await save(input, next);
@@ -471,12 +493,15 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
       return withTaskLock(input, async () => {
         const timestamp = now();
         const state = await load(input);
-        if (!state.roleRecovery || (input.role && state.roleRecovery.role !== input.role)) {
+        const roleRecoveries = input.role
+          ? removeRoleRecovery(state.roleRecoveries, input.role)
+          : [];
+        if (roleRecoveries.length === (state.roleRecoveries?.length ?? 0)) {
           return toSessionRoundState(state, timestamp);
         }
         const next = {
           ...state,
-          roleRecovery: undefined,
+          roleRecoveries,
           updatedAt: timestamp
         };
         await save(input, next);
@@ -629,8 +654,7 @@ function applyTerminalExit(input: {
 }): PersistedRoundFile {
   const stopped = applyForcedTurnStop(input, "terminal-exit");
   return stopped.currentRound?.stopReason === "terminal-exit"
-    && stopped.roleRecovery?.role === input.role
-    ? { ...stopped, roleRecovery: undefined }
+    ? { ...stopped, roleRecoveries: removeRoleRecovery(stopped.roleRecoveries, input.role) }
     : stopped;
 }
 
@@ -719,8 +743,8 @@ function toSessionRoundState(state: PersistedRoundFile, updatedAt: string): VcmS
       totalCompletedTurnCount: state.totalCompletedTurnCount,
       totalCcActiveMs: state.totalCcActiveMs,
       currentRoundCcActiveMs: 0,
-      roleRecovery: state.roleRecovery,
-      flowPause: computeFlowPause(undefined, state.roleRecovery),
+      ...toRoleRecoveryView(state.roleRecoveries),
+      flowPause: computeFlowPause(undefined, state.roleRecoveries ?? []),
       roles: [],
       updatedAt
     };
@@ -751,8 +775,8 @@ function toSessionRoundState(state: PersistedRoundFile, updatedAt: string): VcmS
     totalCompletedTurnCount: state.totalCompletedTurnCount,
     totalCcActiveMs: state.totalCcActiveMs + activeDurationMs,
     currentRoundCcActiveMs,
-    roleRecovery: state.roleRecovery,
-    flowPause: computeFlowPause(current, state.roleRecovery),
+    ...toRoleRecoveryView(state.roleRecoveries),
+    flowPause: computeFlowPause(current, state.roleRecoveries ?? []),
     roles: current.roles,
     updatedAt
   };
@@ -763,32 +787,34 @@ function toSessionRoundState(state: PersistedRoundFile, updatedAt: string): VcmS
  * consumes this instead of re-deriving the pause decision.
  *
  * Reason precedence: `role-recovery-failed` > `stopped-no-next-turn`.
+ * - `role-recovery-failed` is emitted when any role's recovery failed, even
+ *   while another role is still being retried.
  * - `stopped-no-next-turn` is emitted only when a real round has ended and the auto
- *   flow has not advanced and we are not mid active-recovery.
+ *   flow has not advanced and no role is mid active-recovery.
  */
 function computeFlowPause(
   current: PersistedRound | undefined,
-  roleRecovery: VcmRoleRecoveryState | undefined
+  roleRecoveries: readonly VcmRoleRecoveryState[]
 ): VcmFlowPauseState | undefined {
-  const recovering = roleRecovery?.status === "waiting" || roleRecovery?.status === "retrying";
-  if (recovering) {
-    return undefined;
-  }
   const roundStopped = Boolean(current) && current!.status === "stopped" && Boolean(current!.id);
   const nonAlertingStop = roundStopped && (
     current!.stopReason === "manual-interrupt" ||
     current!.stopReason === "runtime-recovery"
   );
 
-  if (roleRecovery?.status === "failed") {
+  const failed = summarizeRoleRecoveries(roleRecoveries.filter((recovery) => recovery.status === "failed"));
+  if (failed) {
     return roundStopped && !nonAlertingStop
       ? {
           paused: true,
           reason: "role-recovery-failed",
-          role: current!.activeRole,
+          role: failed.role,
           since: current!.stoppedAt ?? current!.lastTurnEndedAt
         }
       : undefined;
+  }
+  if (roleRecoveries.some(isActiveRoleRecovery)) {
+    return undefined;
   }
 
   if (roundStopped && !nonAlertingStop) {
@@ -818,8 +844,50 @@ function normalizeRoundFile(input: Partial<PersistedRoundFile>, taskSlug: string
     totalTurnCount: normalizeNumber(input.totalTurnCount ?? legacy.totalPromptSubmitCount),
     totalCompletedTurnCount: normalizeNumber(input.totalCompletedTurnCount ?? legacy.totalStopCount),
     totalCcActiveMs: normalizeNumber(input.totalCcActiveMs),
-    roleRecovery: normalizeRoleRecovery(input.roleRecovery),
+    roleRecoveries: normalizeRoleRecoveries(input.roleRecoveries, (input as { roleRecovery?: unknown }).roleRecovery),
     updatedAt: typeof input.updatedAt === "string" ? input.updatedAt : updatedAt
+  };
+}
+
+function normalizeRoleRecoveries(input: unknown, legacyRecovery: unknown): VcmRoleRecoveryState[] {
+  const entries = Array.isArray(input) ? input : [legacyRecovery];
+  return entries.reduce<VcmRoleRecoveryState[]>((recoveries, entry) => {
+    const recovery = normalizeRoleRecovery(entry);
+    return recovery ? upsertRoleRecovery(recoveries, recovery) : recoveries;
+  }, []);
+}
+
+function upsertRoleRecovery(
+  recoveries: readonly VcmRoleRecoveryState[] | undefined,
+  recovery: VcmRoleRecoveryState
+): VcmRoleRecoveryState[] {
+  const list = recoveries ?? [];
+  return list.some((entry) => entry.role === recovery.role)
+    ? list.map((entry) => entry.role === recovery.role ? recovery : entry)
+    : [...list, recovery];
+}
+
+function removeRoleRecovery(
+  recoveries: readonly VcmRoleRecoveryState[] | undefined,
+  role: RoleName,
+  matches: (recovery: VcmRoleRecoveryState) => boolean = () => true
+): VcmRoleRecoveryState[] {
+  return (recoveries ?? []).filter((recovery) => recovery.role !== role || !matches(recovery));
+}
+
+function isActiveRoleRecovery(recovery: VcmRoleRecoveryState): boolean {
+  return recovery.status === "waiting" || recovery.status === "retrying";
+}
+
+function toRoleRecoveryView(
+  recoveries: readonly VcmRoleRecoveryState[] | undefined
+): Pick<VcmSessionRoundState, "roleRecovery" | "roleRecoveries"> {
+  if (!recoveries || recoveries.length === 0) {
+    return {};
+  }
+  return {
+    roleRecovery: summarizeRoleRecoveries(recoveries),
+    roleRecoveries: [...recoveries]
   };
 }
 
@@ -847,7 +915,14 @@ function normalizeRoleRecovery(input: unknown): VcmRoleRecoveryState | undefined
     retryable: typeof record.retryable === "boolean" ? record.retryable : undefined,
     nextRetryAt: typeof record.nextRetryAt === "string" ? record.nextRetryAt : undefined,
     lastRetryAt: typeof record.lastRetryAt === "string" ? record.lastRetryAt : undefined,
-    failedAt: typeof record.failedAt === "string" ? record.failedAt : undefined
+    failedAt: typeof record.failedAt === "string" ? record.failedAt : undefined,
+    ...(record.waitReason === "usage-limit"
+      ? {
+          waitReason: "usage-limit" as const,
+          limitResetAt: typeof record.limitResetAt === "string" ? record.limitResetAt : undefined,
+          limitSince: typeof record.limitSince === "string" ? record.limitSince : undefined
+        }
+      : {})
   };
 }
 

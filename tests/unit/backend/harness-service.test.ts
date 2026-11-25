@@ -620,6 +620,10 @@ describe("createHarnessService", () => {
     expect(JSON.stringify(settings.hooks.UserPromptSubmit)).toContain("/api/hooks/claude-code");
     expect(JSON.stringify(settings.hooks.Stop)).toContain("/api/hooks/claude-code");
     expect(JSON.stringify(settings.hooks.StopFailure)).toContain("/api/hooks/claude-code");
+    expect(settings.hooks.StopFailure[0].hooks[0]).toMatchObject({
+      command: expect.stringContaining("--retry 2 --retry-delay 1 --retry-all-errors --connect-timeout 1"),
+      timeout: 10
+    });
     expect(JSON.stringify(settings.hooks.PostCompact)).toContain("/api/hooks/claude-code");
     expect(JSON.stringify(settings.hooks.PermissionRequest)).toContain("/api/hooks/claude-code/permission-request");
     expect(JSON.stringify(settings.hooks.PreToolUse)).toContain("git rev-parse --show-toplevel");

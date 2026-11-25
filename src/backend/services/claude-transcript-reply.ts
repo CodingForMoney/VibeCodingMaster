@@ -28,6 +28,32 @@ export interface TranscriptTurnEvidence {
     id: string | null;
     timestamp: string;
   };
+  /**
+   * Latest main-thread API error record. Claude Code writes one when a turn
+   * fails; a failed background query writes none.
+   */
+  apiError?: {
+    id: string | null;
+    timestamp: string;
+  };
+}
+
+/** The last main-thread user or assistant record of a transcript. */
+export interface TranscriptMainThreadRecord {
+  /**
+   * `end-turn`: a completed assistant reply. `api-error`: a failed turn.
+   * `interrupt`: the user interrupted the turn. `other`: the turn is still
+   * working, such as a prompt or a tool call.
+   */
+  kind: "end-turn" | "api-error" | "interrupt" | "other";
+  timestamp: string;
+  text?: string;
+  error?: string;
+}
+
+export interface TranscriptActivity {
+  modifiedAtMs: number;
+  lastMainThreadRecord?: TranscriptMainThreadRecord;
 }
 
 /** Default maximum captured-reply length (characters). */
@@ -86,14 +112,14 @@ export async function readTranscriptTextEvents(transcriptPath: string): Promise<
   return events;
 }
 
-/** Read transcript activity and a completed assistant turn after this turn began. */
-export async function readTranscriptTurnEvidence(session: RoleSessionRecord): Promise<TranscriptTurnEvidence> {
+async function readTranscriptTail(
+  session: RoleSessionRecord
+): Promise<{ raw: string; modifiedAtMs: number } | undefined> {
   const transcriptPath = resolveExistingClaudeTranscriptPath(session);
   if (!transcriptPath) {
-    return {};
+    return undefined;
   }
 
-  let raw: string;
   let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
     handle = await open(transcriptPath, "r");
@@ -102,19 +128,106 @@ export async function readTranscriptTurnEvidence(session: RoleSessionRecord): Pr
     const readOffset = Math.max(0, metadata.size - readLength);
     const buffer = Buffer.alloc(readLength);
     await handle.read(buffer, 0, readLength, readOffset);
-    raw = buffer.toString("utf8");
+    let raw = buffer.toString("utf8");
     if (readOffset > 0) {
       const firstNewline = raw.indexOf("\n");
       raw = firstNewline >= 0 ? raw.slice(firstNewline + 1) : "";
     }
+    return { raw, modifiedAtMs: metadata.mtimeMs };
   } catch {
-    return {};
+    return undefined;
   } finally {
     await handle?.close().catch(() => undefined);
   }
+}
+
+/**
+ * Read when the transcript was last written and its last main-thread record.
+ * System, summary, and other bookkeeping records, such as the Stop hook
+ * summary written after a reply, do not change whether a turn is running.
+ */
+export async function readTranscriptActivity(session: RoleSessionRecord): Promise<TranscriptActivity | undefined> {
+  const tail = await readTranscriptTail(session);
+  if (!tail) {
+    return undefined;
+  }
+  let lastMainThreadRecord: TranscriptMainThreadRecord | undefined;
+  for (const line of tail.raw.split("\n")) {
+    if (!line.trim()) {
+      continue;
+    }
+    let record: Record<string, unknown>;
+    try {
+      record = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    lastMainThreadRecord = classifyMainThreadRecord(record) ?? lastMainThreadRecord;
+  }
+  return {
+    modifiedAtMs: tail.modifiedAtMs,
+    ...(lastMainThreadRecord ? { lastMainThreadRecord } : {})
+  };
+}
+
+function classifyMainThreadRecord(record: Record<string, unknown>): TranscriptMainThreadRecord | undefined {
+  const timestamp = typeof record.timestamp === "string" ? record.timestamp : undefined;
+  if (!timestamp || record.isSidechain === true || record.isMeta === true) {
+    return undefined;
+  }
+  const message = record.message as Record<string, unknown> | undefined;
+  if (record.type === "assistant") {
+    const text = messageText(message);
+    if (record.isApiErrorMessage === true) {
+      return {
+        kind: "api-error",
+        timestamp,
+        ...(text ? { text } : {}),
+        ...(typeof record.error === "string" ? { error: record.error } : {})
+      };
+    }
+    if (message?.model !== "<synthetic>" && message?.stop_reason === "end_turn") {
+      return { kind: "end-turn", timestamp, ...(text ? { text } : {}) };
+    }
+    return { kind: "other", timestamp };
+  }
+  if (record.type === "user") {
+    return messageText(message)?.startsWith("[Request interrupted by user")
+      ? { kind: "interrupt", timestamp }
+      : { kind: "other", timestamp };
+  }
+  return undefined;
+}
+
+function messageText(message: Record<string, unknown> | undefined): string | undefined {
+  const content = message?.content;
+  if (typeof content === "string") {
+    return content.trim() || undefined;
+  }
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+  const text = content
+    .filter((item): item is { type: string; text: string } =>
+      Boolean(item) && typeof item === "object" && (item as { type?: unknown }).type === "text"
+      && typeof (item as { text?: unknown }).text === "string")
+    .map((item) => item.text)
+    .join("\n")
+    .trim();
+  return text || undefined;
+}
+
+/** Read transcript activity and a completed assistant turn after this turn began. */
+export async function readTranscriptTurnEvidence(session: RoleSessionRecord): Promise<TranscriptTurnEvidence> {
+  const tail = await readTranscriptTail(session);
+  if (!tail) {
+    return {};
+  }
+  const { raw } = tail;
 
   const turnStartedAtMs = timestampMs(session.lastTurnStartedAt);
   let completion: TranscriptTurnEvidence["completion"];
+  let apiError: TranscriptTurnEvidence["apiError"];
 
   for (const line of raw.split("\n")) {
     if (!line.trim()) {
@@ -129,6 +242,13 @@ export async function readTranscriptTurnEvidence(session: RoleSessionRecord): Pr
 
     const timestamp = typeof record.timestamp === "string" ? record.timestamp : undefined;
     if (record.type !== "assistant" || record.isSidechain === true || !timestamp) {
+      continue;
+    }
+
+    if (record.isApiErrorMessage === true) {
+      if (!apiError || isLaterTimestamp(timestamp, apiError.timestamp)) {
+        apiError = { id: typeof record.uuid === "string" ? record.uuid : null, timestamp };
+      }
       continue;
     }
 
@@ -151,7 +271,10 @@ export async function readTranscriptTurnEvidence(session: RoleSessionRecord): Pr
     }
   }
 
-  return completion ? { completion } : {};
+  return {
+    ...(completion ? { completion } : {}),
+    ...(apiError ? { apiError } : {})
+  };
 }
 
 /** True for a text event that completed a turn (assistant stopped of its own accord). */

@@ -1,4 +1,16 @@
-import type { VcmRoleRecoveryState } from "../../shared/types/round.js";
+import {
+  summarizeRoleRecoveries,
+  type VcmRoleRecoveryState,
+  type VcmSessionRoundState
+} from "../../shared/types/round.js";
+
+/** The latest waiting or retrying recovery, shown as the retry notice. */
+export function selectActiveRoleRecovery(
+  state: Pick<VcmSessionRoundState, "roleRecovery" | "roleRecoveries">
+): VcmRoleRecoveryState | undefined {
+  const recoveries = state.roleRecoveries ?? (state.roleRecovery ? [state.roleRecovery] : []);
+  return summarizeRoleRecoveries(recoveries.filter((recovery) => recovery.status !== "failed"));
+}
 
 export function getRoleRecoveryNoticeKey(taskSlug: string, recovery: VcmRoleRecoveryState): string {
   return `${taskSlug}:${recovery.role}:${recovery.lastFailureAt}`;

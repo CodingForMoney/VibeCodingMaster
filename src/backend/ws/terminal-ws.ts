@@ -115,8 +115,12 @@ export function isSafeTerminalResize(cols: number, rows: number): boolean {
   );
 }
 
+// Ctrl+C anywhere in the input, or Esc pressed on its own, interrupts a Claude
+// Code turn, which then sends no Stop hook. An escape sequence such as an
+// arrow key or a bracketed paste starts with Esc but arrives as one longer
+// chunk, so only a lone Esc counts.
 export function isManualInterruptInput(data: string): boolean {
-  return data.includes("\u0003");
+  return data.includes("\u0003") || data === "\u001b";
 }
 
 const MIN_TERMINAL_COLS = 20;

@@ -17,7 +17,7 @@ import type {
   StartGatewayQrLoginResult,
   UpdateGatewaySettingsRequest
 } from "../../shared/types/gateway.js";
-import type { RuntimeDiagnostics } from "../../shared/types/diagnostics.js";
+import type { HookEventDiagnostics, RuntimeDiagnostics } from "../../shared/types/diagnostics.js";
 import type {
   HarnessApplyRequest,
   HarnessApplyResult,
@@ -114,6 +114,15 @@ export const apiClient = {
   },
   getRuntimeDiagnostics() {
     return request<RuntimeDiagnostics>("/api/diagnostics/runtime");
+  },
+  getHookEventDiagnostics(filter: { taskSlug?: string; role?: string; limit?: number } = {}) {
+    const query = new URLSearchParams();
+    if (filter.taskSlug) query.set("taskSlug", filter.taskSlug);
+    if (filter.role) query.set("role", filter.role);
+    if (filter.limit) query.set("limit", String(filter.limit));
+    const queryString = query.toString();
+    const suffix = queryString ? `?${queryString}` : "";
+    return request<HookEventDiagnostics>(`/api/diagnostics/hook-events${suffix}`);
   },
   getCurrentProject() {
     return request<ProjectSummary | null>("/api/projects/current");

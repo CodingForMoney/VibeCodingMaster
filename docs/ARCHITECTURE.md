@@ -589,13 +589,54 @@ Reviewer sessions. Translator and Harness Engineer are task-scoped tool
 roles and are excluded. A tool workflow that prompts a workflow role still
 participates in Round tracking through that workflow role's hooks.
 
-Normal Turn completion and failure come only from Claude Stop and StopFailure
-Hooks. Transcript content is display and translation evidence; it never changes
-Session, Turn, or Round state. `terminal-process-exit-service` subscribes
-directly to PTY process exit events. An unexpected exit marks the current
-Session idle and ends its active workflow-role Round with `terminal-exit`.
-Explicit Stop and Restart dispose the PTY runtime entry before the child exit
-event, so they do not enter this failure path.
+Normal Turn completion and failure come from Claude Stop and StopFailure Hooks.
+Transcript content is otherwise display and translation evidence. It decides
+turn state only in three bounded cases: a late duplicate Stop whose completion
+is already recorded is ignored; a StopFailure outside a VCM-tracked turn counts
+only when the transcript records a main-thread API error after the role's last
+turn start or end; and stale-activity reconciliation, below. A role is in a
+VCM-tracked turn while its activity is running and no retry of it is pending.
+Claude Code also sends StopFailure when a background query of an idle Session
+fails, such as the away summary; that event changes no activity, Round, or
+recovery state. `terminal-process-exit-service` subscribes directly to PTY
+process exit events. An unexpected exit marks the current Session idle and ends
+its active workflow-role Round with `terminal-exit`. Explicit Stop and Restart
+dispose the PTY runtime entry before the child exit event, so they do not enter
+this failure path.
+
+Role retry state is per role. `round-service` keeps one recovery entry per role
+in `roleRecoveries`, each with its own attempt, backoff, usage-limit wait, and
+attempt limit; `roleRecovery` is the single entry for consumers that show one:
+the latest failed entry, otherwise the latest waiting or retrying entry. A round
+file with the earlier single `roleRecovery` is migrated when read. Any failed
+entry pauses a stopped Round with `role-recovery-failed`, even while another
+role is still being retried. A scheduled retry acts only on its own role's
+current entry; a Stop, manual interrupt, unexpected terminal exit, or runtime
+recovery that already settled the role has removed that entry.
+
+Ctrl+C anywhere in terminal input, or Esc sent on its own, is a manual
+interrupt: the Session becomes idle, the role's active Round turn stops with
+`manual-interrupt`, and the role's waiting or retrying recovery entry is
+removed, so no recovery prompt follows. Escape sequences such as arrow keys and
+bracketed paste are not interrupts.
+
+Every coordinator reconcile also settles stale workflow-role activity of the
+active task through `claude-hook-service`, under the role's Hook lock. A role
+whose process runs and whose activity is running is settled only when no retry
+of it is pending, no long-running validation job is active, its turn started
+and its transcript was last written at least five minutes earlier, and its last
+main-thread user or assistant record belongs to the current turn. A completed
+reply is then processed as the lost Stop, an API error as the lost StopFailure,
+and a user-interrupt record as a manual interrupt. A turn still waiting on a
+tool, a model response, or an undelivered prompt stays running.
+
+The installed StopFailure hook retries delivery like the Stop and
+UserPromptSubmit hooks. A retried duplicate falls before the turn boundary that
+its first delivery recorded, so it is ignored. `claude-hook-service` keeps the
+latest 500 received hook events in memory with their Session match, outcome,
+and error or reply excerpt, plus each stale-activity settlement;
+`GET /api/diagnostics/hook-events` lists them newest first and accepts
+`taskSlug`, `role`, and `limit` filters.
 
 ## Architect Planning Context Ownership
 

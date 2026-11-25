@@ -33,3 +33,23 @@ export interface TranslationDiagnostics {
   transcriptWatchers: number;
   listeners: number;
 }
+
+/** How VCM handled one received Claude Code hook event. */
+export interface HookEventDiagnostic {
+  receivedAt: string;
+  taskSlug: string;
+  role: string;
+  /** Hook event name, or `StaleActivityReconcile` for a VCM-side settlement. */
+  eventName: string;
+  /** Whether the event matched the role's current session, when VCM checked. */
+  sessionMatched?: boolean;
+  outcome: string;
+  /** StopFailure error or last assistant message excerpt. */
+  detail?: string;
+  error?: string;
+}
+
+export interface HookEventDiagnostics {
+  /** Newest first. */
+  events: HookEventDiagnostic[];
+}

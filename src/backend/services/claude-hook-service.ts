@@ -7,7 +7,7 @@ import type {
 } from "../../shared/types/claude-hook.js";
 import { isHarnessEngineerToolRoleName, isReviewerRoleName, isTranslatorToolRoleName, isVcmRoleName } from "../../shared/constants.js";
 import { VcmError } from "../errors.js";
-import { readTranscriptTurnEvidence } from "./claude-transcript-reply.js";
+import { readTranscriptActivity, readTranscriptTurnEvidence } from "./claude-transcript-reply.js";
 import { findPmUserQuestion } from "./pm-user-question.js";
 import type { GatewayService } from "../gateway/gateway-service.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
@@ -21,7 +21,9 @@ import type { JobGuardService } from "./job-guard-service.js";
 import type { MessageService } from "./message-service.js";
 import type { ProjectService } from "./project-service.js";
 import type { RoundService } from "./round-service.js";
+import type { HookEventDiagnostic } from "../../shared/types/diagnostics.js";
 import type { RoleName, VcmRoleName } from "../../shared/types/role.js";
+import { findRoleRecovery } from "../../shared/types/round.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
 import { matchesRoleHookSession, type SessionService } from "./session-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
@@ -59,6 +61,13 @@ const NON_RETRYABLE_CONTEXT_FAILURE_PATTERNS = [
   "maximum context length"
 ] as const;
 const DIAGNOSTIC_SNIPPET_MAX_LENGTH = 2000;
+// A running role whose transcript has been quiet this long and whose last
+// main-thread record ended the current turn lost its turn-end hook.
+const STALE_ROLE_ACTIVITY_QUIET_MS = 5 * 60_000;
+const TRANSCRIPT_TURN_TOLERANCE_MS = 1_000;
+// Recent hook events kept in memory for diagnosis of state transitions.
+const MAX_RECENT_HOOK_EVENTS = 500;
+const HOOK_EVENT_DETAIL_MAX_LENGTH = 300;
 type StopFailureRetryTimer = ReturnType<typeof setTimeout>;
 type StopFailureRetryResult = "scheduled" | "manual-interrupt" | "not-scheduled";
 type ClaudeBusinessHookEventName = ClaudeTurnHookEventName | "PostCompact";
@@ -74,6 +83,18 @@ export interface ClaudeHookService {
   handleHook(input: ClaudeHookRequest): Promise<ClaudeHookResult>;
   handleStopHook(input: ClaudeHookRequest): Promise<ClaudeHookResult>;
   handlePermissionRequestHook(input: ClaudeHookRequest): Promise<ClaudePermissionRequestHookResult | undefined>;
+  /**
+   * Settle workflow roles that VCM shows as running although their turn ended
+   * without a delivered Stop or StopFailure hook, or was interrupted.
+   */
+  reconcileStaleRoleActivity(repoRoot: string, taskSlug: string): Promise<StaleRoleActivityReconciliation[]>;
+  /** Recently received hook events and how each was handled, oldest first. */
+  listRecentHookEvents(): HookEventDiagnostic[];
+}
+
+export interface StaleRoleActivityReconciliation {
+  role: VcmRoleName;
+  action: "stop" | "stop-failure" | "interrupt";
 }
 
 export interface ClaudeHookServiceDeps {
@@ -100,7 +121,7 @@ export interface ClaudeHookServiceDeps {
     "handleTaskRetrospectiveHook" | "completeWaitingTaskRetrospective"
   >;
   gatewayService?: Pick<GatewayService, "handleRoleStop" | "handleRoleStopFailure">;
-  jobGuard?: Pick<JobGuardService, "evaluateStop" | "notePromptSubmitted">;
+  jobGuard?: Pick<JobGuardService, "evaluateStop" | "notePromptSubmitted"> & Partial<Pick<JobGuardService, "findActiveJobs">>;
   architectRestartService?: Pick<
     ArchitectRestartService,
     "recordArchitectStop" | "recordRouteAccepted" | "recordReplacementPromptSubmitted"
@@ -114,6 +135,8 @@ export interface ClaudeHookServiceDeps {
 
 export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHookService {
   const stopFailureRetryTimers = new Map<string, StopFailureRetryTimer>();
+  const recentHookEvents: HookEventDiagnostic[] = [];
+  const hookNotes = new WeakMap<ClaudeHookRequest, { sessionMatched?: boolean; outcome?: string }>();
   const roleHookLocks = new Map<string, Promise<void>>();
   const now = deps.now ?? (() => new Date().toISOString());
   const retrySetTimeout = deps.retrySetTimeout ?? ((callback: () => void, delayMs: number) => globalThis.setTimeout(callback, delayMs));
@@ -463,6 +486,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       return memoryResult;
     }
     if (await isDuplicateCompletedStop(context, input)) {
+      noteHook(input, { outcome: "duplicate-stop" });
       return completedHookResult(input, eventName);
     }
     await clearStopFailureRecoveryState(context, input.role);
@@ -568,7 +592,12 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     }
 
     const context = await getHookContext(input);
-    if (!(await isCurrentRoleHook(context, input, eventName))) {
+    const session = await getCurrentRoleHookSession(context, input, eventName);
+    if (!session) {
+      return completedHookResult(input, eventName);
+    }
+    if (!(await isStopFailureOfTrackedTurn(context, session))) {
+      noteHook(input, { outcome: "ignored-background-stop-failure" });
       return completedHookResult(input, eventName);
     }
     const memoryResult = await processAutoMemoryRoleHook(input, context, eventName);
@@ -598,6 +627,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
         });
       }
       await markStopFailureRecoveryFailed(input, context, failure, 0);
+      noteHook(input, { outcome: "recovery-failed" });
       return recordTurnEnd(input, context, eventName, {
         dispatchRouteFiles: false,
         notifyGateway: false,
@@ -615,6 +645,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       ? await scheduleUsageLimitRetry(input, context, failure, usageLimit)
       : await scheduleStopFailureRetry(input, context, failure);
     if (retryResult === "scheduled") {
+      noteHook(input, { outcome: "retry-scheduled" });
       return {
         ok: true,
         eventName,
@@ -882,18 +913,96 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     input: ClaudeHookRequest,
     eventName: ClaudeHookEventName
   ): Promise<boolean> {
+    return Boolean(await getCurrentRoleHookSession(context, input, eventName));
+  }
+
+  async function getCurrentRoleHookSession(
+    context: Awaited<ReturnType<typeof getHookContext>>,
+    input: ClaudeHookRequest,
+    eventName: ClaudeHookEventName
+  ): Promise<RoleSessionRecord | undefined> {
     const current = await deps.sessionService.getRoleSession(
       context.project.repoRoot,
       context.taskSlug,
       input.role
     );
-    return Boolean(current && matchesRoleHookSession(current, {
+    const matched = Boolean(current && matchesRoleHookSession(current, {
       eventName,
       sessionId: stringOrUndefined(input.event.session_id),
       transcriptPath: stringOrUndefined(input.event.transcript_path),
       runtimeSessionId: stringOrUndefined(input.event.vcm_runtime_session_id),
       runtimeSessionToken: input.runtimeSessionToken
     }));
+    noteHook(input, matched ? { sessionMatched: true } : { sessionMatched: false, outcome: "stale-session" });
+    return matched ? current : undefined;
+  }
+
+  function noteHook(input: ClaudeHookRequest, note: { sessionMatched?: boolean; outcome?: string }): void {
+    hookNotes.set(input, { ...hookNotes.get(input), ...note });
+  }
+
+  function recordHookEvent(event: HookEventDiagnostic): void {
+    recentHookEvents.push(event);
+    if (recentHookEvents.length > MAX_RECENT_HOOK_EVENTS) {
+      recentHookEvents.splice(0, recentHookEvents.length - MAX_RECENT_HOOK_EVENTS);
+    }
+  }
+
+  async function observeHook(
+    input: ClaudeHookRequest,
+    handle: () => Promise<ClaudeHookResult>
+  ): Promise<ClaudeHookResult> {
+    const receivedAt = now();
+    const base = {
+      receivedAt,
+      taskSlug: input.taskSlug,
+      role: input.role,
+      eventName: String(input.event.hook_event_name ?? "Stop")
+    };
+    const detail = describeHookEventDetail(input);
+    try {
+      const result = await handle();
+      const note = hookNotes.get(input);
+      recordHookEvent({
+        ...base,
+        ...(note?.sessionMatched !== undefined ? { sessionMatched: note.sessionMatched } : {}),
+        outcome: note?.outcome ?? describeHookResult(result),
+        ...(detail ? { detail } : {})
+      });
+      return result;
+    } catch (error) {
+      recordHookEvent({
+        ...base,
+        outcome: "error",
+        error: error instanceof Error ? error.message : String(error),
+        ...(detail ? { detail } : {})
+      });
+      throw error;
+    }
+  }
+
+  // Claude Code also sends StopFailure when a background query of an idle
+  // session fails, such as the away summary. A role is in a VCM-tracked turn
+  // while it runs and no retry of it is pending. Outside such a turn, only a
+  // main-thread API error that the transcript recorded after the role's last
+  // turn boundary is a turn failure; a retried duplicate of the StopFailure
+  // that scheduled the pending retry falls before that boundary.
+  async function isStopFailureOfTrackedTurn(
+    context: Awaited<ReturnType<typeof getHookContext>>,
+    session: RoleSessionRecord
+  ): Promise<boolean> {
+    const retryPending = stopFailureRetryTimers.has(
+      stopFailureRecoveryKey(context.project.repoRoot, context.taskSlug, session.role)
+    );
+    if (session.activityStatus === "running" && !retryPending) {
+      return true;
+    }
+    const { apiError } = await readTranscriptTurnEvidence(session);
+    const boundaryMs = Math.max(
+      timestampMsOrZero(session.lastTurnStartedAt),
+      timestampMsOrZero(session.lastTurnEndedAt)
+    );
+    return Boolean(apiError && timestampMsOrZero(apiError.timestamp) > boundaryMs);
   }
 
   async function withRoleHookLock<T>(
@@ -933,9 +1042,9 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     ) {
       return "manual-interrupt";
     }
-    const previousAttempt = currentRoundState.roleRecovery?.role === input.role &&
-      currentRoundState.roleRecovery.status !== "failed"
-      ? currentRoundState.roleRecovery.attempt
+    const roleRecovery = findRoleRecovery(currentRoundState, input.role);
+    const previousAttempt = roleRecovery && roleRecovery.status !== "failed"
+      ? roleRecovery.attempt
       : 0;
     const attempt = previousAttempt + 1;
     const timestamp = now();
@@ -1003,9 +1112,9 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     ) {
       return "manual-interrupt";
     }
-    const previous = currentRoundState.roleRecovery?.role === input.role
-      && currentRoundState.roleRecovery.status !== "failed"
-      ? currentRoundState.roleRecovery
+    const roleRecovery = findRoleRecovery(currentRoundState, input.role);
+    const previous = roleRecovery && roleRecovery.status !== "failed"
+      ? roleRecovery
       : undefined;
     const alreadyWaiting = previous?.waitReason === "usage-limit";
     const timestamp = now();
@@ -1105,8 +1214,11 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
   ): Promise<void> {
     const stateInput = createRoundStateInput(context);
     const currentRoundState = await deps.roundService.getSessionRoundState(stateInput);
-    const recovery = currentRoundState.roleRecovery;
-    if (!recovery || recovery.role !== input.role || recovery.attempt !== attempt || recovery.status !== "waiting") {
+    // The entry is gone when a Stop, an interrupt, a terminal exit, or runtime
+    // recovery already settled the role, and a newer failure of the role
+    // replaced this timer together with the attempt.
+    const recovery = findRoleRecovery(currentRoundState, input.role);
+    if (!recovery || recovery.attempt !== attempt || recovery.status !== "waiting") {
       return;
     }
 
@@ -1279,9 +1391,116 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     };
   }
 
+  async function reconcileStaleRoleActivity(
+    repoRoot: string,
+    taskSlug: string
+  ): Promise<StaleRoleActivityReconciliation[]> {
+    const project = await deps.projectService.getCurrentProject();
+    if (project?.repoRoot !== repoRoot) {
+      return [];
+    }
+    const nowMs = Date.parse(now());
+    const candidates = (await deps.sessionService.listRoleSessions(repoRoot, taskSlug)).filter((session) =>
+      isVcmRoleName(session.role)
+      && session.status === "running"
+      && session.activityStatus === "running"
+      && nowMs - timestampMsOrZero(session.lastTurnStartedAt) >= STALE_ROLE_ACTIVITY_QUIET_MS
+    );
+    const results: StaleRoleActivityReconciliation[] = [];
+    for (const candidate of candidates) {
+      const role = candidate.role as VcmRoleName;
+      const lockInput = { taskSlug, role, event: {} } as ClaudeHookRequest;
+      const action = await withRoleHookLock(lockInput, () => reconcileStaleRole(repoRoot, taskSlug, role));
+      if (action) {
+        results.push({ role, action });
+        recordHookEvent({
+          receivedAt: now(),
+          taskSlug,
+          role,
+          eventName: "StaleActivityReconcile",
+          outcome: action
+        });
+      }
+    }
+    return results;
+  }
+
+  // Runs under the role's Hook lock, so a hook that arrives meanwhile is
+  // handled first and the role is checked again afterwards.
+  async function reconcileStaleRole(
+    repoRoot: string,
+    taskSlug: string,
+    role: VcmRoleName
+  ): Promise<StaleRoleActivityReconciliation["action"] | undefined> {
+    const context = await getHookContext({ taskSlug, role, event: {} } as ClaudeHookRequest);
+    const session = await deps.sessionService.getRoleSession(repoRoot, context.taskSlug, role);
+    if (
+      !session
+      || session.status !== "running"
+      || session.activityStatus !== "running"
+      || stopFailureRetryTimers.has(stopFailureRecoveryKey(repoRoot, context.taskSlug, role))
+    ) {
+      return undefined;
+    }
+    const nowMs = Date.parse(now());
+    const turnStartedAtMs = timestampMsOrZero(session.lastTurnStartedAt);
+    if (nowMs - turnStartedAtMs < STALE_ROLE_ACTIVITY_QUIET_MS) {
+      return undefined;
+    }
+    if ((await deps.jobGuard?.findActiveJobs?.(context.taskRepoRoot))?.length) {
+      return undefined;
+    }
+    const activity = await readTranscriptActivity(session);
+    const record = activity?.lastMainThreadRecord;
+    if (
+      !activity
+      || !record
+      || nowMs - activity.modifiedAtMs < STALE_ROLE_ACTIVITY_QUIET_MS
+      || timestampMsOrZero(record.timestamp) < turnStartedAtMs - TRANSCRIPT_TURN_TOLERANCE_MS
+    ) {
+      return undefined;
+    }
+
+    const hookInput = (eventName: "Stop" | "StopFailure", event: Record<string, unknown>): ClaudeHookRequest => ({
+      taskSlug: context.taskSlug,
+      role,
+      runtimeSessionToken: session.runtimeSessionToken,
+      event: {
+        hook_event_name: eventName,
+        session_id: session.claudeSessionId,
+        transcript_path: session.transcriptPath,
+        vcm_runtime_session_id: session.id,
+        ...event
+      }
+    } as ClaudeHookRequest);
+
+    if (record.kind === "end-turn") {
+      await processStopHook(hookInput("Stop", { last_assistant_message: record.text }), { allowBlock: false });
+      return "stop";
+    }
+    if (record.kind === "api-error") {
+      await processStopFailureHook(hookInput("StopFailure", {
+        error: record.error ?? "unknown",
+        last_assistant_message: record.text
+      }));
+      return "stop-failure";
+    }
+    if (record.kind === "interrupt") {
+      clearStopFailureRetryTimer(repoRoot, context.taskSlug, role);
+      await deps.sessionService.markRoleActivityIdle(repoRoot, context.taskSlug, role);
+      await deps.roundService.recordManualInterrupt({ ...createRoundStateInput(context), role });
+      return "interrupt";
+    }
+    return undefined;
+  }
+
   return {
+    reconcileStaleRoleActivity,
+    listRecentHookEvents() {
+      return recentHookEvents.map((event) => ({ ...event }));
+    },
     async handleHook(input) {
-      return withRoleHookLock(input, async () => {
+      return observeHook(input, () => withRoleHookLock(input, async () => {
         const eventName = parseHookEvent(input.event.hook_event_name);
         if (isTranslatorToolRoleName(input.role)) {
           return processTranslatorHook(input);
@@ -1301,10 +1520,10 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
         // Legacy combined endpoint: the installed hook discards the response,
         // so a block decision could not be enforced. Never block here.
         return processStopHook(input, { allowBlock: false });
-      });
+      }));
     },
     handleStopHook(input) {
-      return withRoleHookLock(input, async () => {
+      return observeHook(input, () => withRoleHookLock(input, async () => {
         if (isTranslatorToolRoleName(input.role)) {
           return processTranslatorHook(input);
         }
@@ -1312,7 +1531,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
           return processHarnessEngineerHook(input, { allowBlock: true });
         }
         return processStopHook(input, { allowBlock: true });
-      });
+      }));
     },
     handlePermissionRequestHook
   };
@@ -1404,4 +1623,33 @@ const PASTED_CONTENT_OPEN_TAG = /^<pasted_content\b[^>]*>/i;
 function isDirectUserPrompt(prompt: string): boolean {
   const normalized = prompt.trim().replace(PASTED_CONTENT_OPEN_TAG, "").trim();
   return normalized.length > 0 && !/^\[VCM(?:\s|\])/i.test(normalized);
+}
+
+function timestampMsOrZero(value: string | undefined): number {
+  const parsed = value ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function describeHookResult(result: ClaudeHookResult): string {
+  if (result.stopDecision?.behavior === "block") {
+    return "stop-blocked";
+  }
+  if (!result.sessionUpdated) {
+    return "no-change";
+  }
+  return result.dispatchedCount > 0 ? `recorded; dispatched ${result.dispatchedCount}` : "recorded";
+}
+
+function describeHookEventDetail(input: ClaudeHookRequest): string | undefined {
+  const parts = [
+    normalizeDiagnosticString(input.event.error, 200),
+    normalizeDiagnosticString(input.event.last_assistant_message, HOOK_EVENT_DETAIL_MAX_LENGTH)
+  ].filter((part): part is string => Boolean(part));
+  if (parts.length === 0) {
+    return undefined;
+  }
+  const detail = parts.join(": ");
+  return detail.length > HOOK_EVENT_DETAIL_MAX_LENGTH
+    ? `${detail.slice(0, HOOK_EVENT_DETAIL_MAX_LENGTH)}...`
+    : detail;
 }

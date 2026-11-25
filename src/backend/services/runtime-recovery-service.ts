@@ -47,13 +47,16 @@ interface RecoverableRoundFile {
   taskSlug: string;
   currentRound?: RecoverableRound;
   lastStoppedRound?: RecoverableRound;
-  roleRecovery?: {
-    role?: string;
-    status?: string;
-  };
+  roleRecovery?: RecoverableRoleRecovery;
+  roleRecoveries?: RecoverableRoleRecovery[];
   totalCompletedTurnCount?: number;
   totalCcActiveMs?: number;
   updatedAt: string;
+}
+
+interface RecoverableRoleRecovery {
+  role?: string;
+  status?: string;
 }
 
 interface RecoverableRound {
@@ -309,9 +312,19 @@ export function createRuntimeRecoveryService(deps: RuntimeRecoveryServiceDeps): 
       state.totalCcActiveMs = (state.totalCcActiveMs ?? 0) + activeDurationMs;
     }
 
-    if (state.roleRecovery?.status === "waiting" || state.roleRecovery?.status === "retrying") {
+    // Retry timers do not survive a restart, so every role's pending retry is
+    // dropped; failed recoveries stay visible. `roleRecovery` is the legacy
+    // single entry that round-service migrates into `roleRecoveries`.
+    if (isPendingRoleRecovery(state.roleRecovery)) {
       state.roleRecovery = undefined;
       changed = true;
+    }
+    if (Array.isArray(state.roleRecoveries)) {
+      const kept = state.roleRecoveries.filter((recovery) => !isPendingRoleRecovery(recovery));
+      if (kept.length !== state.roleRecoveries.length) {
+        state.roleRecoveries = kept;
+        changed = true;
+      }
     }
 
     if (!changed) {
@@ -532,4 +545,8 @@ async function runStep(
   } catch (error) {
     context.warnings.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+function isPendingRoleRecovery(recovery: RecoverableRoleRecovery | undefined): boolean {
+  return recovery?.status === "waiting" || recovery?.status === "retrying";
 }

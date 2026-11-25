@@ -1,6 +1,11 @@
 import fs from "node:fs/promises";
-import type { RuntimeDiagnostics, OpenFilesLimit } from "../../shared/types/diagnostics.js";
+import type {
+  HookEventDiagnostics,
+  OpenFilesLimit,
+  RuntimeDiagnostics
+} from "../../shared/types/diagnostics.js";
 import type { GatewayService } from "../gateway/gateway-service.js";
+import type { ClaudeHookService } from "./claude-hook-service.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import type { TranslationService } from "./translation-service.js";
 import { readVcmPackageVersion } from "../app-version.js";
@@ -8,6 +13,13 @@ import { readVcmPackageVersion } from "../app-version.js";
 export interface DiagnosticsService {
   getRuntimeDiagnostics(): Promise<RuntimeDiagnostics>;
   getErrorRuntimeInfo(): ErrorRuntimeInfo;
+  getHookEventDiagnostics(filter?: HookEventDiagnosticsFilter): HookEventDiagnostics;
+}
+
+export interface HookEventDiagnosticsFilter {
+  taskSlug?: string;
+  role?: string;
+  limit?: number;
 }
 
 export interface ErrorRuntimeInfo {
@@ -21,6 +33,7 @@ export interface DiagnosticsServiceDeps {
   runtime: Pick<TerminalRuntime, "listSessions">;
   gatewayService: Pick<GatewayService, "getDiagnostics">;
   translationService: Pick<TranslationService, "getDiagnostics">;
+  hookEvents?: Pick<ClaudeHookService, "listRecentHookEvents">;
 }
 
 export function createDiagnosticsService(deps: DiagnosticsServiceDeps): DiagnosticsService {
@@ -53,6 +66,15 @@ export function createDiagnosticsService(deps: DiagnosticsServiceDeps): Diagnost
         version,
         pid: process.pid,
         cwd: process.cwd()
+      };
+    },
+    getHookEventDiagnostics(filter = {}) {
+      const events = (deps.hookEvents?.listRecentHookEvents() ?? [])
+        .filter((event) => (!filter.taskSlug || event.taskSlug === filter.taskSlug)
+          && (!filter.role || event.role === filter.role))
+        .reverse();
+      return {
+        events: filter.limit !== undefined && filter.limit > 0 ? events.slice(0, filter.limit) : events
       };
     }
   };

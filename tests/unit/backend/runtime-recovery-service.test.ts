@@ -19,6 +19,34 @@ describe("createRuntimeRecoveryService", () => {
     tempDirs.length = 0;
   });
 
+  it("drops every role's pending retry on project connect and keeps failed recoveries", async () => {
+    const repoRoot = await makeTempRepo(tempDirs);
+    const taskRepoRoot = path.join(repoRoot, ".claude/worktrees/demo-task");
+    await mkdir(path.join(taskRepoRoot, ".ai/vcm/rounds"), { recursive: true });
+    const recovery = (role: RoleName, status: string) => ({
+      role,
+      status,
+      attempt: 1,
+      maxAttempts: 20,
+      lastFailureAt: "2026-06-26T23:59:55.000Z"
+    });
+    await writeJson(path.join(taskRepoRoot, ".ai/vcm/rounds/demo-task.json"), {
+      version: 1,
+      taskSlug: "demo-task",
+      roleRecoveries: [recovery("coder", "waiting"), recovery("tester", "retrying"), recovery("architect", "failed")],
+      totalRoundCount: 0,
+      totalTurnCount: 0,
+      totalCompletedTurnCount: 0,
+      totalCcActiveMs: 0,
+      updatedAt: "2026-06-26T23:59:50.000Z"
+    });
+
+    await createService(repoRoot, taskRepoRoot, [], []).recoverProject(repoRoot);
+
+    const roundFile = await readJson(path.join(taskRepoRoot, ".ai/vcm/rounds/demo-task.json"));
+    expect(roundFile.roleRecoveries).toEqual([expect.objectContaining({ role: "architect", status: "failed" })]);
+  });
+
   it("recovers stale task sessions, rounds, dispatches, and gate reviews on project connect", async () => {
     const repoRoot = await makeTempRepo(tempDirs);
     const taskRepoRoot = path.join(repoRoot, ".claude/worktrees/demo-task");
